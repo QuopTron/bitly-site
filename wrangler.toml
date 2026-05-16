@@ -1,6 +1,6 @@
 name = "bitly-site"
 type = "javascript"
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+account_id = "a5e62a1e8ae4840916ed4122689e507c"
 workers_dev = true
 compatibility_date = "2024-01-01"
 
@@ -9,6 +9,9 @@ command = "npm run build"
 [build.upload]
 format = "service-worker"
 
+# Pages specific settings
+pages_build_output_dir = "dist/analog/public"
+
 [site]
-bucket = "dist"
+bucket = "dist/analog/public"
 entry-point = "src"
