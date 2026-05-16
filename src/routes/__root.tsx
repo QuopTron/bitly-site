@@ -8,7 +8,8 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 
-import appCss from "../styles.css";
+// Import global CSS
+import "../styles.css";
 
 function NotFoundComponent() {
   return (
@@ -82,10 +83,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+// No explicit stylesheet link needed; CSS is imported globally.
     ],
   }),
   shellComponent: RootShell,
