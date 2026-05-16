@@ -23,7 +23,7 @@ function deleteCookie(name: string) {
 
 // ── Offer timer (America/La_Paz UTC‑4) ──────────────────────
 const OFFER_START = new Date("2026-05-14T20:00:00-04:00");
-const OFFER_END = new Date("2026-05-16T12:00:00-04:00");
+const OFFER_END = new Date("2026-05-16T15:00:00-04:00");
 const BASE_PRICE = 60;
 const FREE_TRIAL_DAYS = 1;
 const MAX_ATTEMPTS = 3;
@@ -265,9 +265,9 @@ export default function PricingModal({ onClose }: { onClose: () => void }) {
             <button
               onClick={() =>
                 window.open(
-                  "https://wa.me/59100000000?text=" +
+                  "https://wa.me/59173427418?text=" +
                   encodeURIComponent(
-                    `Hola! Quiero bitly Premium por ${offeredPrice} Bs 🎉`
+                    `Hola! Obtuve una oferta por bitly Premium por ${offeredPrice} Bs 🎉`
                   ),
                   "_blank",
                   "noopener,noreferrer"
