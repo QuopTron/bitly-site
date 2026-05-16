@@ -142,12 +142,7 @@ export default function PricingModal({ onClose }: { onClose: () => void }) {
     setAttempts((p) => Math.max(p - 1, 0));
   }, [canTry]);
 
-  const handleResetAttempts = useCallback(() => {
-    setAttempts(MAX_ATTEMPTS);
-    deleteCookie("pricing_locked");
-    setLocked(false);
-    setShowMessage(false);
-  }, []);
+  
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto py-4">
@@ -309,12 +304,6 @@ export default function PricingModal({ onClose }: { onClose: () => void }) {
                 <span>Intentos agotados</span>
               </div>
             </div>
-            <button
-              onClick={handleResetAttempts}
-              className="w-full rounded-lg sm:rounded-xl border border-primary/30 bg-primary/10 py-1.5 sm:py-2 text-xs font-semibold text-primary transition hover:bg-primary/20"
-            >
-              Reiniciar
-            </button>
           </div>
         )}
       </div>

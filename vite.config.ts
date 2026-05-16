@@ -8,12 +8,9 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart({
-      // ✅ Esto es clave: habilita SSG estático
       prerender: {
-        enabled: true,
-        // Opcional: define rutas a pre-renderizar
-        // routes: ['/']
-      },
+        enabled: true
+      }
     }),
     react(),
     viteTsconfigPaths(),
