@@ -162,7 +162,7 @@ export default function PricingModal({ onClose }: { onClose: () => void }) {
           </div>
           <h2 className="text-lg sm:text-2xl font-bold text-foreground">bitly Premium</h2>
           <div className="mt-2 text-center text-xs uppercase tracking-[0.2em] text-slate-500">
-            <span className="font-semibold text-slate-900 dark:text-white">
+            <span className="font-semibold text-slate-900 text-white">
               powered by <span className="text-white">Flo</span><span className="text-emerald-400">X</span>
             </span>
           </div>
