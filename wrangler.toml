@@ -5,13 +5,16 @@ workers_dev = true
 compatibility_date = "2024-01-01"
 
 [build]
-command = "npm run build"
+command = "pnpm build"
+
 [build.upload]
 format = "service-worker"
 
-# Pages specific settings
-pages_build_output_dir = "dist/analog/public"
+# ✅ Corregido: ruta real de salida de Vite
+pages_build_output_dir = "dist/client"
 
 [site]
-bucket = "dist/analog/public"
+bucket = "dist/client"
 entry-point = "src"
+
+
