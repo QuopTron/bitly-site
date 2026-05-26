@@ -101,6 +101,36 @@ export type Database = {
         }
         Relationships: []
       }
+      pre_reservas: {
+        Row: {
+          celular: string
+          created_at: string
+          descuento_porcentaje: number
+          id: string
+          opcion_elegida: string
+          precio_descuento: number
+          precio_original: number
+        }
+        Insert: {
+          celular: string
+          created_at?: string
+          descuento_porcentaje: number
+          id?: string
+          opcion_elegida: string
+          precio_descuento: number
+          precio_original: number
+        }
+        Update: {
+          celular?: string
+          created_at?: string
+          descuento_porcentaje?: number
+          id?: string
+          opcion_elegida?: string
+          precio_descuento?: number
+          precio_original?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
