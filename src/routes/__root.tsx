@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts } from "@tanstack/react-router";
+import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
 import { getLanguage } from "@/lib/i18n";
 import "../styles.css";
 
@@ -28,7 +28,7 @@ function NotFound() {
   );
 }
 
-function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
+const ErrorPage: ErrorRouteComponent = ({ error, reset }) => {
   console.error(error);
   const router = useRouter();
   const es = getLanguage() === "es";
@@ -44,7 +44,7 @@ function ErrorPage({ error, reset }: { error: Error; reset: () => void }) {
       </div>
     </div>
   );
-}
+};
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();

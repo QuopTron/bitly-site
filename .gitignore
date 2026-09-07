@@ -6,7 +6,6 @@ node_modules/
 
 # Environment files
 .env
-.env.example
 
 # OS generated files
 .DS_Store

@@ -1,4 +1,4 @@
-import { Sun, Moon, Globe, Wallet, Download, Menu, X } from "lucide-react";
+import { Sun, Moon, Globe, Wallet, Menu, X } from "lucide-react";
 import logo from "@/assets/bitly-logo.png";
 import { useI18n, setLanguage, getLanguage } from "@/lib/i18n";
 import { useState } from "react";
@@ -61,9 +61,6 @@ export default function Header({ onPricing }: Props) {
             <button onClick={onPricing} className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary transition hover:bg-primary/20 sm:px-5 sm:text-sm">
               <Wallet className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> {t("pricingTitle")}
             </button>
-            <a href="#descargar" className="inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:opacity-90 sm:px-5 sm:text-sm">
-              <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> {t("navDownload")}
-            </a>
           </div>
         </div>
       </div>
@@ -87,9 +84,6 @@ export default function Header({ onPricing }: Props) {
           <button onClick={() => { onPricing(); setMobileOpen(false); }} className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary transition hover:bg-primary/20">
             <Wallet className="h-3.5 w-3.5" /> {t("pricingTitle")}
           </button>
-          <a href="#descargar" onClick={() => setMobileOpen(false)} className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90">
-            <Download className="h-3.5 w-3.5" /> {t("navDownload")}
-          </a>
         </div>
       )}
     </header>

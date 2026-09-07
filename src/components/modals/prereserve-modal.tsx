@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { X, Send, Smartphone, Shield, Clock, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useI18n } from "@/lib/i18n";
@@ -49,7 +49,8 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
       setSuccess(true);
       setCelular("");
       setPlan("");
-    } catch {
+    } catch (e) {
+      console.error("[Bitly] Pre-reserve failed:", e);
       setError(t("preReservaRegisterError"));
     } finally { setLoading(false); }
   };

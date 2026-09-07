@@ -23,6 +23,7 @@ let current: Code = "BOB";
 const listeners: Array<(c: Code) => void> = [];
 
 function getStored(): Code {
+  if (typeof window === "undefined") return "BOB";
   try {
     const v = localStorage.getItem("bitly_currency") as Code | null;
     return v && CODES.includes(v) ? v : "BOB";
@@ -31,19 +32,21 @@ function getStored(): Code {
   }
 }
 
-current = getStored();
+if (typeof window !== "undefined") {
+  current = getStored();
+}
 
 export async function initRates() {
   try {
     const r = await fetch(RATES_URL);
     const d = await r.json();
     if (d?.rates) rates = d.rates;
-  } catch {}
+  } catch (e) { console.error("[Bitly] Failed to fetch exchange rates:", e); }
 }
 
 export function setCurrency(code: Code) {
   current = code;
-  try { localStorage.setItem("bitly_currency", code); } catch {}
+  try { localStorage.setItem("bitly_currency", code); } catch (e) { console.error("[Bitly] Failed to save currency:", e); }
   listeners.forEach((fn) => fn(code));
   window.dispatchEvent(new CustomEvent("currencychange"));
 }

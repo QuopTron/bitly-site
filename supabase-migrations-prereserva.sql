@@ -16,8 +16,8 @@ ALTER TABLE pre_reservas ENABLE ROW LEVEL SECURITY;
 -- Política para insertar pre-reservas (público)
 CREATE POLICY "Public insert pre_reservas" ON pre_reservas FOR INSERT WITH CHECK (true);
 
--- Política para leer pre-reservas (público)
-CREATE POLICY "Public read pre_reservas" ON pre_reservas FOR SELECT USING (true);
+-- Política para leer pre-reservas (solo service role en servidor)
+CREATE POLICY "Service role read pre_reservas" ON pre_reservas FOR SELECT USING (false);
 
 -- Función para calcular descuento de ruleta (35% hacia abajo a partir del 17/05/2026)
 CREATE OR REPLACE FUNCTION calculate_ruleta_descuento(celular TEXT)

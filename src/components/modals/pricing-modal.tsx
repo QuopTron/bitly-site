@@ -1,25 +1,37 @@
 import { useState, useEffect } from "react";
-import { X, Clock, Gem, Send, Check, Timer, Zap } from "lucide-react";
+import { X, Clock, Gem, Send, Check, Timer, Zap, TrendingUp } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { useCurrency, convert, format, INFO } from "@/lib/currency";
 
 const NORMAL_PRICE = 50;
+const START_HOUR = 9;
+const END_HOUR = 17;
+
+const PRICE_TABLE = [
+  { hour: 1, price: 1 },
+  { hour: 2, price: 5 },
+  { hour: 3, price: 10 },
+  { hour: 4, price: 18 },
+  { hour: 5, price: 26 },
+  { hour: 6, price: 34 },
+  { hour: 7, price: 42 },
+  { hour: 8, price: 50 },
+];
 
 type Offer = {
   price: number;
   pct: number;
   label: string;
-  tag: "flash" | "last" | "special" | "permanent";
-  icon: typeof Zap | typeof Clock | typeof Gem | typeof Timer;
+  tag: "flash" | "rising" | "special" | "permanent";
+  icon: typeof Zap | typeof Clock | typeof Gem | typeof Timer | typeof TrendingUp;
   end: Date | null;
+  hourSlot: number;
 };
 
 function getOffer(): Offer {
   const now = new Date();
-  const h = now.getHours() + now.getMinutes() / 60;
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const d = now.getDate();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
 
   const at = (hour: number, day = 0): Date => {
     const e = new Date(now);
@@ -28,20 +40,33 @@ function getOffer(): Offer {
     return e;
   };
 
-  if (y === 2026 && m === 4 && d === 26) {
-    if (h >= 14 && h < 18) return { price: 25, pct: 50, label: "50% OFF", tag: "flash", icon: Zap, end: at(18) };
-    if (h >= 18 && h < 20) return { price: 30, pct: 40, label: "40% OFF", tag: "flash", icon: Zap, end: at(20) };
-    if (h < 14) return { price: 50, pct: 0, label: "50 Bs", tag: "special", icon: Clock, end: at(14) };
-    return { price: 50, pct: 0, label: "50 Bs", tag: "special", icon: Clock, end: at(14, 1) };
+  if (currentHour >= START_HOUR && currentHour < END_HOUR) {
+    const elapsed = currentHour - START_HOUR;
+    const slot = Math.min(elapsed, 7);
+    const entry = PRICE_TABLE[slot];
+    const nextEntry = slot < 7 ? PRICE_TABLE[slot + 1] : null;
+    const pct = Math.round(((NORMAL_PRICE - entry.price) / NORMAL_PRICE) * 100);
+
+    const nextHour = at(currentHour + 1);
+
+    if (entry.price <= 10) {
+      return { price: entry.price, pct, label: `${pct}% OFF`, tag: "flash", icon: Zap, end: nextHour, hourSlot: slot + 1 };
+    }
+    if (entry.price < NORMAL_PRICE) {
+      return { price: entry.price, pct, label: `${pct}% OFF`, tag: "rising", icon: TrendingUp, end: nextHour, hourSlot: slot + 1 };
+    }
+    return { price: 50, pct: 0, label: "50 Bs", tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
-  if (y === 2026 && m === 4 && d === 27) {
-    if (h >= 14 && h < 18) return { price: 35, pct: 30, label: "30% OFF", tag: "flash", icon: Zap, end: at(18) };
-    if (h >= 18 && h < 20) return { price: 40, pct: 20, label: "20% OFF", tag: "flash", icon: Zap, end: at(20) };
-    if (h >= 20 && h < 21) return { price: 45, pct: 10, label: "10% OFF", tag: "last", icon: Timer, end: at(21) };
-    if (h < 14) return { price: 50, pct: 0, label: "50 Bs", tag: "special", icon: Clock, end: at(14) };
-    return { price: 50, pct: 0, label: "50 Bs", tag: "special", icon: Clock, end: null };
+
+  if (currentHour >= END_HOUR) {
+    return { price: 50, pct: 0, label: "50 Bs", tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
-  return { price: 50, pct: 0, label: "50 Bs", tag: "permanent", icon: Gem, end: null };
+
+  const timeToStart = at(START_HOUR);
+  const slot = 0;
+  const entry = PRICE_TABLE[0];
+  const pct = Math.round(((NORMAL_PRICE - entry.price) / NORMAL_PRICE) * 100);
+  return { price: entry.price, pct, label: `${pct}% OFF`, tag: "flash", icon: Zap, end: timeToStart, hourSlot: 1 };
 }
 
 function formatCountdown(s: number): string {
@@ -53,9 +78,9 @@ function formatCountdown(s: number): string {
 
 const TAG_META: Record<string, { label: [string, string]; grad: string }> = {
   flash:     { label: ["¡Oferta relámpago!", "Flash offer!"],         grad: "from-green-400 to-emerald-500" },
-  last:      { label: ["Última oportunidad", "Last chance!"],         grad: "from-emerald-500 to-green-600" },
+  rising:    { label: ["¡Precio sube cada hora!", "Price rises hourly!"], grad: "from-amber-400 to-orange-500" },
   special:   { label: ["Precio especial", "Special price"],           grad: "from-primary to-accent" },
-  permanent: { label: ["Precio especial", "Special price"],           grad: "from-primary to-accent" },
+  permanent: { label: ["Precio normal", "Regular price"],             grad: "from-primary to-accent" },
 };
 
 export default function PricingModal({ onClose, onPreReserve }: { onClose: () => void; onPreReserve: () => void }) {
@@ -83,10 +108,11 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
   const meta = TAG_META[offer.tag];
   const tagLabel = meta.label[lang === "es" ? 0 : 1];
   const urgent = showCount && countdown <= 60;
-  const isPct = offer.tag === "flash" || offer.tag === "last";
+  const isPct = offer.tag === "flash" || offer.tag === "rising";
+  const isUrgent = offer.tag === "flash";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm p-3 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay backdrop-blur-sm p-3 sm:p-4" onClick={onClose}>
       <div
         className="relative w-full max-w-xl max-h-[85vh] overflow-y-auto animate-in zoom-in-95 duration-200 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         onClick={(e) => e.stopPropagation()}
@@ -104,6 +130,49 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
           </div>
           <h2 className="text-xl font-bold text-foreground sm:text-2xl">{t("pricingTitle")}</h2>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">{t("pricingSubtitle")}</p>
+        </div>
+
+        <div className="mb-4 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/5 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">{t("pricingRising") || "Sube cada hora"}</span>
+            </div>
+            {showCount && (
+              <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400">
+                <Timer className="h-3.5 w-3.5" />
+                {formatCountdown(countdown)}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
+            {PRICE_TABLE.map((entry, i) => {
+              const isActive = offer.hourSlot === entry.hour;
+              const isPast = offer.hourSlot > entry.hour;
+              return (
+                <div
+                  key={entry.hour}
+                  className={`flex flex-col items-center rounded-lg py-1.5 text-[10px] transition-all ${
+                    isActive
+                      ? "bg-amber-500/20 ring-2 ring-amber-400/50 shadow-lg shadow-amber-500/20"
+                      : isPast
+                        ? "bg-muted/30 opacity-40"
+                        : "bg-muted/20"
+                  }`}
+                >
+                  <span className={`font-bold ${isActive ? "text-amber-400" : isPast ? "text-muted-foreground" : "text-foreground"}`}>
+                    {entry.price}
+                  </span>
+                  <span className="text-[8px] text-muted-foreground">Bs</span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-center text-[10px] text-muted-foreground/60">
+            {offer.hourSlot <= 8
+              ? `${t("pricingHour") || "Hora"} ${offer.hourSlot}/8 — ${t("pricingNext") || "Siguiente"}: ${offer.hourSlot < 8 ? PRICE_TABLE[offer.hourSlot]?.price ?? 50 : 50} Bs`
+              : t("pricingEnded") || "Oferta terminada"}
+          </p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4">
@@ -181,28 +250,28 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
             <div className={`mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br shadow-lg ring-1 ${
               offer.tag === "flash"
                 ? "from-green-400/30 to-emerald-400/10 shadow-green-500/25 ring-green-500/30"
-                : offer.tag === "last"
-                  ? "from-emerald-400/30 to-green-400/10 shadow-emerald-500/25 ring-emerald-500/30"
+                : offer.tag === "rising"
+                  ? "from-amber-400/30 to-orange-400/10 shadow-amber-500/25 ring-amber-500/30"
                   : "from-primary/25 to-primary/5 shadow-primary/15 ring-primary/25"
             }`}>
               <offer.icon className={`h-6 w-6 ${
                 offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" :
-                offer.tag === "last" ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]" :
+                offer.tag === "rising" ? "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" :
                 "text-primary"
               }`} />
             </div>
             <div>
               <p className={`text-sm font-bold ${
                 offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_12px_rgba(74,222,128,0.3)]" :
-                offer.tag === "last" ? "text-emerald-400" :
+                offer.tag === "rising" ? "text-amber-400" :
                 "text-foreground"
               }`}>
                 {tagLabel}
               </p>
               {showCount && (
                 <div className={`mt-2 flex items-center justify-center gap-2 text-base font-mono font-bold tracking-wider ${
-                  urgent ? "text-green-300 animate-pulse drop-shadow-[0_0_10px_rgba(134,239,172,0.5)]" :
                   offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]" :
+                  offer.tag === "rising" ? "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]" :
                   "text-primary"
                 }`}>
                   <Timer className="h-4 w-4" />
