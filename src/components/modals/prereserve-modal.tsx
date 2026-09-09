@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { X, Send, Smartphone, Shield, Clock, Check } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { insertPreReserva } from "@/lib/supabase-fns";
 import { useI18n } from "@/lib/i18n";
 
 const PRE_RESERVA_END = new Date("2026-06-01T00:00:00-04:00");
@@ -44,8 +44,15 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
     const p = PLANES.find((x) => x.id === plan);
     if (!p) return;
     try {
-      const { error: err } = await supabase.from("pre_reservas").insert([{ celular, opcion_elegida: p.id, precio_original: p.precio_original, precio_descuento: p.precio_descuento, descuento_porcentaje: 50 }]);
-      if (err) throw err;
+      await insertPreReserva({
+        data: {
+          celular,
+          opcion_elegida: p.id,
+          precio_original: p.precio_original,
+          precio_descuento: p.precio_descuento,
+          descuento_porcentaje: 50,
+        },
+      });
       setSuccess(true);
       setCelular("");
       setPlan("");

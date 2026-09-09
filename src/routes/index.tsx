@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { incrementDownload } from "@/lib/supabase-fns";
 import Particles from "@/components/particles";
 import GlowBackground from "@/components/layout/glow-background";
 import Header from "@/components/layout/header";
@@ -96,7 +96,7 @@ export default function Index() {
 
   const handleDownload = async (platform: "windows" | "android", url: string | null) => {
     setStats((s) => ({ ...s, [platform]: (s[platform] ?? 0) + 1 }));
-    try { await supabase.rpc("increment_download", { _platform: platform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
+    try { await incrementDownload({ data: { platform } }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
 
