@@ -1,6 +1,22 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
+export const fetchAppData = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const { data: appInfo } = await supabaseAdmin
+      .from("app_info")
+      .select("*")
+      .limit(1)
+      .maybeSingle();
+
+    const { data: statsData } = await supabaseAdmin
+      .from("download_stats")
+      .select("platform,count");
+
+    return { appInfo, statsData };
+  }
+);
+
 export const incrementDownload = createServerFn({ method: "POST" })
   .validator((data: { platform: string }) => data)
   .handler(async ({ data }) => {

@@ -6,11 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    tanstackStart({
-      prerender: {
-        enabled: true
-      }
-    }),
+    tanstackStart(),
     react(),
   ],
   resolve: {
