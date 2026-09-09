@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
-import { fetchAppData, incrementDownload } from "@/lib/supabase-fns";
+import { supabase } from "@/integrations/supabase/client";
 import Particles from "@/components/particles";
 import GlowBackground from "@/components/layout/glow-background";
 import Header from "@/components/layout/header";
@@ -47,11 +47,12 @@ export default function Index() {
   useEffect(() => {
     (async () => {
       try {
-        const d = await fetchAppData();
-        if (d?.appInfo) setInfo(d.appInfo as typeof info);
-        if (d?.statsData) {
+        const { data: d } = await supabase.from("app_info").select("*").limit(1).maybeSingle();
+        if (d) setInfo(d as typeof info);
+        const s = await supabase.from("download_stats").select("platform,count");
+        if (s.data) {
           const m: Record<string, number> = {};
-          d.statsData.forEach((r) => (m[r.platform] = Number(r.count)));
+          s.data.forEach((r) => (m[r.platform] = Number(r.count)));
           setStats(m as typeof stats);
         }
       } catch (e) { console.error("[Bitly] Failed to load app info:", e); } finally { setLoading(false); }
@@ -86,7 +87,7 @@ export default function Index() {
 
   const handleDownload = async (platform: "windows" | "android", url: string | null) => {
     setStats((s) => ({ ...s, [platform]: (s[platform] ?? 0) + 1 }));
-    try { await incrementDownload({ data: { platform } }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
+    try { await supabase.rpc("increment_download", { _platform: platform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
 

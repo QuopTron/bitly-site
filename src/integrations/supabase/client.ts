@@ -23,7 +23,17 @@ function createSupabaseClient() {
       storage: typeof window !== 'undefined' ? localStorage : undefined,
       persistSession: typeof window !== 'undefined',
       autoRefreshToken: typeof window !== 'undefined',
-    }
+    },
+    global: {
+      fetch: (url, options) => {
+        if (options?.headers) {
+          const h = new Headers(options.headers);
+          h.delete('accept-profile');
+          options = { ...options, headers: h };
+        }
+        return fetch(url, options);
+      },
+    },
   });
 }
 
