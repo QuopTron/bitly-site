@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import Particles from "@/components/particles";
 import GlowBackground from "@/components/layout/glow-background";
 import Header from "@/components/layout/header";
@@ -20,13 +21,33 @@ export const Route = createFileRoute("/")({
       { name: "description", content: "Descarga Bitly: música FLAC sin pérdida desde Tidal, Qobuz, Deezer y más." },
     ],
   }),
+  loader: async () => {
+    const { data: appInfo } = await supabaseAdmin
+      .from("app_info")
+      .select("*")
+      .limit(1)
+      .maybeSingle();
+
+    const { data: statsData } = await supabaseAdmin
+      .from("download_stats")
+      .select("platform,count");
+
+    return { appInfo, statsData };
+  },
   component: Index,
 });
 
 export default function Index() {
-  const [info, setInfo] = useState({ name: "Bitly", tagline: "Tu música, sin límites", description: "", windows_url: null, android_url: null, version: "1.0.0" });
-  const [stats, setStats] = useState({ windows: 0, android: 0 });
-  const [loading, setLoading] = useState(true);
+  const { appInfo, statsData } = Route.useLoaderData();
+
+  const info = appInfo ?? { name: "Bitly", tagline: "Tu música, sin límites", description: "", windows_url: null, android_url: null, version: "1.0.0" };
+
+  const initialStats: Record<string, number> = {};
+  if (statsData) {
+    statsData.forEach((r) => { initialStats[r.platform] = Number(r.count); });
+  }
+  const [stats, setStats] = useState({ windows: initialStats.windows ?? 0, android: initialStats.android ?? 0 });
+
   const [showPricing, setShowPricing] = useState(false);
   const [showPrereserve, setShowPrereserve] = useState(false);
   const [showMobile, setShowMobile] = useState(false);
@@ -45,18 +66,6 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { data: d } = await supabase.from("app_info").select("*").limit(1).maybeSingle();
-        if (d) setInfo(d as typeof info);
-        const s = await supabase.from("download_stats").select("platform,count");
-        if (s.data) {
-          const m: Record<string, number> = {};
-          s.data.forEach((r) => (m[r.platform] = Number(r.count)));
-          setStats(m as typeof stats);
-        }
-      } catch (e) { console.error("[Bitly] Failed to load app info:", e); } finally { setLoading(false); }
-    })();
     initRates();
 
     const CACHE_KEY = "bitly_release";
@@ -90,8 +99,6 @@ export default function Index() {
     try { await supabase.rpc("increment_download", { _platform: platform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
-
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
   const total = (stats.windows ?? 0) + (stats.android ?? 0);
   const androidUrl = release.apkUrl ?? info.android_url;
