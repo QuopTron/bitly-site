@@ -22,7 +22,7 @@ export default function HeroSection(props: Props) {
       <div className="space-y-5 sm:space-y-6">
         <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Sparkles className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
-          {props.version ? `${t("heroBadge")} — v${props.version}` : t("heroBadge")}
+          {props.version ? `${t("heroBadge")} — ${props.version}` : t("heroBadge")}
         </div>
         <h1 className="text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-8xl">
           <span className="bg-clip-text text-transparent" style={{ backgroundImage: "var(--gradient-mint)" }}>

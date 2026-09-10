@@ -7,11 +7,14 @@ import GlowBackground from "@/components/layout/glow-background";
 import Header from "@/components/layout/header";
 import HeroSection from "@/components/hero/hero-section";
 import Footer from "@/components/layout/footer";
-import PricingModal from "@/components/modals/pricing-modal";
-import PrereserveModal from "@/components/modals/prereserve-modal";
 import MobileModal from "@/components/modals/mobile-modal";
 import FaqModal from "@/components/modals/faq-modal";
+import ReleaseModal from "@/components/modals/release-modal";
+import PlansSection from "@/components/plans-section";
+// import InstallModal from "@/components/modals/install-modal";
 import { initRates } from "@/lib/currency";
+
+type ReleaseAsset = { name: string; browser_download_url: string; size: number };
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -27,12 +30,13 @@ export default function Index() {
   const [info, setInfo] = useState({ name: "Bitly", tagline: "Tu música, sin límites", description: "", windows_url: null, android_url: null, version: "1.0.0" });
   const [stats, setStats] = useState({ windows: 0, android: 0 });
   const [loading, setLoading] = useState(true);
-  const [showPricing, setShowPricing] = useState(false);
-  const [showPrereserve, setShowPrereserve] = useState(false);
   const [showMobile, setShowMobile] = useState(false);
   const [showFaq, setShowFaq] = useState(false);
+  const [showRelease, setShowRelease] = useState(false);
+  const [releasePlatform, setReleasePlatform] = useState<"windows" | "android">("android");
+  // const [showInstall, setShowInstall] = useState(false);
   const [blocked, setBlocked] = useState(false);
-  const [release, setRelease] = useState<{ version: string; apkUrl: string | null }>({ version: "", apkUrl: null });
+  const [release, setRelease] = useState<{ version: string; apkUrl: string | null; windowsUrl: string | null; assets: ReleaseAsset[] }>({ version: "", apkUrl: null, windowsUrl: null, assets: [] });
 
   useEffect(() => {
     const check = () => {
@@ -59,7 +63,7 @@ export default function Index() {
     })();
     initRates();
 
-    const CACHE_KEY = "bitly_release";
+    const CACHE_KEY = "bitly_release_v2";
     const CACHE_TTL = 30 * 60 * 1000;
     try {
       const cached = localStorage.getItem(CACHE_KEY);
@@ -76,9 +80,19 @@ export default function Index() {
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (!data) return;
-        const assets: Array<{ name: string; browser_download_url: string }> = data.assets ?? [];
+        const assets: ReleaseAsset[] = (data.assets ?? []).map((a: any) => ({
+          name: a.name,
+          browser_download_url: a.browser_download_url,
+          size: a.size ?? 0,
+        }));
         const apk = assets.find((a) => a.name.includes("arm64")) ?? assets.find((a) => a.name.endsWith(".apk"));
-        const result = { version: data.tag_name ?? "", apkUrl: apk?.browser_download_url ?? null };
+        const win = assets.find((a) => a.name.endsWith(".exe"));
+        const result = {
+          version: data.tag_name ?? "",
+          apkUrl: apk?.browser_download_url ?? null,
+          windowsUrl: win?.browser_download_url ?? null,
+          assets,
+        };
         setRelease(result);
         try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: result, ts: Date.now() })); } catch {}
       })
@@ -88,34 +102,43 @@ export default function Index() {
   const handleDownload = async (platform: "windows" | "android", url: string | null) => {
     setStats((s) => ({ ...s, [platform]: (s[platform] ?? 0) + 1 }));
     try { await supabase.rpc("increment_download", { _platform: platform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    setReleasePlatform(platform);
+    setShowRelease(true);
   };
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
   const total = (stats.windows ?? 0) + (stats.android ?? 0);
   const androidUrl = release.apkUrl ?? info.android_url;
+  const windowsUrl = release.windowsUrl ?? info.windows_url;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <Particles />
       <GlowBackground />
-      <Header onPricing={() => setShowPricing(true)} />
+      <Header />
       <main className="flex-1 flex flex-col justify-center">
         <HeroSection
           tagline={info.tagline} description={info.description} version={release.version || info.version}
-          isBlocked={blocked} windowsUrl={info.windows_url} androidUrl={androidUrl}
+          isBlocked={blocked} windowsUrl={windowsUrl} androidUrl={androidUrl}
           totalDownloads={total} windowsDownloads={stats.windows ?? 0} androidDownloads={stats.android ?? 0}
           onDownload={handleDownload}
           onOpenMobile={() => setShowMobile(true)}
           onOpenFaq={() => setShowFaq(true)}
         />
       </main>
+      <PlansSection />
       <Footer />
-      {showPricing && <PricingModal onClose={() => setShowPricing(false)} onPreReserve={() => setShowPrereserve(true)} />}
-      {showPrereserve && <PrereserveModal onClose={() => setShowPrereserve(false)} />}
       <MobileModal open={showMobile} onClose={() => setShowMobile(false)} />
       <FaqModal open={showFaq} onClose={() => setShowFaq(false)} />
+      <ReleaseModal
+        open={showRelease}
+        onClose={() => setShowRelease(false)}
+        platform={releasePlatform}
+        assets={release.assets}
+        version={release.version}
+      />
+      {/* <InstallModal open={showInstall} onClose={() => setShowInstall(false)} url={androidUrl} /> */}
     </div>
   );
 }

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="854" viewBox="0 0 480 854">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1117"/>
+      <stop offset="100%" style="stop-color:#161b22"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#5ce0b8"/>
+      <stop offset="100%" style="stop-color:#3dd9a0"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="854" rx="24" fill="url(#bg)"/>
+  <!-- Status bar -->
+  <rect x="0" y="0" width="480" height="44" fill="#0d1117"/>
+  <text x="240" y="30" text-anchor="middle" font-family="system-ui" font-size="14" fill="#8b949e">9:41</text>
+  <!-- Browser bar -->
+  <rect x="20" y="60" width="440" height="48" rx="24" fill="#21262d"/>
+  <text x="40" y="90" font-family="system-ui" font-size="13" fill="#8b949e">github.com/QuopTron/bitly/releases</text>
+  <!-- Download card -->
+  <rect x="20" y="140" width="440" height="180" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <rect x="40" y="160" width="40" height="40" rx="10" fill="url(#mint)"/>
+  <text x="55" y="186" font-family="system-ui" font-size="20" fill="#0d1117">⬇</text>
+  <text x="92" y="178" font-family="system-ui" font-size="16" font-weight="bold" fill="#e6edf3">Bitly-arm64.apk</text>
+  <text x="92" y="200" font-family="system-ui" font-size="13" fill="#8b949e">v2.1.0 · 45.2 MB</text>
+  <!-- Download button -->
+  <rect x="40" y="230" width="200" height="48" rx="24" fill="url(#mint)"/>
+  <text x="140" y="260" text-anchor="middle" font-family="system-ui" font-size="15" font-weight="bold" fill="#0d1117">Download APK</text>
+  <!-- Arrow pointing to button -->
+  <rect x="40" y="360" width="400" height="3" rx="1.5" fill="#30363d" opacity="0.3"/>
+  <text x="240" y="420" text-anchor="middle" font-family="system-ui" font-size="18" font-weight="bold" fill="#5ce0b8">PASO 1</text>
+  <text x="240" y="455" text-anchor="middle" font-family="system-ui" font-size="15" fill="#e6edf3">Presiona "Download APK"</text>
+  <text x="240" y="485" text-anchor="middle" font-family="system-ui" font-size="13" fill="#8b949e">Se descargará el archivo automáticamente</text>
+  <!-- Phone mockup border -->
+  <rect x="8" y="8" width="464" height="838" rx="20" fill="none" stroke="#30363d" stroke-width="1.5"/>
+</svg>
