@@ -294,4 +294,8 @@ export const DICT: Record<string, [string, string]> = {
                                                                     "For Android emulators (BlueStacks, LDPlayer), Chromebooks, or tablets with Intel processors."],
   releaseArchHint:      ["Si no sabes cuál elegir, usa ARM64 — funciona en casi todos los celulares actuales.",
                                                                     "If you're not sure, pick ARM64 — it works on almost all current phones."],
+  releaseWinX64:        ["Para la mayoría de PCs con Windows 10/11 (procesadores Intel o AMD).",
+                                                                    "For most Windows 10/11 PCs (Intel or AMD processors)."],
+  releaseWinArm64:      ["Para dispositivos Windows con procesador ARM (Surface Pro X, Snapdragon, etc.).",
+                                                                    "For Windows devices with ARM processors (Surface Pro X, Snapdragon, etc.)."],
 };

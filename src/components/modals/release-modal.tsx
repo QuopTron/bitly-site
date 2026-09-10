@@ -28,6 +28,10 @@ function detectArch(): string | null {
     if (/armv7|arm/i.test(ua)) return "arm";
     return "arm64";
   }
+  if (uaData?.platform === "Windows" || /Win/i.test(ua)) {
+    if (/arm64|aarch64/i.test(ua)) return "arm64-windows";
+    return "x64-windows";
+  }
   if (/x86_64|Win64|x64/i.test(ua)) return "x86_64";
   return null;
 }
@@ -58,6 +62,25 @@ function getApkLabel(name: string): { label: string; desc: string; recommended: 
   return { label: name, desc: "", recommended: false };
 }
 
+function getWinLabel(name: string): { label: string; desc: string; recommended: boolean } {
+  const arch = detectArch();
+  if (name.toLowerCase().includes("arm64") || name.toLowerCase().includes("aarch64")) {
+    return {
+      label: "Windows ARM64",
+      desc: "Para dispositivos con procesador ARM (Surface Pro X, etc.)",
+      recommended: arch === "arm64-windows",
+    };
+  }
+  if (name.toLowerCase().includes("x64") || name.toLowerCase().includes("x86_64") || name.toLowerCase().includes("amd64")) {
+    return {
+      label: "Windows x64",
+      desc: "La mayoría de PCs con Windows (Intel / AMD)",
+      recommended: arch === "x64-windows",
+    };
+  }
+  return { label: name.replace(/\.exe$/i, ""), desc: "Instalador de Windows", recommended: true };
+}
+
 export default function ReleaseModal({ open, onClose, platform, assets, version }: Props) {
   const t = useI18n();
   const [detected, setDetected] = useState<string | null>(null);
@@ -86,29 +109,38 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
       icon={<Icon className="h-6 w-6 text-primary" />}
     >
       <div className="space-y-3">
-        {isAndroid && (
-          <button
-            onClick={() => setShowInfo(!showInfo)}
-            className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-xs transition hover:bg-primary/10 sm:text-sm"
-          >
-            <Cpu className="h-4 w-4 flex-shrink-0 text-primary" />
-            <div className="flex-1">
-              <span className="font-medium text-primary">{t("releaseIdentify")}</span>
-              {detected && (
-                <span className="ml-2 text-muted-foreground">
-                  {t("releaseDetected")} <strong className="text-foreground">{detected === "arm64" ? "ARM64" : detected === "arm" ? "ARM32" : "x86_64"}</strong>
-                </span>
-              )}
-            </div>
-            <Info className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-          </button>
-        )}
+        <button
+          onClick={() => setShowInfo(!showInfo)}
+          className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-xs transition hover:bg-primary/10 sm:text-sm"
+        >
+          <Cpu className="h-4 w-4 flex-shrink-0 text-primary" />
+          <div className="flex-1">
+            <span className="font-medium text-primary">{t("releaseIdentify")}</span>
+            {detected && (
+              <span className="ml-2 text-muted-foreground">
+                {t("releaseDetected")} <strong className="text-foreground">
+                  {detected === "arm64" ? "ARM64" : detected === "arm" ? "ARM32" : detected === "x64-windows" ? "Windows x64" : detected === "arm64-windows" ? "Windows ARM64" : "x86_64"}
+                </strong>
+              </span>
+            )}
+          </div>
+          <Info className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+        </button>
 
-        {isAndroid && showInfo && (
+        {showInfo && (
           <div className="rounded-xl border border-border bg-card/30 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs space-y-1.5">
-            <p><strong className="text-foreground">ARM64:</strong> {t("releaseArchArm64")}</p>
-            <p><strong className="text-foreground">ARM32:</strong> {t("releaseArchArm")}</p>
-            <p><strong className="text-foreground">x86_64:</strong> {t("releaseArchX86")}</p>
+            {isAndroid ? (
+              <>
+                <p><strong className="text-foreground">ARM64:</strong> {t("releaseArchArm64")}</p>
+                <p><strong className="text-foreground">ARM32:</strong> {t("releaseArchArm")}</p>
+                <p><strong className="text-foreground">x86_64:</strong> {t("releaseArchX86")}</p>
+              </>
+            ) : (
+              <>
+                <p><strong className="text-foreground">x64:</strong> {t("releaseWinX64")}</p>
+                <p><strong className="text-foreground">ARM64:</strong> {t("releaseWinArm64")}</p>
+              </>
+            )}
             <p className="pt-1 text-muted-foreground/70">{t("releaseArchHint")}</p>
           </div>
         )}
@@ -120,7 +152,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
         )}
 
         {filteredAssets.map((asset) => {
-          const info = isAndroid ? getApkLabel(asset.name) : null;
+          const info = isAndroid ? getApkLabel(asset.name) : getWinLabel(asset.name);
           const isRecommended = info?.recommended;
           return (
             <div
