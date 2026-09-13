@@ -33,7 +33,7 @@ export default function Index() {
   const [showMobile, setShowMobile] = useState(false);
   const [showFaq, setShowFaq] = useState(false);
   const [showRelease, setShowRelease] = useState(false);
-  const [releasePlatform, setReleasePlatform] = useState<"windows" | "android">("android");
+  const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv">("android");
   // const [showInstall, setShowInstall] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [release, setRelease] = useState<{ version: string; apkUrl: string | null; windowsUrl: string | null; assets: ReleaseAsset[] }>({ version: "", apkUrl: null, windowsUrl: null, assets: [] });
@@ -99,9 +99,10 @@ export default function Index() {
       .catch(() => {});
   }, []);
 
-  const handleDownload = async (platform: "windows" | "android", url: string | null) => {
-    setStats((s) => ({ ...s, [platform]: (s[platform] ?? 0) + 1 }));
-    try { await supabase.rpc("increment_download", { _platform: platform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
+  const handleDownload = async (platform: "windows" | "android" | "tv", url: string | null) => {
+    const statsPlatform = platform === "tv" ? "android" : platform;
+    setStats((s) => ({ ...s, [statsPlatform]: (s[statsPlatform] ?? 0) + 1 }));
+    try { await supabase.rpc("increment_download", { _platform: statsPlatform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
     setReleasePlatform(platform);
     setShowRelease(true);
   };

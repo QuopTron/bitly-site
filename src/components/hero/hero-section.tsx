@@ -8,7 +8,7 @@ type Props = {
   tagline: string; description: string; version: string | null;
   isBlocked: boolean; windowsUrl: string | null; androidUrl: string | null;
   totalDownloads: number; windowsDownloads: number; androidDownloads: number;
-  onDownload: (p: "windows" | "android", u: string | null) => void;
+  onDownload: (p: "windows" | "android" | "tv", u: string | null) => void;
   onOpenMobile: () => void; onOpenFaq: () => void;
 };
 

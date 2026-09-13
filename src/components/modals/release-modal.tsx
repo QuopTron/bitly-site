@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Download, Smartphone, Monitor, Cpu, CheckCircle2, Info } from "lucide-react";
+import { Download, Smartphone, Monitor, Tv, Cpu, CheckCircle2, Info } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import ModalWrapper from "@/components/ui/modal-wrapper";
 
@@ -8,7 +8,7 @@ type ReleaseAsset = { name: string; browser_download_url: string; size: number }
 type Props = {
   open: boolean;
   onClose: () => void;
-  platform: "windows" | "android";
+  platform: "windows" | "android" | "tv";
   assets: ReleaseAsset[];
   version: string;
 };
@@ -93,22 +93,29 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
     }
   }, [open]);
 
-  const isAndroid = platform === "android";
+  const isAndroid = platform === "android" || platform === "tv";
+  const isTv = platform === "tv";
   const filteredAssets = assets.filter((a) =>
     isAndroid ? a.name.endsWith(".apk") : a.name.endsWith(".exe")
   );
 
-  const Icon = isAndroid ? Smartphone : Monitor;
+  const Icon = isTv ? Tv : isAndroid ? Smartphone : Monitor;
 
   return (
     <ModalWrapper
       open={open}
       onClose={onClose}
-      title={t("releaseTitle")}
-      subtitle={version ? `${t("releaseSubtitle")} — v${version}` : t("releaseSubtitle")}
+      title={isTv ? t("releaseTitleTV") : t("releaseTitle")}
+      subtitle={version ? `${isTv ? t("releaseSubtitleTV") : t("releaseSubtitle")} — v${version}` : isTv ? t("releaseSubtitleTV") : t("releaseSubtitle")}
       icon={<Icon className="h-6 w-6 text-primary" />}
     >
       <div className="space-y-3">
+        {isTv && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+            <p><strong className="text-amber-400">{t("releaseTVNote")}:</strong> {t("releaseTVNoteDesc")}</p>
+          </div>
+        )}
+
         <button
           onClick={() => setShowInfo(!showInfo)}
           className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-xs transition hover:bg-primary/10 sm:text-sm"

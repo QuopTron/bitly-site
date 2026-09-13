@@ -281,6 +281,8 @@ export const DICT: Record<string, [string, string]> = {
   // ── Release modal ──
   releaseTitle:         ["Descargar Bitly",                        "Download Bitly"],
   releaseSubtitle:      ["Selecciona la versión para tu dispositivo","Choose the version for your device"],
+  releaseTitleTV:       ["Bitly para Smart TV",                    "Bitly for Smart TV"],
+  releaseSubtitleTV:    ["Instala en Android TV, Google TV o Fire TV","Install on Android TV, Google TV or Fire TV"],
   releaseIdentify:      ["Identificar mi plataforma",              "Identify my platform"],
   releaseDetected:      ["Tu dispositivo es compatible con:",      "Your device is compatible with:"],
   releaseRecommended:   ["Recomendado",                            "Recommended"],
@@ -298,4 +300,8 @@ export const DICT: Record<string, [string, string]> = {
                                                                     "For most Windows 10/11 PCs (Intel or AMD processors)."],
   releaseWinArm64:      ["Para dispositivos Windows con procesador ARM (Surface Pro X, Snapdragon, etc.).",
                                                                     "For Windows devices with ARM processors (Surface Pro X, Snapdragon, etc.)."],
+  releaseTVNote:        ["Instrucción especial para TV",
+                                                                    "Special instruction for TV"],
+  releaseTVNoteDesc:    ["Descargá el APK en tu celular o PC, copialo a un USB, y usá la app \"Downloader\" en tu TV para instalarlo. También podés enviar el APK porWebshare o Send Files to TV.",
+                                                                    "Download the APK on your phone or PC, copy it to a USB, and use the \"Downloader\" app on your TV to install it. You can also send the APK via Webshare or Send Files to TV."],
 };
