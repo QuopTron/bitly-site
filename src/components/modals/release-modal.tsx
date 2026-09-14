@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Download, Smartphone, Monitor, Tv, Cpu, CheckCircle2, Info } from "lucide-react";
+import { Download, Smartphone, Monitor, Tv, Cpu, CheckCircle2, Info, Apple, Copy, ExternalLink } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import ModalWrapper from "@/components/ui/modal-wrapper";
 
@@ -8,7 +8,7 @@ type ReleaseAsset = { name: string; browser_download_url: string; size: number }
 type Props = {
   open: boolean;
   onClose: () => void;
-  platform: "windows" | "android" | "tv";
+  platform: "windows" | "android" | "tv" | "ios" | "macos";
   assets: ReleaseAsset[];
   version: string;
 };
@@ -36,49 +36,222 @@ function detectArch(): string | null {
   return null;
 }
 
-function getApkLabel(name: string): { label: string; desc: string; recommended: boolean } {
-  const arch = detectArch();
-  if (name.includes("arm64")) {
-    return {
-      label: "ARM64 (arm64-v8a)",
-      desc: "La mayoría de celulares modernos (2016+)",
-      recommended: arch === "arm64",
-    };
-  }
-  if (name.includes("armeabi-v7a") || name.includes("arm-v7a")) {
-    return {
-      label: "ARM32 (armeabi-v7a)",
-      desc: "Celulares antiguos o de gama baja",
-      recommended: arch === "arm",
-    };
-  }
-  if (name.includes("x86_64")) {
-    return {
-      label: "x86_64",
-      desc: "Emuladores, Chromebooks, tablets Intel",
-      recommended: arch === "x86_64",
-    };
-  }
-  return { label: name, desc: "", recommended: false };
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+  return (
+    <button onClick={handleCopy} className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-card/40 px-2 py-1 text-[10px] font-mono text-foreground transition hover:border-primary/40 hover:bg-primary/5 sm:text-xs">
+      {text}
+      <Copy className="h-3 w-3 text-muted-foreground" />
+      {copied && <span className="text-primary">Copiado</span>}
+    </button>
+  );
 }
 
-function getWinLabel(name: string): { label: string; desc: string; recommended: boolean } {
-  const arch = detectArch();
-  if (name.toLowerCase().includes("arm64") || name.toLowerCase().includes("aarch64")) {
-    return {
-      label: "Windows ARM64",
-      desc: "Para dispositivos con procesador ARM (Surface Pro X, etc.)",
-      recommended: arch === "arm64-windows",
-    };
-  }
-  if (name.toLowerCase().includes("x64") || name.toLowerCase().includes("x86_64") || name.toLowerCase().includes("amd64")) {
-    return {
-      label: "Windows x64",
-      desc: "La mayoría de PCs con Windows (Intel / AMD)",
-      recommended: arch === "x64-windows",
-    };
-  }
-  return { label: name.replace(/\.exe$/i, ""), desc: "Instalador de Windows", recommended: true };
+function Step({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3">
+      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary sm:h-7 sm:w-7 sm:text-xs">
+        {num}
+      </div>
+      <div className="flex-1 space-y-1">
+        <p className="text-xs font-semibold sm:text-sm">{title}</p>
+        <div className="text-[10px] leading-relaxed text-muted-foreground sm:text-xs">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function TVGuide({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+        <p><strong className="text-amber-400">{t("releaseTVGuideNote")}:</strong> {t("releaseTVGuideNoteDesc")}</p>
+      </div>
+
+      <div className="space-y-3">
+        <Step num={1} title={t("releaseTVStep1Title")}>
+          <p>{t("releaseTVStep1Desc")}</p>
+        </Step>
+        <Step num={2} title={t("releaseTVStep2Title")}>
+          <p>{t("releaseTVStep2Desc")}</p>
+          <div className="mt-2 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-medium text-foreground sm:text-xs">TVs modernos (Samsung, LG, Sony, TCL, etc.):</span>
+              <CopyButton text="8134206" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-medium text-foreground sm:text-xs">TVs antiguos o gama baja:</span>
+              <CopyButton text="3035631" />
+            </div>
+          </div>
+        </Step>
+        <Step num={3} title={t("releaseTVStep3Title")}>
+          <p>{t("releaseTVStep3Desc")}</p>
+        </Step>
+        <Step num={4} title={t("releaseTVStep4Title")}>
+          <p>{t("releaseTVStep4Desc")}</p>
+        </Step>
+      </div>
+    </div>
+  );
+}
+
+function AndroidGuide({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <Step num={1} title={t("releaseAndroidStep1Title")}>
+          <p>{t("releaseAndroidStep1Desc")}</p>
+        </Step>
+        <Step num={2} title={t("releaseAndroidStep2Title")}>
+          <p>{t("releaseAndroidStep2Desc")}</p>
+        </Step>
+        <Step num={3} title={t("releaseAndroidStep3Title")}>
+          <p>{t("releaseAndroidStep3Desc")}</p>
+        </Step>
+        <Step num={4} title={t("releaseAndroidStep4Title")}>
+          <p>{t("releaseAndroidStep4Desc")}</p>
+        </Step>
+      </div>
+    </div>
+  );
+}
+
+function WindowsGuide({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <Step num={1} title={t("releaseWinStep1Title")}>
+          <p>{t("releaseWinStep1Desc")}</p>
+        </Step>
+        <Step num={2} title={t("releaseWinStep2Title")}>
+          <p>{t("releaseWinStep2Desc")}</p>
+        </Step>
+        <Step num={3} title={t("releaseWinStep3Title")}>
+          <p>{t("releaseWinStep3Desc")}</p>
+        </Step>
+      </div>
+    </div>
+  );
+}
+
+function MacosGuide({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <Step num={1} title={t("releaseMacStep1Title")}>
+          <p>{t("releaseMacStep1Desc")}</p>
+        </Step>
+        <Step num={2} title={t("releaseMacStep2Title")}>
+          <p>{t("releaseMacStep2Desc")}</p>
+        </Step>
+        <Step num={3} title={t("releaseMacStep3Title")}>
+          <p>{t("releaseMacStep3Desc")}</p>
+        </Step>
+        <Step num={4} title={t("releaseMacStep4Title")}>
+          <p>{t("releaseMacStep4Desc")}</p>
+        </Step>
+      </div>
+    </div>
+  );
+}
+
+function IosGuide({ t }: { t: (k: string) => string }) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+        <p><strong className="text-blue-400">{t("releaseIOSGuideNote")}:</strong> {t("releaseIOSGuideNoteDesc")}</p>
+      </div>
+      <div className="space-y-3">
+        <Step num={1} title={t("releaseIOSStep1Title")}>
+          <p>{t("releaseIOSStep1Desc")}</p>
+          <a href="https://github.com/opa334/TrollStore" target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline sm:text-xs">
+            TrollStore en GitHub <ExternalLink className="h-3 w-3" />
+          </a>
+        </Step>
+        <Step num={2} title={t("releaseIOSStep2Title")}>
+          <p>{t("releaseIOSStep2Desc")}</p>
+        </Step>
+        <Step num={3} title={t("releaseIOSStep3Title")}>
+          <p>{t("releaseIOSStep3Desc")}</p>
+        </Step>
+      </div>
+    </div>
+  );
+}
+
+function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => string }) {
+  const exeAssets = assets.filter((a) => a.name.endsWith(".exe"));
+  if (exeAssets.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
+      {exeAssets.map((asset) => {
+        const isArm = asset.name.toLowerCase().includes("arm64") || asset.name.toLowerCase().includes("aarch64");
+        return (
+          <a
+            key={asset.name}
+            href={asset.browser_download_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
+          >
+            <div>
+              <div className="text-xs font-semibold sm:text-sm">{isArm ? "Windows ARM64" : "Windows x64"}</div>
+              <div className="text-[10px] text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
+            </div>
+            <Download className="h-4 w-4 text-muted-foreground" />
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => string }) {
+  const apkAssets = assets.filter((a) => a.name.endsWith(".apk"));
+  if (apkAssets.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
+      {apkAssets.map((asset) => {
+        const isArm64 = asset.name.includes("arm64");
+        const isArm32 = asset.name.includes("armeabi-v7a") || asset.name.includes("arm-v7a");
+        const label = isArm64 ? "ARM64 — Celulares modernos (2016+)" : isArm32 ? "ARM32 — Celulares antiguos" : "x86_64 — Emuladores / Chromebooks";
+        const arch = detectArch();
+        const recommended = (isArm64 && arch === "arm64") || (isArm32 && arch === "arm") || (!isArm64 && !isArm32 && arch === "x86_64");
+        return (
+          <a
+            key={asset.name}
+            href={asset.browser_download_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center justify-between rounded-xl border p-2.5 transition sm:p-3 ${
+              recommended ? "border-primary/60 bg-primary/5 shadow-sm shadow-primary/10" : "border-border/60 bg-card/40 hover:border-primary/40 hover:bg-primary/5"
+            }`}
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold sm:text-sm">{label}</span>
+                {recommended && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold text-background">Recomendado</span>}
+              </div>
+              <div className="text-[10px] text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
+            </div>
+            <Download className="h-4 w-4 text-muted-foreground" />
+          </a>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function ReleaseModal({ open, onClose, platform, assets, version }: Props) {
@@ -93,29 +266,30 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
     }
   }, [open]);
 
-  const isAndroid = platform === "android" || platform === "tv";
   const isTv = platform === "tv";
-  const filteredAssets = assets.filter((a) =>
-    isAndroid ? a.name.endsWith(".apk") : a.name.endsWith(".exe")
-  );
+  const isAndroid = platform === "android";
+  const isIos = platform === "ios";
+  const isMacos = platform === "macos";
+  const isWindows = platform === "windows";
 
-  const Icon = isTv ? Tv : isAndroid ? Smartphone : Monitor;
+  const filteredAssets = assets.filter((a) => {
+    if (isTv || isAndroid) return a.name.endsWith(".apk");
+    if (isIos) return a.name.endsWith(".ipa");
+    if (isMacos) return a.name.endsWith(".dmg");
+    return a.name.endsWith(".exe");
+  });
+
+  const Icon = isTv ? Tv : isAndroid ? Smartphone : isIos || isMacos ? Apple : Monitor;
 
   return (
     <ModalWrapper
       open={open}
       onClose={onClose}
-      title={isTv ? t("releaseTitleTV") : t("releaseTitle")}
-      subtitle={version ? `${isTv ? t("releaseSubtitleTV") : t("releaseSubtitle")} — v${version}` : isTv ? t("releaseSubtitleTV") : t("releaseSubtitle")}
+      title={isTv ? t("releaseTitleTV") : isIos ? t("releaseTitleIOS") : isMacos ? t("releaseTitleMacOS") : t("releaseTitle")}
+      subtitle={version ? `${isTv ? t("releaseSubtitleTV") : isIos ? t("releaseSubtitleIOS") : isMacos ? t("releaseSubtitleMacOS") : t("releaseSubtitle")} — v${version}` : isTv ? t("releaseSubtitleTV") : isIos ? t("releaseSubtitleIOS") : isMacos ? t("releaseSubtitleMacOS") : t("releaseSubtitle")}
       icon={<Icon className="h-6 w-6 text-primary" />}
     >
-      <div className="space-y-3">
-        {isTv && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-            <p><strong className="text-amber-400">{t("releaseTVNote")}:</strong> {t("releaseTVNoteDesc")}</p>
-          </div>
-        )}
-
+      <div className="space-y-4">
         <button
           onClick={() => setShowInfo(!showInfo)}
           className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-xs transition hover:bg-primary/10 sm:text-sm"
@@ -136,12 +310,16 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
 
         {showInfo && (
           <div className="rounded-xl border border-border bg-card/30 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs space-y-1.5">
-            {isAndroid ? (
+            {isAndroid || isTv ? (
               <>
                 <p><strong className="text-foreground">ARM64:</strong> {t("releaseArchArm64")}</p>
                 <p><strong className="text-foreground">ARM32:</strong> {t("releaseArchArm")}</p>
                 <p><strong className="text-foreground">x86_64:</strong> {t("releaseArchX86")}</p>
               </>
+            ) : isIos ? (
+              <p><strong className="text-foreground">iOS:</strong> {t("releaseIOSInfo")}</p>
+            ) : isMacos ? (
+              <p><strong className="text-foreground">macOS:</strong> {t("releaseMacOSInfo")}</p>
             ) : (
               <>
                 <p><strong className="text-foreground">x64:</strong> {t("releaseWinX64")}</p>
@@ -152,54 +330,41 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
           </div>
         )}
 
-        {filteredAssets.length === 0 && (
-          <div className="rounded-xl border border-border bg-card/30 p-4 text-center text-xs text-muted-foreground sm:text-sm">
-            {t("releaseNoAssets")}
-          </div>
-        )}
+        {isTv && <TVGuide t={t} />}
+        {isAndroid && <AndroidGuide t={t} />}
+        {isWindows && <WindowsGuide t={t} />}
+        {isMacos && <MacosGuide t={t} />}
+        {isIos && <IosGuide t={t} />}
 
-        {filteredAssets.map((asset) => {
-          const info = isAndroid ? getApkLabel(asset.name) : getWinLabel(asset.name);
-          const isRecommended = info?.recommended;
-          return (
-            <div
-              key={asset.name}
-              className={`relative rounded-xl border bg-gradient-to-b from-card/40 to-card/20 p-3 backdrop-blur transition-all sm:p-4 ${
-                isRecommended ? "border-primary/60 shadow-lg shadow-primary/10" : "border-border"
-              }`}
-            >
-              {isRecommended && (
-                <div className="absolute -top-2.5 left-3 rounded-full bg-primary px-2 py-0.5 text-[9px] font-bold text-background sm:text-[10px]">
-                  {t("releaseRecommended")}
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border sm:h-11 sm:w-11 ${isRecommended ? "border-primary/40" : "border-border"}`} style={{ background: "var(--gradient-mint)", opacity: isRecommended ? 1 : 0.7 }}>
-                  {isAndroid ? <Smartphone className="h-5 w-5 text-background" /> : <Monitor className="h-5 w-5 text-background" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold sm:text-sm">{info?.label || asset.name}</div>
-                  {info?.desc && <div className="text-[10px] text-muted-foreground sm:text-xs">{info.desc}</div>}
-                  <div className="mt-0.5 text-[10px] text-muted-foreground/70">{asset.name} · {formatSize(asset.size)}</div>
-                </div>
+        <div className="border-t border-border/40 pt-3">
+          {isWindows && <WinAssets assets={filteredAssets} t={t} />}
+          {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
+          {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
+              {filteredAssets.map((asset) => (
                 <a
+                  key={asset.name}
                   href={asset.browser_download_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className={`flex flex-shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold transition sm:px-4 sm:py-2 sm:text-xs ${
-                    isRecommended
-                      ? "bg-foreground text-background shadow-lg shadow-foreground/20 hover:scale-[1.03]"
-                      : "border border-border/60 bg-card/40 text-foreground hover:border-primary/40 hover:bg-primary/5"
-                  }`}
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
                 >
-                  <Download className="h-3 w-3" />
-                  {t("releaseDownload")}
+                  <div>
+                    <div className="text-xs font-semibold sm:text-sm">{asset.name}</div>
+                    <div className="text-[10px] text-muted-foreground sm:text-xs">{formatSize(asset.size)}</div>
+                  </div>
+                  <Download className="h-4 w-4 text-muted-foreground" />
                 </a>
-              </div>
+              ))}
             </div>
-          );
-        })}
+          )}
+          {filteredAssets.length === 0 && (
+            <div className="rounded-xl border border-border bg-card/30 p-4 text-center text-xs text-muted-foreground sm:text-sm">
+              {t("releaseNoAssets")}
+            </div>
+          )}
+        </div>
       </div>
     </ModalWrapper>
   );

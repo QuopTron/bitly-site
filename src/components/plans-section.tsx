@@ -1,5 +1,7 @@
 import { Check, X as XIcon, MessageCircle, Camera, Gem, Zap } from "lucide-react";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, getLanguage } from "@/lib/i18n";
+import { getPhasePrice } from "@/lib/pricing";
+import { useCurrency, format } from "@/lib/currency";
 
 const WHATSAPP = "+59173427418";
 const INSTAGRAM = "flox_devs_sucre";
@@ -11,6 +13,9 @@ const premFeatures = ["premiumCompare1", "premiumCompare2", "premiumCompare3", "
 
 export default function PlansSection() {
   const t = useI18n();
+  const [currency] = useCurrency();
+  const { price, originalPrice, label, labelEn, onOffer } = getPhasePrice();
+  const lang = getLanguage();
 
   return (
     <section className="container mx-auto px-4 py-12 sm:px-6 sm:py-16 md:py-20">
@@ -59,14 +64,16 @@ export default function PlansSection() {
 
         {/* Premium */}
         <div className="relative rounded-2xl bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 ring-1 ring-primary/25 shadow-xl shadow-primary/5 sm:p-6">
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-green-500/30 sm:px-4 sm:text-xs">
-            {t("plansOfferTag")}
-          </div>
+          {onOffer && (
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-green-500/30 sm:px-4 sm:text-xs">
+              {lang === "es" ? label : labelEn}
+            </div>
+          )}
           <div className="mb-4 pt-2">
             <h3 className="text-lg font-bold text-primary sm:text-xl">{t("plansPremium")}</h3>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-foreground sm:text-4xl">30 Bs</span>
-              <span className="text-sm text-muted-foreground/60 line-through">{t("plansOriginalPrice")}</span>
+              <span className="text-3xl font-bold text-foreground sm:text-4xl">{format(price, currency)}</span>
+              {onOffer && <span className="text-sm text-muted-foreground/60 line-through">{format(originalPrice, currency)}</span>}
             </div>
             <p className="mt-1 text-xs text-primary font-medium">{t("plansPremiumPrice")}</p>
           </div>

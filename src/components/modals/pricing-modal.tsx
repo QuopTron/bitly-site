@@ -2,21 +2,19 @@ import { useState, useEffect } from "react";
 import { X, Clock, Gem, Send, Check, Timer, Zap, TrendingUp } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { useCurrency, convert, format, INFO } from "@/lib/currency";
+import { getPhasePrice } from "@/lib/pricing";
 
-const NORMAL_PRICE = 50;
+function getCurrentPrice() {
+  return getPhasePrice().price;
+}
+
+function makePriceTable(normal: number) {
+  const prices = [1, 5, 10, 18, 26, 34, 42, normal];
+  return prices.map((price, i) => ({ hour: i + 1, price }));
+}
+
 const START_HOUR = 9;
 const END_HOUR = 17;
-
-const PRICE_TABLE = [
-  { hour: 1, price: 1 },
-  { hour: 2, price: 5 },
-  { hour: 3, price: 10 },
-  { hour: 4, price: 18 },
-  { hour: 5, price: 26 },
-  { hour: 6, price: 34 },
-  { hour: 7, price: 42 },
-  { hour: 8, price: 50 },
-];
 
 type Offer = {
   price: number;
@@ -32,6 +30,8 @@ function getOffer(): Offer {
   const now = new Date();
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
+  const NORMAL_PRICE = getCurrentPrice();
+  const PRICE_TABLE = makePriceTable(NORMAL_PRICE);
 
   const at = (hour: number, day = 0): Date => {
     const e = new Date(now);
@@ -55,11 +55,11 @@ function getOffer(): Offer {
     if (entry.price < NORMAL_PRICE) {
       return { price: entry.price, pct, label: `${pct}% OFF`, tag: "rising", icon: TrendingUp, end: nextHour, hourSlot: slot + 1 };
     }
-    return { price: 50, pct: 0, label: "50 Bs", tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
+    return { price: NORMAL_PRICE, pct: 0, label: `${NORMAL_PRICE} Bs`, tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
 
   if (currentHour >= END_HOUR) {
-    return { price: 50, pct: 0, label: "50 Bs", tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
+    return { price: NORMAL_PRICE, pct: 0, label: `${NORMAL_PRICE} Bs`, tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
 
   const timeToStart = at(START_HOUR);
@@ -136,7 +136,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-amber-400" />
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">{t("pricingRising") || "Sube cada hora"}</span>
+              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">{t("pricingRising")}</span>
             </div>
             {showCount && (
               <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400">
@@ -146,7 +146,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
             )}
           </div>
           <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
-            {PRICE_TABLE.map((entry, i) => {
+            {makePriceTable(getCurrentPrice()).map((entry, i) => {
               const isActive = offer.hourSlot === entry.hour;
               const isPast = offer.hourSlot > entry.hour;
               return (
@@ -170,8 +170,8 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
           </div>
           <p className="mt-2 text-center text-[10px] text-muted-foreground/60">
             {offer.hourSlot <= 8
-              ? `${t("pricingHour") || "Hora"} ${offer.hourSlot}/8 — ${t("pricingNext") || "Siguiente"}: ${offer.hourSlot < 8 ? PRICE_TABLE[offer.hourSlot]?.price ?? 50 : 50} Bs`
-              : t("pricingEnded") || "Oferta terminada"}
+              ? `${t("pricingHour")} ${offer.hourSlot}/8 — ${t("pricingNext")}: ${offer.hourSlot < 8 ? makePriceTable(getCurrentPrice())[offer.hourSlot]?.price ?? getCurrentPrice() : getCurrentPrice()} Bs`
+              : t("pricingEnded")}
           </p>
         </div>
 
@@ -220,9 +220,9 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
               <span className="text-sm text-muted-foreground">{sym}</span>
             </div>
             <p className="relative mt-1 text-xs text-muted-foreground">{t("pricingLifetime")}</p>
-            {offer.price < NORMAL_PRICE && (
+            {offer.price < getCurrentPrice() && (
               <p className="relative text-xs text-muted-foreground/60">
-                <span className="line-through">{convert(NORMAL_PRICE, currency)} {sym}</span>
+                <span className="line-through">{convert(getCurrentPrice(), currency)} {sym}</span>
                 <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm ${
                   isPct
                     ? "bg-gradient-to-r from-green-400/30 to-emerald-400/10 text-green-400 shadow-green-500/20"

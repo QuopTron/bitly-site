@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 const RATES_URL = "https://open.er-api.com/v6/latest/BOB";
-const MARKUP = 1.15;
+const MARKUP = 1.20;
 
 export const CODES = ["BOB", "USD", "EUR", "ARS", "PEN", "CLP", "BRL", "MXN", "COP"] as const;
 export type Code = (typeof CODES)[number];

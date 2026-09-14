@@ -28,15 +28,15 @@ export const Route = createFileRoute("/")({
 
 export default function Index() {
   const [info, setInfo] = useState({ name: "Bitly", tagline: "Tu música, sin límites", description: "", windows_url: null, android_url: null, version: "1.0.0" });
-  const [stats, setStats] = useState({ windows: 0, android: 0 });
+  const [stats, setStats] = useState<{ [key: string]: number }>({ windows: 0, android: 0 });
   const [loading, setLoading] = useState(true);
   const [showMobile, setShowMobile] = useState(false);
   const [showFaq, setShowFaq] = useState(false);
   const [showRelease, setShowRelease] = useState(false);
-  const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv">("android");
+  const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
   // const [showInstall, setShowInstall] = useState(false);
   const [blocked, setBlocked] = useState(false);
-  const [release, setRelease] = useState<{ version: string; apkUrl: string | null; windowsUrl: string | null; assets: ReleaseAsset[] }>({ version: "", apkUrl: null, windowsUrl: null, assets: [] });
+  const [release, setRelease] = useState<{ version: string; apkUrl: string | null; windowsUrl: string | null; iosUrl: string | null; macosUrl: string | null; assets: ReleaseAsset[] }>({ version: "", apkUrl: null, windowsUrl: null, iosUrl: null, macosUrl: null, assets: [] });
 
   useEffect(() => {
     const check = () => {
@@ -87,10 +87,14 @@ export default function Index() {
         }));
         const apk = assets.find((a) => a.name.includes("arm64")) ?? assets.find((a) => a.name.endsWith(".apk"));
         const win = assets.find((a) => a.name.endsWith(".exe"));
+        const ios = assets.find((a) => a.name.endsWith(".ipa"));
+        const macos = assets.find((a) => a.name.endsWith(".dmg"));
         const result = {
           version: data.tag_name ?? "",
           apkUrl: apk?.browser_download_url ?? null,
           windowsUrl: win?.browser_download_url ?? null,
+          iosUrl: ios?.browser_download_url ?? null,
+          macosUrl: macos?.browser_download_url ?? null,
           assets,
         };
         setRelease(result);
@@ -99,7 +103,7 @@ export default function Index() {
       .catch(() => {});
   }, []);
 
-  const handleDownload = async (platform: "windows" | "android" | "tv", url: string | null) => {
+  const handleDownload = async (platform: "windows" | "android" | "tv" | "ios" | "macos", url: string | null) => {
     const statsPlatform = platform === "tv" ? "android" : platform;
     setStats((s) => ({ ...s, [statsPlatform]: (s[statsPlatform] ?? 0) + 1 }));
     try { await supabase.rpc("increment_download", { _platform: statsPlatform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
@@ -112,6 +116,8 @@ export default function Index() {
   const total = (stats.windows ?? 0) + (stats.android ?? 0);
   const androidUrl = release.apkUrl ?? info.android_url;
   const windowsUrl = release.windowsUrl ?? info.windows_url;
+  const iosUrl = release.iosUrl;
+  const macosUrl = release.macosUrl;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -121,7 +127,7 @@ export default function Index() {
       <main className="flex-1 flex flex-col justify-center">
         <HeroSection
           tagline={info.tagline} description={info.description} version={release.version || info.version}
-          isBlocked={blocked} windowsUrl={windowsUrl} androidUrl={androidUrl}
+          isBlocked={blocked} windowsUrl={windowsUrl} androidUrl={androidUrl} iosUrl={iosUrl} macosUrl={macosUrl}
           totalDownloads={total} windowsDownloads={stats.windows ?? 0} androidDownloads={stats.android ?? 0}
           onDownload={handleDownload}
           onOpenMobile={() => setShowMobile(true)}

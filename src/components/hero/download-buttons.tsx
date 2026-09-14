@@ -4,10 +4,12 @@ type Props = {
   isBlocked: boolean;
   windowsUrl: string | null;
   androidUrl: string | null;
-  onDownload: (platform: "windows" | "android" | "tv", url: string | null) => void;
+  iosUrl: string | null;
+  macosUrl: string | null;
+  onDownload: (platform: "windows" | "android" | "tv" | "ios" | "macos", url: string | null) => void;
 };
 
-export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, onDownload }: Props) {
+export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, iosUrl, macosUrl, onDownload }: Props) {
   if (isBlocked) {
     return (
       <>
@@ -69,6 +71,26 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, onD
         <div className="text-left">
           <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
           <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Smart TV</div>
+        </div>
+      </button>
+      <button
+        onClick={() => onDownload("ios", iosUrl)}
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+      >
+        <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
+        <div className="text-left">
+          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">iOS</div>
+        </div>
+      </button>
+      <button
+        onClick={() => onDownload("macos", macosUrl)}
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+      >
+        <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
+        <div className="text-left">
+          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">macOS</div>
         </div>
       </button>
     </>

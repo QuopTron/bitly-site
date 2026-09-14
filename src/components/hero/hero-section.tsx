@@ -6,9 +6,9 @@ import StatsBar from "./stats-bar";
 
 type Props = {
   tagline: string; description: string; version: string | null;
-  isBlocked: boolean; windowsUrl: string | null; androidUrl: string | null;
+  isBlocked: boolean; windowsUrl: string | null; androidUrl: string | null; iosUrl: string | null; macosUrl: string | null;
   totalDownloads: number; windowsDownloads: number; androidDownloads: number;
-  onDownload: (p: "windows" | "android" | "tv", u: string | null) => void;
+  onDownload: (p: "windows" | "android" | "tv" | "ios" | "macos", u: string | null) => void;
   onOpenMobile: () => void; onOpenFaq: () => void;
 };
 
@@ -37,6 +37,8 @@ export default function HeroSection(props: Props) {
             isBlocked={props.isBlocked}
             windowsUrl={props.windowsUrl}
             androidUrl={props.androidUrl}
+            iosUrl={props.iosUrl}
+            macosUrl={props.macosUrl}
             onDownload={props.onDownload}
           />
         </div>
