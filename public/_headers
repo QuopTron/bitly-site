@@ -1,0 +1,15 @@
+# _headers — Archivo de Cloudflare Pages que fija el Content-Type de los
+# archivos .well-known. Va en la raíz de la carpeta public/ del sitio
+# (repo bitly-site), junto con la carpeta .well-known/.
+#
+# Por qué: `apple-app-site-association` no tiene extensión, así que el hosting
+# no sabe que es JSON. Apple y Google esperan application/json.
+
+/.well-known/assetlinks.json
+  Content-Type: application/json
+
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+
+/open
+  Cache-Control: public, max-age=300

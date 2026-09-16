@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.bitly",
+      "sha256_cert_fingerprints": [
+        "2D:EF:EF:5F:5C:78:59:0F:4A:61:88:CC:3F:49:3E:E8:F1:6C:AC:35:D8:8C:3C:A7:9B:18:A0:82:E9:7D:BA:3D"
+      ]
+    }
+  }
+]

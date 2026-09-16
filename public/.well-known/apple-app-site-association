@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAM_ID_REEMPLAZAR.com.example.bitly"],
+        "components": [{ "/": "/open*" }]
+      }
+    ]
+  }
+}
