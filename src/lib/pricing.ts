@@ -1,6 +1,17 @@
+/**
+ * Fases de precio (en bolivianos).
+ *
+ * La oferta de lanzamiento de 30 Bs corre hasta el 30 de septiembre de 2026
+ * inclusive: `until` apunta a las 00:00 del 1 de octubre.
+ */
 const PHASES = [
-  { until: "2026-09-16T00:00:00", price: 30, originalPrice: 50, label: "Oferta hasta 15/09", labelEn: "Offer until 15/09" },
-  { until: "2026-09-21T00:00:00", price: 40, originalPrice: 50, label: "Oferta hasta 20/09", labelEn: "Offer until 20/09" },
+  {
+    until: "2026-10-01T00:00:00",
+    price: 30,
+    originalPrice: 50,
+    label: "Oferta hasta 30/09",
+    labelEn: "Offer until 30/09",
+  },
   { until: null, price: 50, originalPrice: 50, label: "", labelEn: "" },
 ];
 

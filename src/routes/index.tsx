@@ -11,7 +11,7 @@ import MobileModal from "@/components/modals/mobile-modal";
 import FaqModal from "@/components/modals/faq-modal";
 import ReleaseModal from "@/components/modals/release-modal";
 import PlansSection from "@/components/plans-section";
-// import InstallModal from "@/components/modals/install-modal";
+import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
 import { initRates } from "@/lib/currency";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 
@@ -33,7 +33,6 @@ export default function Index() {
   const [showFaq, setShowFaq] = useState(false);
   const [showRelease, setShowRelease] = useState(false);
   const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
-  // const [showInstall, setShowInstall] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [release, setRelease] = useState<ReleaseIndex | null>(null);
 
@@ -110,6 +109,7 @@ export default function Index() {
           onOpenFaq={() => setShowFaq(true)}
         />
       </main>
+      <InstallSection />
       <PlansSection />
       <Footer />
       <MobileModal open={showMobile} onClose={() => setShowMobile(false)} />
@@ -121,8 +121,11 @@ export default function Index() {
         assets={modalRelease?.assets ?? []}
         version={modalRelease?.version ?? ""}
         latestVersion={release?.version ?? ""}
+        onOpenGuide={() => {
+          setShowRelease(false);
+          abrirGuia(plataformaDeDescarga(releasePlatform));
+        }}
       />
-      {/* <InstallModal open={showInstall} onClose={() => setShowInstall(false)} url={androidUrl} /> */}
     </div>
   );
 }

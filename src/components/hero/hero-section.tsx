@@ -32,7 +32,9 @@ export default function HeroSection(props: Props) {
         <p className="max-w-lg text-sm text-muted-foreground sm:text-base lg:text-lg">
           {props.description || t("heroDescription")}
         </p>
-        <div id="descargar" className="flex flex-col gap-3 sm:flex-row">
+        {/* Los 5 botones se reparten en filas: sin `flex-wrap` + un mínimo por botón,
+            la fila se desborda en pantallas de 640 a 1100 px. */}
+        <div id="descargar" className="flex flex-col gap-3 sm:flex-row sm:flex-wrap [&>*]:min-w-[9rem]">
           <DownloadButtons
             isBlocked={props.isBlocked}
             windowsUrl={props.windowsUrl}

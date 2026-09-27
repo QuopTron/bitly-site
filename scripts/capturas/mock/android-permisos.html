@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ajustes · Instalar apps desconocidas</title>
+<style>
+  :root{
+    --bg:#1C1B1F; --sup2:#2B2930; --on:#E6E1E5; --on2:#CAC4D0;
+    --primary:#A8C7FA; --primary-dark:#0B3355;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--on);
+    font-family:Roboto,"Segoe UI",system-ui,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+
+  .pantalla{width:100%;height:100%;display:flex;flex-direction:column}
+
+  /* barra de estado */
+  .estado{height:44px;flex:none;padding:0 22px;display:flex;align-items:center;justify-content:space-between;
+    font-size:14px;font-weight:500;letter-spacing:.2px}
+  .estado .iconos{display:flex;align-items:center;gap:5px}
+  .barras{display:flex;align-items:flex-end;gap:2px}
+  .barras i{display:block;width:3px;border-radius:1px;background:var(--on)}
+  .barras i:nth-child(1){height:5px}
+  .barras i:nth-child(2){height:8px}
+  .barras i:nth-child(3){height:11px}
+  .barras i:nth-child(4){height:14px}
+  .bateria{width:22px;height:11px;border:1.5px solid var(--on);border-radius:3px;position:relative;opacity:.95}
+  .bateria::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;border-radius:0 2px 2px 0;background:var(--on)}
+  .bateria i{position:absolute;inset:1.5px;right:5px;border-radius:1px;background:var(--on)}
+
+  /* barra superior */
+  .barra{height:62px;flex:none;display:flex;align-items:center;gap:10px;padding:0 20px 0 10px}
+  .barra svg{flex:none}
+  .barra h1{font-size:21px;font-weight:500;letter-spacing:-.2px;white-space:nowrap}
+
+  .cuerpo{flex:1;padding:6px 0 0;overflow:hidden}
+
+  .fila-app{display:flex;align-items:center;gap:16px;padding:10px 24px 18px}
+  .fila-app .app{font-size:16px;font-weight:500}
+
+  .chrome{width:34px;height:34px;border-radius:50%;position:relative;flex:none;
+    background:conic-gradient(from -150deg,#EA4335 0 110deg,#FBBC05 110deg 220deg,#34A853 220deg 360deg)}
+  .chrome::before{content:"";position:absolute;inset:6px;border-radius:50%;background:#fff}
+  .chrome::after{content:"";position:absolute;inset:10px;border-radius:50%;background:#4285F4}
+
+  .tarjeta{margin:0 16px;background:var(--sup2);border-radius:20px;padding:18px 20px 16px}
+  .tarjeta .cabecera{display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .tarjeta .titulo{font-size:16px;font-weight:500;line-height:1.35}
+  .tarjeta .nota{margin-top:8px;font-size:13px;line-height:1.45;color:var(--on2)}
+
+  /* switch Material 3, encendido */
+  .switch{width:52px;height:32px;flex:none;border-radius:16px;background:var(--primary);
+    display:flex;align-items:center;justify-content:flex-end;padding:2px}
+  .switch .pulgar{width:28px;height:28px;border-radius:50%;background:var(--primary-dark);
+    display:grid;place-items:center}
+
+  .ayuda{padding:26px 24px 0}
+  .ayuda h2{font-size:15px;font-weight:600;margin-bottom:8px}
+  .ayuda p{font-size:14px;line-height:1.55;color:var(--on2)}
+  .pista{margin:18px 24px 0;padding:12px 14px;border-radius:14px;background:rgba(168,199,250,.10);
+    border:1px solid rgba(168,199,250,.28);color:var(--primary);font-size:12.5px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="pantalla">
+  <div class="estado">
+    <span>9:41</span>
+    <div class="iconos">
+      <svg width="14" height="13" viewBox="0 0 14 13" fill="none" aria-hidden="true">
+        <path d="M7 11.2 1.2 5.3a8.3 8.3 0 0 1 11.6 0L7 11.2Z" fill="#E6E1E5"/>
+      </svg>
+      <div class="barras"><i></i><i></i><i></i><i></i></div>
+      <div class="bateria"><i></i></div>
+    </div>
+  </div>
+
+  <div class="barra">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M15 5 8 12l7 7" stroke="#E6E1E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h1>Instalar apps desconocidas</h1>
+  </div>
+
+  <div class="cuerpo">
+    <div class="fila-app">
+      <div class="chrome"></div>
+      <span class="app">Chrome</span>
+    </div>
+
+    <div class="tarjeta">
+      <div class="cabecera">
+        <span class="titulo">Permitir desde esta fuente</span>
+        <div class="switch">
+          <div class="pulgar">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="m3.5 8.4 2.9 2.9 6-6.6" stroke="#A8C7FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <p class="nota">Se permite la instalación de apps desde esta fuente.</p>
+    </div>
+
+    <div class="ayuda">
+      <h2>Instalar apps desconocidas</h2>
+      <p>Permitir la instalación de apps desde esta fuente. Puede poner en riesgo tu dispositivo. Las apps instaladas desde esta fuente no se verifican.</p>
+    </div>
+
+    <div class="pista">Activá esta opción para Chrome (o el navegador con el que descargues el APK).</div>
+  </div>
+</div>
+</body>
+</html>

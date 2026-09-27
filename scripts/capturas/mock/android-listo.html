@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android · app instalada</title>
+<style>
+  :root{--on:#E6E1E5;--on2:#CAC4D0;--primary:#A8C7FA}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;color:var(--on);
+    font-family:Roboto,"Segoe UI",system-ui,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .pantalla{position:relative;width:100%;height:100%;background:
+    radial-gradient(110% 60% at 50% 8%,#16303d 0%,#131318 52%,#0c0c10 100%)}
+
+  .estado{height:44px;padding:0 22px;display:flex;align-items:center;justify-content:space-between;
+    font-size:14px;font-weight:500}
+  .estado .iconos{display:flex;align-items:center;gap:5px}
+  .barras{display:flex;align-items:flex-end;gap:2px}
+  .barras i{display:block;width:3px;border-radius:1px;background:var(--on)}
+  .barras i:nth-child(1){height:5px}.barras i:nth-child(2){height:8px}
+  .barras i:nth-child(3){height:11px}.barras i:nth-child(4){height:14px}
+  .bateria{width:22px;height:11px;border:1.5px solid var(--on);border-radius:3px;position:relative}
+  .bateria::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:5px;border-radius:0 2px 2px 0;background:var(--on)}
+  .bateria i{position:absolute;inset:1.5px;right:5px;border-radius:1px;background:var(--on)}
+
+  .cuerpo{height:calc(100% - 44px);display:flex;flex-direction:column;align-items:center;
+    justify-content:center;padding:0 34px 40px;text-align:center;gap:0}
+
+  .tick{width:66px;height:66px;border-radius:50%;display:grid;place-items:center;margin-bottom:26px;
+    background:rgba(63,199,166,.16);border:1px solid rgba(63,199,166,.45)}
+  .icono{width:88px;height:88px;border-radius:23px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#7BE0B7 0%,#3FC7A6 55%,#1E9E8A 100%);
+    box-shadow:0 16px 34px rgba(63,199,166,.3)}
+  .nombre{margin-top:20px;font-size:23px;font-weight:500}
+  .estado-app{margin-top:6px;font-size:15px;color:#7BE0B7;font-weight:500}
+  .carpeta{margin-top:10px;font-size:13px;color:var(--on2)}
+  .chip{margin-top:18px;display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;
+    background:rgba(168,199,250,.12);border:1px solid rgba(168,199,250,.3);color:var(--primary);font-size:12.5px}
+
+  .botones{position:absolute;left:32px;right:32px;bottom:42px;display:flex;gap:10px}
+  .botones button{flex:1;height:48px;border:none;border-radius:24px;font-family:inherit;font-size:15px;font-weight:600}
+  .btn-lleno{background:var(--primary);color:#0d2b45}
+  .btn-texto{background:transparent;color:var(--primary);border:1px solid rgba(168,199,250,.35)}
+</style>
+</head>
+<body>
+<div class="pantalla">
+  <div class="estado">
+    <span>9:41</span>
+    <div class="iconos">
+      <svg width="14" height="13" viewBox="0 0 14 13" aria-hidden="true"><path d="M7 11.2 1.2 5.3a8.3 8.3 0 0 1 11.6 0L7 11.2Z" fill="#E6E1E5"/></svg>
+      <div class="barras"><i></i><i></i><i></i><i></i></div>
+      <div class="bateria"><i></i></div>
+    </div>
+  </div>
+
+  <div class="cuerpo">
+    <div class="tick">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="m5 12.6 4.4 4.4L19 7.4" stroke="#7BE0B7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <div class="icono">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M9 18V6.6l10-2v10" stroke="#08312a" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="6.6" cy="18" r="2.6" stroke="#08312a" stroke-width="1.9"/>
+        <circle cx="16.6" cy="14.6" r="2.6" stroke="#08312a" stroke-width="1.9"/>
+      </svg>
+    </div>
+
+    <div class="nombre">Bitly</div>
+    <div class="estado-app">Instalada</div>
+    <div class="carpeta">Guardada en la pantalla de inicio</div>
+    <div class="chip">Abrí Bitly y elegí tu carpeta de música</div>
+  </div>
+
+  <div class="botones">
+    <button class="btn-lleno">Abrir</button>
+    <button class="btn-texto">Listo</button>
+  </div>
+</div>
+</body>
+</html>

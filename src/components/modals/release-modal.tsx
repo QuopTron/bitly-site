@@ -1,17 +1,22 @@
 import { useState, useEffect } from "react";
-import { Download, Smartphone, Monitor, Tv, Cpu, CheckCircle2, Info, Apple, Copy, ExternalLink } from "lucide-react";
+import { ArrowRight, Download, Smartphone, Monitor, Tv, Cpu, Info, Apple } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import ModalWrapper from "@/components/ui/modal-wrapper";
+import { GuiaCelular, GuiaIOS, GuiaMac, GuiaPC, GuiaTV } from "@/components/install/guides";
 
 type ReleaseAsset = { name: string; browser_download_url: string; size: number };
+
+type Platform = "windows" | "android" | "tv" | "ios" | "macos";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  platform: "windows" | "android" | "tv" | "ios" | "macos";
+  platform: Platform;
   assets: ReleaseAsset[];
   version: string;
   latestVersion: string;
+  /** Lleva a la guía con capturas de la sección de instalación. */
+  onOpenGuide?: () => void;
 };
 
 function formatSize(bytes: number): string {
@@ -35,157 +40,6 @@ function detectArch(): string | null {
   }
   if (/x86_64|Win64|x64/i.test(ua)) return "x86_64";
   return null;
-}
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {}
-  };
-  return (
-    <button onClick={handleCopy} className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-card/40 px-2 py-1 text-[10px] font-mono text-foreground transition hover:border-primary/40 hover:bg-primary/5 sm:text-xs">
-      {text}
-      <Copy className="h-3 w-3 text-muted-foreground" />
-      {copied && <span className="text-primary">Copiado</span>}
-    </button>
-  );
-}
-
-function Step({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex gap-3">
-      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary sm:h-7 sm:w-7 sm:text-xs">
-        {num}
-      </div>
-      <div className="flex-1 space-y-1">
-        <p className="text-xs font-semibold sm:text-sm">{title}</p>
-        <div className="text-[10px] leading-relaxed text-muted-foreground sm:text-xs">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function TVGuide({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-        <p><strong className="text-amber-400">{t("releaseTVGuideNote")}:</strong> {t("releaseTVGuideNoteDesc")}</p>
-      </div>
-
-      <div className="space-y-3">
-        <Step num={1} title={t("releaseTVStep1Title")}>
-          <p>{t("releaseTVStep1Desc")}</p>
-        </Step>
-        <Step num={2} title={t("releaseTVStep2Title")}>
-          <p>{t("releaseTVStep2Desc")}</p>
-          <div className="mt-2 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-medium text-foreground sm:text-xs">TVs modernos (Samsung, LG, Sony, TCL, etc.):</span>
-              <CopyButton text="8134206" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-medium text-foreground sm:text-xs">TVs antiguos o gama baja:</span>
-              <CopyButton text="3035631" />
-            </div>
-          </div>
-        </Step>
-        <Step num={3} title={t("releaseTVStep3Title")}>
-          <p>{t("releaseTVStep3Desc")}</p>
-        </Step>
-        <Step num={4} title={t("releaseTVStep4Title")}>
-          <p>{t("releaseTVStep4Desc")}</p>
-        </Step>
-      </div>
-    </div>
-  );
-}
-
-function AndroidGuide({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <Step num={1} title={t("releaseAndroidStep1Title")}>
-          <p>{t("releaseAndroidStep1Desc")}</p>
-        </Step>
-        <Step num={2} title={t("releaseAndroidStep2Title")}>
-          <p>{t("releaseAndroidStep2Desc")}</p>
-        </Step>
-        <Step num={3} title={t("releaseAndroidStep3Title")}>
-          <p>{t("releaseAndroidStep3Desc")}</p>
-        </Step>
-        <Step num={4} title={t("releaseAndroidStep4Title")}>
-          <p>{t("releaseAndroidStep4Desc")}</p>
-        </Step>
-      </div>
-    </div>
-  );
-}
-
-function WindowsGuide({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <Step num={1} title={t("releaseWinStep1Title")}>
-          <p>{t("releaseWinStep1Desc")}</p>
-        </Step>
-        <Step num={2} title={t("releaseWinStep2Title")}>
-          <p>{t("releaseWinStep2Desc")}</p>
-        </Step>
-        <Step num={3} title={t("releaseWinStep3Title")}>
-          <p>{t("releaseWinStep3Desc")}</p>
-        </Step>
-      </div>
-    </div>
-  );
-}
-
-function MacosGuide({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <Step num={1} title={t("releaseMacStep1Title")}>
-          <p>{t("releaseMacStep1Desc")}</p>
-        </Step>
-        <Step num={2} title={t("releaseMacStep2Title")}>
-          <p>{t("releaseMacStep2Desc")}</p>
-        </Step>
-        <Step num={3} title={t("releaseMacStep3Title")}>
-          <p>{t("releaseMacStep3Desc")}</p>
-        </Step>
-        <Step num={4} title={t("releaseMacStep4Title")}>
-          <p>{t("releaseMacStep4Desc")}</p>
-        </Step>
-      </div>
-    </div>
-  );
-}
-
-function IosGuide({ t }: { t: (k: string) => string }) {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-        <p><strong className="text-blue-400">{t("releaseIOSGuideNote")}:</strong> {t("releaseIOSGuideNoteDesc")}</p>
-      </div>
-      <div className="space-y-3">
-        <Step num={1} title={t("releaseIOSStep1Title")}>
-          <p>{t("releaseIOSStep1Desc")}</p>
-          <a href="https://github.com/opa334/TrollStore" target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline sm:text-xs">
-            TrollStore en GitHub <ExternalLink className="h-3 w-3" />
-          </a>
-        </Step>
-        <Step num={2} title={t("releaseIOSStep2Title")}>
-          <p>{t("releaseIOSStep2Desc")}</p>
-        </Step>
-        <Step num={3} title={t("releaseIOSStep3Title")}>
-          <p>{t("releaseIOSStep3Desc")}</p>
-        </Step>
-      </div>
-    </div>
-  );
 }
 
 function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => string }) {
@@ -243,7 +97,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold sm:text-sm">{label}</span>
-                {recommended && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold text-background">Recomendado</span>}
+                {recommended && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold text-background">{t("releaseRecommended")}</span>}
               </div>
               <div className="text-[10px] text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
             </div>
@@ -255,7 +109,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
   );
 }
 
-export default function ReleaseModal({ open, onClose, platform, assets, version, latestVersion }: Props) {
+export default function ReleaseModal({ open, onClose, platform, assets, version, latestVersion, onOpenGuide }: Props) {
   const t = useI18n();
   const [detected, setDetected] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -331,11 +185,11 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
           </div>
         )}
 
-        {isTv && <TVGuide t={t} />}
-        {isAndroid && <AndroidGuide t={t} />}
-        {isWindows && <WindowsGuide t={t} />}
-        {isMacos && <MacosGuide t={t} />}
-        {isIos && <IosGuide t={t} />}
+        {isTv && <GuiaTV />}
+        {isAndroid && <GuiaCelular />}
+        {isWindows && <GuiaPC />}
+        {isMacos && <GuiaMac />}
+        {isIos && <GuiaIOS />}
 
         <div className="border-t border-border/40 pt-3">
           {version && latestVersion && version !== latestVersion && (
@@ -371,6 +225,16 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
             </div>
           )}
         </div>
+
+        {onOpenGuide && (
+          <button
+            onClick={onOpenGuide}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 text-xs font-semibold text-primary transition hover:bg-primary/15 sm:text-sm"
+          >
+            <ArrowRight className="h-4 w-4" />
+            {t("releaseSeeGuide")}
+          </button>
+        )}
       </div>
     </ModalWrapper>
   );
