@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macOS · Terminal</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;
+    font-family:"SF Pro Text",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{background:
+    radial-gradient(90% 70% at 15% 12%,#3b2f63 0%,transparent 55%),
+    radial-gradient(80% 80% at 88% 82%,#1f4a6b 0%,transparent 60%),
+    linear-gradient(150deg,#161a2b 0%,#101425 55%,#0b0f1c 100%);
+    display:grid;place-items:center}
+
+  #ventana{width:760px;background:#151518;border-radius:10px;overflow:hidden;
+    box-shadow:0 34px 70px rgba(0,0,0,.62),0 0 0 .5px rgba(255,255,255,.16) inset}
+
+  .titulo{height:36px;display:grid;place-items:center;position:relative;background:#26262a;border-bottom:1px solid #0e0e10}
+  .semáforo{position:absolute;left:12px;top:0;bottom:0;display:flex;align-items:center;gap:7px}
+  .semáforo i{width:11px;height:11px;border-radius:50%;display:block}
+  .titulo .nombre{font-size:12px;color:#9a9aa2}
+
+  .cuerpo{padding:16px 18px 22px;font-family:"SF Mono",Menlo,Consolas,"Courier New",monospace;
+    font-size:13.5px;line-height:1.75;color:#e6e6ea}
+  .linea{white-space:nowrap}
+  .prompt{color:#7BE0B7}
+  .ruta{color:#7fb2ff}
+  .cursor{display:inline-block;width:8px;height:16px;background:#e6e6ea;vertical-align:-3px;margin-left:2px;
+    animation:parpadeo 1.1s steps(1,end) infinite}
+  @keyframes parpadeo{50%{opacity:0}}
+  .ok{margin-top:10px;color:#9a9aa2;font-size:12.5px}
+  .ok b{color:#7BE0B7}
+</style>
+</head>
+<body>
+  <div id="ventana">
+    <div class="titulo">
+      <div class="semáforo"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+      <div class="nombre">usuario — bash — 90×24</div>
+    </div>
+    <div class="cuerpo">
+      <div class="linea">Last login: Mon Sep 28 09:41:02 on ttys000</div>
+      <div class="linea"><span class="prompt">usuario@Mac</span> <span class="ruta">~</span> % xattr -dr com.apple.quarantine /Applications/Bitly.app</div>
+      <div class="linea"><span class="prompt">usuario@Mac</span> <span class="ruta">~</span> %<span class="cursor"></span></div>
+      <div class="ok">Listo: <b>Bitly</b> ya se puede abrir desde la carpeta Aplicaciones.</div>
+    </div>
+  </div>
+</body>
+</html>

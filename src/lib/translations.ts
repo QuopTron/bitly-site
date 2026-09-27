@@ -391,6 +391,35 @@ export const DICT: Record<string, [string, string]> = {
                                                                     "Recent macOS hides that option. Paste this command in Terminal to clear the quarantine flag, then open the app again:"],
   installMacTerminal:   ["Comando para la Terminal",               "Terminal command"],
 
+  // ── Botones de descarga de cada guía ──
+  installGetPhone:      ["Descargar el APK",                        "Download the APK"],
+  installGetPC:         ["Descargar el instalador",                 "Download the installer"],
+  installGetTV:         ["Descargar el APK para la TV",             "Download the TV APK"],
+  installGetIOS:        ["Descargar el .ipa",                       "Download the .ipa"],
+  installGetMac:        ["Descargar el .dmg",                       "Download the .dmg"],
+
+  // ── Capturas de iPhone / iPad ──
+  installIOSShot1:      ["Compartí el .ipa con TrollStore",         "Share the .ipa to TrollStore"],
+  installIOSShot1Desc:  ["Abrí Archivos › Descargas, tocá Bitly.ipa y elegí «Abrir con TrollStore».",
+                                                                    "Open Files › Downloads, tap Bitly.ipa and choose «Open with TrollStore»."],
+  installIOSShot2:      ["Si usás Sideloadly, confiá el perfil",    "Using Sideloadly? Trust the profile"],
+  installIOSShot2Desc:  ["Ajustes › General › VPN y gestión de dispositivos › Confiar en tu Apple ID.",
+                                                                    "Settings › General › VPN & Device Management › Trust your Apple ID."],
+  installIOSShot3:      ["¡Listo! Bitly en tu iPhone",              "Done! Bitly on your iPhone"],
+  installIOSShot3Desc:  ["La app queda en la pantalla de inicio; con TrollStore no caduca.",
+                                                                    "The app stays on your home screen; with TrollStore it never expires."],
+
+  // ── Capturas de macOS ──
+  installMacShot1:      ["Arrastrá Bitly a Aplicaciones",           "Drag Bitly into Applications"],
+  installMacShot1Desc:  ["Al abrir el .dmg aparece esta ventana: arrastrá el ícono a la carpeta Aplicaciones.",
+                                                                    "When you open the .dmg this window appears: drag the icon into the Applications folder."],
+  installMacShot2:      ["Si macOS bloquea la app",                 "If macOS blocks the app"],
+  installMacShot2Desc:  ["Ese aviso es de Gatekeeper: clic derecho sobre Bitly › Abrir, o quitá la cuarentena desde la Terminal.",
+                                                                    "That warning comes from Gatekeeper: right-click Bitly › Open, or clear the quarantine from the Terminal."],
+  installMacShot3:      ["Quitar la cuarentena con un comando",     "Clear the quarantine with one command"],
+  installMacShot3Desc:  ["Pegalo en la Terminal y abrí Bitly otra vez desde Aplicaciones.",
+                                                                    "Paste it in the Terminal and open Bitly again from Applications."],
+
   // ── Release modal ──
   releaseTitle:         ["Descargar Bitly",                        "Download Bitly"],
   releaseSubtitle:      ["Selecciona la versión para tu dispositivo","Choose the version for your device"],
@@ -489,5 +518,6 @@ export const DICT: Record<string, [string, string]> = {
                            "The DMG file is the standard macOS installer. You just need to drag the app to the Applications folder."],
   releaseSelectArch:      ["Elegí la versión para tu arquitectura:",  "Choose the version for your architecture:"],
   releaseDownloadFile:  ["Descargá el archivo:",                    "Download the file:"],
-  releaseSeeGuide:      ["Ver el paso a paso con capturas",         "See the step-by-step with screenshots"],
+  releaseNotSure:       ["¿No sabés cómo instalar?",                "Not sure how to install?"],
+  releaseNotSureDesc:   ["Te llevamos al paso a paso con capturas", "We'll take you to the step-by-step with screenshots"],
 };

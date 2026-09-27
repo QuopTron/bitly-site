@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iOS · Bitly instalada</title>
+<style>
+  :root{--tinta:#fff;--gris:rgba(255,255,255,.85)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;color:var(--tinta);
+    font-family:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .pantalla{position:relative;width:100%;height:100%;
+    background:
+      radial-gradient(70% 50% at 20% 8%,rgba(86,180,255,.45) 0%,transparent 60%),
+      radial-gradient(80% 60% at 85% 78%,rgba(140,102,255,.5) 0%,transparent 62%),
+      linear-gradient(160deg,#132b47 0%,#141a35 45%,#1b1230 100%)}
+
+  .estado{height:52px;padding:0 26px 0 30px;display:flex;align-items:center;justify-content:space-between;
+    font-size:15px;font-weight:600}
+  .isla{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:104px;height:30px;border-radius:16px;background:#000}
+  .estado .iconos{display:flex;align-items:center;gap:6px}
+
+  .grilla{display:grid;grid-template-columns:repeat(4,1fr);gap:22px 18px;padding:14px 22px 0}
+  .app{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .ico{width:62px;height:62px;border-radius:15px;display:grid;place-items:center;
+    box-shadow:0 6px 14px rgba(0,0,0,.35)}
+  .etq{font-size:12px;color:var(--gris);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:72px}
+  .nueva .ico{box-shadow:0 0 0 3px rgba(255,255,255,.9),0 8px 18px rgba(0,0,0,.4)}
+  .nueva .etq{font-weight:700;color:#fff}
+
+  .puntos{position:absolute;left:0;right:0;bottom:132px;display:flex;justify-content:center;gap:8px}
+  .puntos i{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.4)}
+  .puntos i.on{background:#fff}
+
+  .dock{position:absolute;left:12px;right:12px;bottom:22px;height:96px;border-radius:34px;
+    background:rgba(255,255,255,.16);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);
+    display:flex;align-items:center;justify-content:space-around;padding:0 18px}
+  .dock .ico{width:58px;height:58px;border-radius:14px}
+
+  .aviso{position:absolute;left:16px;right:16px;bottom:138px;background:rgba(15,20,35,.72);
+    border:1px solid rgba(120,220,180,.4);border-radius:16px;padding:10px 14px;display:flex;align-items:center;gap:10px;
+    backdrop-filter:blur(10px)}
+  .aviso .txt{font-size:12.5px;line-height:1.35}
+  .aviso b{color:#7BE0B7}
+</style>
+</head>
+<body>
+<div class="pantalla">
+  <div class="estado">
+    <span>9:41</span>
+    <div class="isla"></div>
+    <div class="iconos">
+      <svg width="18" height="13" viewBox="0 0 18 13" aria-hidden="true">
+        <rect x="0" y="8" width="3" height="5" rx="1" fill="#fff"/><rect x="4.6" y="5.6" width="3" height="7.4" rx="1" fill="#fff"/>
+        <rect x="9.2" y="3" width="3" height="10" rx="1" fill="#fff"/><rect x="13.8" y="0.6" width="3" height="12.4" rx="1" fill="#fff"/>
+      </svg>
+      <svg width="17" height="12" viewBox="0 0 17 12" aria-hidden="true"><path d="M8.5 10.4 1.6 3.6a10 10 0 0 1 13.8 0L8.5 10.4Z" fill="#fff"/></svg>
+      <svg width="26" height="13" viewBox="0 0 26 13" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="21" height="12" rx="3.5" stroke="rgba(255,255,255,.6)"/>
+        <rect x="2.2" y="2.2" width="15" height="8.6" rx="2" fill="#fff"/>
+        <path d="M23.4 4.6v3.8c1-.3 1.5-.9 1.5-1.9s-.5-1.6-1.5-1.9Z" fill="rgba(255,255,255,.7)"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="grilla">
+    <div class="app nueva">
+      <div class="ico" style="background:linear-gradient(140deg,#7BE0B7 0%,#3FC7A6 55%,#1E9E8A 100%)">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 18V6.6l10-2v10" stroke="#08312a" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="6.6" cy="18" r="2.6" stroke="#08312a" stroke-width="1.9"/>
+          <circle cx="16.6" cy="14.6" r="2.6" stroke="#08312a" stroke-width="1.9"/>
+        </svg>
+      </div>
+      <div class="etq">Bitly</div>
+    </div>
+
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#ff7a7a,#e0344f)">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 18V6l10-2v11" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.6" cy="18" r="2.4" stroke="#fff" stroke-width="1.9"/><circle cx="16.6" cy="15" r="2.4" stroke="#fff" stroke-width="1.9"/></svg>
+    </div><div class="etq">Música</div></div>
+
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#ffd479,#f5a623)"></div><div class="etq">Fotos</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#79c7ff,#1f7fe0)"></div><div class="etq">Correo</div></div>
+
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#b18cff,#6b3ff0)"></div><div class="etq">Ajustes</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#7ee0a8,#25a45f)"></div><div class="etq">Notas</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#9ad7ff,#2b8ce0)"></div><div class="etq">Safari</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#ffb37a,#e0762b)"></div><div class="etq">Archivos</div></div>
+
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#8fa4bd,#4a5f77)"></div><div class="etq">TrollStore</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#c2c9d6,#8a94a6)"></div><div class="etq">Cámara</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#ff9ec4,#e04a86)"></div><div class="etq">Salud</div></div>
+    <div class="app"><div class="ico" style="background:linear-gradient(150deg,#a8e6c2,#3aa678)"></div><div class="etq">Mapas</div></div>
+  </div>
+
+  <div class="aviso">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="#7BE0B7" stroke-width="1.8"/>
+      <path d="m8.4 12.4 2.4 2.4 4.8-5.2" stroke="#7BE0B7" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="txt"><b>Bitly quedó instalada.</b> Abrila y elegí tu carpeta de música.</div>
+  </div>
+
+  <div class="puntos"><i class="on"></i><i></i><i></i></div>
+
+  <div class="dock">
+    <div class="ico" style="background:linear-gradient(150deg,#8fd6ff,#2b8ce0)"></div>
+    <div class="ico" style="background:linear-gradient(150deg,#8ef0b4,#2aa869)"></div>
+    <div class="ico" style="background:linear-gradient(150deg,#ffc79a,#e2802b)"></div>
+    <div class="ico" style="background:linear-gradient(150deg,#b9a6ff,#6746e0)"></div>
+  </div>
+</div>
+</body>
+</html>

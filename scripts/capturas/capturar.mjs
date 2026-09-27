@@ -268,10 +268,14 @@ async function rectDe(ses, selector, { pad = 0, viewport, minimo = { w: 100, h: 
 
 /* ─────────────────────────── Tareas ─────────────────────────── */
 
-const VISTA_CELU = { w: 390, h: 800, dpr: 2, movil: true };
-const VISTA_CELU_ALTO = { w: 390, h: 844, dpr: 2, movil: true };
+// dpr 3 en celular/iPhone y dpr 2 en escritorio: las capturas se muestran a ~200 px
+// de ancho, así que quedan nítidas en pantallas 3x (retina y gama alta).
+const VISTA_CELU = { w: 390, h: 800, dpr: 3, movil: true };
+const VISTA_CELU_ALTO = { w: 390, h: 844, dpr: 3, movil: true };
+const VISTA_IOS = { w: 390, h: 844, dpr: 3, movil: true };
 const VISTA_PC = { w: 1440, h: 860, dpr: 2 };
-const VISTA_TV = { w: 1600, h: 900, dpr: 1 };
+const VISTA_MAC = { w: 1440, h: 900, dpr: 2 };
+const VISTA_TV = { w: 1600, h: 900, dpr: 2 };
 
 const MOCK = (n) => pathToFileURL(path.join(AQUI, "mock", n)).href;
 
@@ -396,6 +400,67 @@ const TAREAS = {
         await ir(ses, MOCK("tv-downloader.html"));
         await dormir(500);
         return { clip: { x: 0, y: 0, width: VISTA_TV.w, height: VISTA_TV.h } };
+      },
+    },
+  ],
+  ios: [
+    {
+      archivo: "ios-1-compartir.webp",
+      viewport: VISTA_IOS,
+      async correr(ses) {
+        await ir(ses, MOCK("ios-compartir.html"));
+        await dormir(500);
+        return { clip: { x: 0, y: 0, width: VISTA_IOS.w, height: VISTA_IOS.h } };
+      },
+    },
+    {
+      archivo: "ios-2-confiar.webp",
+      viewport: VISTA_IOS,
+      async correr(ses) {
+        await ir(ses, MOCK("ios-confiar.html"));
+        await dormir(500);
+        return { clip: { x: 0, y: 0, width: VISTA_IOS.w, height: VISTA_IOS.h } };
+      },
+    },
+    {
+      archivo: "ios-3-inicio.webp",
+      viewport: VISTA_IOS,
+      async correr(ses) {
+        await ir(ses, MOCK("ios-inicio.html"));
+        await dormir(500);
+        return { clip: { x: 0, y: 0, width: VISTA_IOS.w, height: VISTA_IOS.h } };
+      },
+    },
+  ],
+  mac: [
+    {
+      archivo: "mac-1-dmg.webp",
+      viewport: VISTA_MAC,
+      async correr(ses) {
+        await ir(ses, MOCK("mac-dmg.html"));
+        await dormir(500);
+        const clip = await rectDe(ses, "#ventana", { pad: 46, viewport: VISTA_MAC, minimo: { w: 500, h: 300 } });
+        return { clip: { ...clip, masAlla: true } };
+      },
+    },
+    {
+      archivo: "mac-2-gatekeeper.webp",
+      viewport: VISTA_MAC,
+      async correr(ses) {
+        await ir(ses, MOCK("mac-gatekeeper.html"));
+        await dormir(600); // el cursor de la Terminal parpadea; acá sólo esperamos layout
+        const clip = await rectDe(ses, "#bloque", { pad: 44, viewport: VISTA_MAC, minimo: { w: 400, h: 250 } });
+        return { clip: { ...clip, masAlla: true } };
+      },
+    },
+    {
+      archivo: "mac-3-terminal.webp",
+      viewport: VISTA_MAC,
+      async correr(ses) {
+        await ir(ses, MOCK("mac-terminal.html"));
+        await dormir(500);
+        const clip = await rectDe(ses, "#ventana", { pad: 44, viewport: VISTA_MAC, minimo: { w: 500, h: 150 } });
+        return { clip: { ...clip, masAlla: true } };
       },
     },
   ],
@@ -573,7 +638,27 @@ async function revisarSeccion(ses) {
   );
   if (!lente.listo) throw new Error("La vista ampliada no mostró la imagen");
 
-  return `${medidas.ventana}px · scroll ${medidas.scroll} · sección ${medidas.seccion}×${medidas.alto} | ${detalle.join(" · ")} | lente: ${lente.texto}`;
+  // El botón de descarga al pie de la guía debe abrir el modal con los archivos.
+  await js(ses, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  await dormir(300);
+  await js(ses, `document.querySelector('#instalar [role=tabpanel] > button').click()`);
+  await esperarPor(ses, "document.querySelector('.fixed.inset-0.z-50')", { nombre: "modal de descargas", tiempo: 8000 });
+  const modal = await medir(
+    ses,
+    `(() => {
+      const caja = document.querySelector('.fixed.inset-0.z-50');
+      const texto = caja.innerText;
+      return JSON.stringify({
+        archivos: caja.querySelectorAll('a[href]').length,
+        diceNoSabes: /sab[eé]s c[oó]mo instalar/i.test(texto),
+        diceSinVersiones: /No hay versiones/i.test(texto),
+      });
+    })()`,
+    (v) => v.archivos > 0 || v.diceSinVersiones,
+  );
+  if (!modal.diceNoSabes) throw new Error("El modal no muestra el botón «¿No sabés cómo instalar?»");
+
+  return `${medidas.ventana}px · scroll ${medidas.scroll} · sección ${medidas.seccion}×${medidas.alto} | ${detalle.join(" · ")} | lente: ${lente.texto} | modal: ${modal.archivos} enlaces`;
 }
 
 TAREAS.revision = ANCHOS_REVISION.map((w) => ({

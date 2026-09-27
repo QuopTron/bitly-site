@@ -4,9 +4,9 @@ Genera las imágenes de `src/assets/capturas/` que usa la sección **«Instalá 
 (`src/components/install/`). Todas salen de Chrome sin ventana, controlado por DevTools Protocol.
 
 ```bash
-node scripts/capturas/capturar.mjs              # todo: celular + pc + tv
-node scripts/capturas/capturar.mjs celular pc   # sólo algunos grupos
-node scripts/capturas/capturar.mjs revision     # no guarda: mide la sección en 7 anchos
+node scripts/capturas/capturar.mjs                       # todo: celular, pc, tv, ios y mac
+node scripts/capturas/capturar.mjs celular pc            # sólo algunos grupos
+node scripts/capturas/capturar.mjs revision              # no guarda: mide la sección en 7 anchos
 ```
 
 ## De dónde sale cada captura
@@ -22,9 +22,20 @@ node scripts/capturas/capturar.mjs revision     # no guarda: mide la sección en
 | `pc-2-descargas` | sitio en vivo, recorte del modal con los `.exe` |
 | `pc-3-smartscreen` | maqueta `mock/windows-smartscreen.html` |
 | `tv-1-downloader` | maqueta `mock/tv-downloader.html` |
+| `ios-1-compartir` | maqueta `mock/ios-compartir.html` (compartir el `.ipa` con TrollStore) |
+| `ios-2-confiar` | maqueta `mock/ios-confiar.html` (confiar en el perfil de Sideloadly) |
+| `ios-3-inicio` | maqueta `mock/ios-inicio.html` (Bitly en la pantalla de inicio) |
+| `mac-1-dmg` | maqueta `mock/mac-dmg.html` (arrastrar a Aplicaciones) |
+| `mac-2-gatekeeper` | maqueta `mock/mac-gatekeeper.html` (aviso de Gatekeeper) |
+| `mac-3-terminal` | maqueta `mock/mac-terminal.html` (comando para quitar la cuarentena) |
 
-Las maquetas de `mock/` son pantallas de sistema (Android, Windows, Downloader) dibujadas en
-HTML para que se vean igual que en un dispositivo real: no se pueden capturar desde el navegador.
+Las maquetas de `mock/` son pantallas de sistema (Android, iOS, Windows, macOS, Downloader)
+dibujadas en HTML para que se vean igual que en un dispositivo real: no se pueden capturar desde
+el navegador, haría falta el aparato de verdad.
+
+Las capturas del celular salen a 3x y las de escritorio a 2x, así se ven nítidas en pantallas de
+alta densidad. Ojo con el peso: cada WebP queda entre 30 y 160 KB, y la galería carga sólo la
+pestaña activa.
 
 ## Variables de entorno
 

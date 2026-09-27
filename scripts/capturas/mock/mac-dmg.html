@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macOS · arrastrar a Aplicaciones</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;
+    font-family:"SF Pro Text",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{background:
+    radial-gradient(90% 70% at 15% 12%,#3b2f63 0%,transparent 55%),
+    radial-gradient(80% 80% at 88% 82%,#1f4a6b 0%,transparent 60%),
+    linear-gradient(150deg,#161a2b 0%,#101425 55%,#0b0f1c 100%);
+    display:grid;place-items:center}
+
+  #ventana{width:720px;background:#F3F3F5;border-radius:10px;overflow:hidden;
+    box-shadow:0 34px 70px rgba(0,0,0,.62),0 0 0 .5px rgba(255,255,255,.18) inset}
+
+  .titulo{height:38px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#E6E6EA;
+    border-bottom:1px solid #D2D2D8}
+  .semáforo{display:flex;gap:7px}
+  .semáforo i{width:11px;height:11px;border-radius:50%;display:block}
+  .titulo .nombre{flex:1;text-align:center;font-size:12.5px;font-weight:600;color:#4b4b52;margin-right:-80px}
+
+  .cuerpo{position:relative;height:400px;background:
+    linear-gradient(180deg,#FBFBFC 0%,#EFEFF2 100%);
+    display:flex;align-items:center;justify-content:center;gap:150px}
+
+  .item{display:flex;flex-direction:column;align-items:center;gap:12px;z-index:2}
+  .item .etq{font-size:12.5px;color:#3a3a40;font-weight:500}
+
+  .squircle{width:120px;height:120px;border-radius:28px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#7BE0B7 0%,#3FC7A6 55%,#1E9E8A 100%);
+    box-shadow:0 10px 22px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.06)}
+
+  .carpeta{width:128px;height:104px;position:relative}
+  .carpeta .atras{position:absolute;left:0;top:0;width:74px;height:22px;border-radius:7px 7px 0 0;background:#4AA8EE}
+  .carpeta .frente{position:absolute;left:0;top:16px;width:128px;height:88px;border-radius:8px 8px 10px 10px;
+    background:linear-gradient(180deg,#59B7F5 0%,#3D9AE4 100%);box-shadow:0 8px 16px rgba(0,0,0,.2)}
+  .carpeta .brillo{position:absolute;left:0;top:16px;width:128px;height:26px;border-radius:8px 8px 0 0;
+    background:linear-gradient(180deg,rgba(255,255,255,.35),transparent)}
+
+  .flecha{position:absolute;left:0;right:0;top:44%;display:flex;justify-content:center;z-index:1}
+  .flotante{position:absolute;left:50%;top:-34px;transform:translateX(-50%);background:#3a3a40;color:#fff;
+    font-size:11.5px;padding:6px 12px;border-radius:8px;white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.25)}
+  .flotante::after{content:"";position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);
+    border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #3a3a40}
+
+  .pie{height:34px;background:#E6E6EA;border-top:1px solid #D2D2D8;display:flex;align-items:center;
+    justify-content:center;gap:6px;font-size:11.5px;color:#5b5b62}
+</style>
+</head>
+<body>
+  <div id="ventana">
+    <div class="titulo">
+      <div class="semáforo"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+      <div class="nombre">Bitly 1.0.0</div>
+    </div>
+
+    <div class="cuerpo">
+      <svg style="position:absolute;left:0;right:0;top:50%;width:100%;height:60px;transform:translateY(4px)" viewBox="0 0 720 60" fill="none" aria-hidden="true">
+        <path d="M262 30h196" stroke="#B9B9C2" stroke-width="3" stroke-linecap="round" stroke-dasharray="9 9"/>
+        <path d="m470 18 16 12-16 12" stroke="#B9B9C2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+
+      <div class="item" style="position:relative">
+        <div class="flotante">Arrastrá Bitly a Aplicaciones</div>
+        <div class="squircle">
+          <svg width="58" height="58" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M9 18V6.6l10-2v10" stroke="#08312a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="6.6" cy="18" r="2.6" stroke="#08312a" stroke-width="1.8"/>
+            <circle cx="16.6" cy="14.6" r="2.6" stroke="#08312a" stroke-width="1.8"/>
+          </svg>
+        </div>
+        <div class="etq">Bitly</div>
+      </div>
+
+      <div class="item">
+        <div class="carpeta">
+          <div class="atras"></div>
+          <div class="frente"></div>
+          <div class="brillo"></div>
+        </div>
+        <div class="etq">Aplicaciones</div>
+      </div>
+    </div>
+
+    <div class="pie">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 3v12" stroke="#5b5b62" stroke-width="2" stroke-linecap="round"/>
+        <path d="m7 10 5 5 5-5" stroke="#5b5b62" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M5 20h14" stroke="#5b5b62" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Bitly se copia a la carpeta Aplicaciones
+    </div>
+  </div>
+</body>
+</html>

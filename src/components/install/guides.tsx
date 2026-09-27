@@ -12,6 +12,12 @@ import pc1 from "@/assets/capturas/pc-1-sitio.webp";
 import pc2 from "@/assets/capturas/pc-2-descargas.webp";
 import pc3 from "@/assets/capturas/pc-3-smartscreen.webp";
 import tv1 from "@/assets/capturas/tv-1-downloader.webp";
+import ios1 from "@/assets/capturas/ios-1-compartir.webp";
+import ios2 from "@/assets/capturas/ios-2-confiar.webp";
+import ios3 from "@/assets/capturas/ios-3-inicio.webp";
+import mac1 from "@/assets/capturas/mac-1-dmg.webp";
+import mac2 from "@/assets/capturas/mac-2-gatekeeper.webp";
+import mac3 from "@/assets/capturas/mac-3-terminal.webp";
 
 export const TROLLSTORE_URL = "https://github.com/opa334/TrollStore";
 export const SIDELOADLY_URL = "https://sideloadly.io/";
@@ -28,8 +34,10 @@ export function Paso({ num, titulo, children }: { num: number; titulo: string; c
         {num}
       </div>
       <div className="flex-1 space-y-1">
-        <p className="text-xs font-semibold sm:text-sm">{titulo}</p>
-        {children && <div className="text-[10px] leading-relaxed text-muted-foreground sm:text-xs">{children}</div>}
+        <p className="text-xs font-semibold sm:text-sm md:text-[15px]">{titulo}</p>
+        {children && (
+          <div className="text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{children}</div>
+        )}
       </div>
     </li>
   );
@@ -53,7 +61,9 @@ export function Aviso({
   const Icono = tono === "atencion" ? AlertCircle : tono === "listo" ? CheckCircle2 : Info;
 
   return (
-    <div className={`rounded-xl border p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs ${estilos.caja}`}>
+    <div
+      className={`rounded-xl border p-3 text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px] ${estilos.caja}`}
+    >
       <p className="flex items-start gap-2">
         <Icono className={`mt-[1px] h-3.5 w-3.5 flex-shrink-0 ${estilos.color}`} />
         <span>
@@ -113,11 +123,14 @@ function Via({
   titulo,
   insignia,
   descripcion,
+  nota,
   children,
 }: {
   titulo: string;
   insignia?: string;
   descripcion: string;
+  /** Contenido extra antes de los pasos (por ejemplo, los requisitos). */
+  nota?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -130,7 +143,8 @@ function Via({
           </span>
         )}
       </div>
-      <p className="mb-4 text-[11px] leading-relaxed text-muted-foreground sm:text-xs">{descripcion}</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{descripcion}</p>
+      {nota && <div className="mb-4 mt-3">{nota}</div>}
       <ol className="space-y-3">{children}</ol>
     </div>
   );
@@ -169,6 +183,24 @@ function capturasPC(t: (k: string) => string): Captura[] {
   }));
 }
 
+function capturasIOS(t: (k: string) => string): Captura[] {
+  return [1, 2, 3].map((n) => ({
+    src: [ios1, ios2, ios3][n - 1],
+    alt: t(`installIOSShot${n}`),
+    titulo: t(`installIOSShot${n}`),
+    pie: t(`installIOSShot${n}Desc`),
+  }));
+}
+
+function capturasMac(t: (k: string) => string): Captura[] {
+  return [1, 2, 3].map((n) => ({
+    src: [mac1, mac2, mac3][n - 1],
+    alt: t(`installMacShot${n}`),
+    titulo: t(`installMacShot${n}`),
+    pie: t(`installMacShot${n}Desc`),
+  }));
+}
+
 /* ─────────────────────────── Guías ─────────────────────────── */
 
 /** Celular (Android): capturas + pasos + el permiso de archivos. */
@@ -176,7 +208,7 @@ export function GuiaCelular({ conCapturas = false }: { conCapturas?: boolean }) 
   const t = useI18n();
   return (
     <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("installPhoneIntro")}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm md:text-[15px]">{t("installPhoneIntro")}</p>
 
       {conCapturas ? (
         <Gallery capturas={capturasCelular(t)} tipo={"telefono" as TipoMarco} url={SITIO} />
@@ -202,7 +234,7 @@ export function GuiaPC({ conCapturas = false }: { conCapturas?: boolean }) {
   const t = useI18n();
   return (
     <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("installPCIntro")}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm md:text-[15px]">{t("installPCIntro")}</p>
 
       {conCapturas ? (
         <Gallery capturas={capturasPC(t)} tipo={"ventana" as TipoMarco} url={SITIO} />
@@ -235,7 +267,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
 
   return (
     <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("installTVIntro")}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm md:text-[15px]">{t("installTVIntro")}</p>
 
       {conCapturas && (
         <Gallery
@@ -261,7 +293,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
               <p className="text-xs font-bold text-primary">{c.titulo}</p>
               <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground sm:text-[11px]">{c.lista}</p>
               <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-background/50 px-3 py-2 ring-1 ring-border/50">
-                <span className="font-mono text-lg font-bold tracking-[0.16em] text-foreground sm:text-xl">
+                <span className="font-mono text-lg font-bold tracking-[0.16em] text-foreground sm:text-xl md:text-2xl">
                   {c.codigo}
                 </span>
                 <CopiarBoton texto={c.codigo} />
@@ -286,38 +318,41 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
 }
 
 /** iPhone / iPad: TrollStore (sin PC) o Sideloadly (con PC). */
-export function GuiaIOS() {
+export function GuiaIOS({ conCapturas = false }: { conCapturas?: boolean }) {
   const t = useI18n();
   return (
     <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("installIOSIntro")}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm md:text-[15px]">{t("installIOSIntro")}</p>
 
       <Aviso tono="info" titulo={t("installIOSNoteTitle")}>
         {t("installIOSNoteDesc")}
       </Aviso>
 
-      <div className="flex flex-wrap gap-2">
-        <span className="rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[10px] text-muted-foreground">
-          {t("installIOSReqTitle")}
-        </span>
-        {["installIOSReq1", "installIOSReq2", "installIOSReq3"].map((k, i) => (
-          <span
-            key={k}
-            className={`rounded-full px-2.5 py-1 text-[10px] ${
-              i === 2
-                ? "border border-amber-500/30 bg-amber-500/5 text-amber-400"
-                : "border border-primary/30 bg-primary/5 text-primary"
-            }`}
-          >
-            {t(k)}
-          </span>
-        ))}
-      </div>
+      {conCapturas && <Gallery capturas={capturasIOS(t)} tipo={"telefono" as TipoMarco} />}
 
       <Via
         titulo={t("installIOSMethodA")}
         insignia={t("installIOSMethodAbadge")}
         descripcion={t("installIOSMethodADesc")}
+        nota={
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[10px] text-muted-foreground">
+              {t("installIOSReqTitle")}
+            </span>
+            {["installIOSReq1", "installIOSReq2", "installIOSReq3"].map((k, i) => (
+              <span
+                key={k}
+                className={`rounded-full px-2.5 py-1 text-[10px] ${
+                  i === 2
+                    ? "border border-amber-500/30 bg-amber-500/5 text-amber-400"
+                    : "border border-primary/30 bg-primary/5 text-primary"
+                }`}
+              >
+                {t(k)}
+              </span>
+            ))}
+          </div>
+        }
       >
         <Paso num={1} titulo={t("releaseIOSStep1Title")}>
           <p>{t("releaseIOSStep1Desc")}</p>
@@ -351,11 +386,13 @@ export function GuiaIOS() {
 }
 
 /** macOS: el .dmg y la puerta de Gatekeeper. */
-export function GuiaMac() {
+export function GuiaMac({ conCapturas = false }: { conCapturas?: boolean }) {
   const t = useI18n();
   return (
     <div className="space-y-5">
-      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("installMacIntro")}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-sm md:text-[15px]">{t("installMacIntro")}</p>
+
+      {conCapturas && <Gallery capturas={capturasMac(t)} tipo={"plano" as TipoMarco} />}
 
       <ol className="space-y-3">
         {[1, 2, 3].map((n) => (

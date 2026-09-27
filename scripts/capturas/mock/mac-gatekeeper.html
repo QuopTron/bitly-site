@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macOS · aviso de Gatekeeper</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;
+    font-family:"SF Pro Text",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{background:
+    radial-gradient(90% 70% at 15% 12%,#3b2f63 0%,transparent 55%),
+    radial-gradient(80% 80% at 88% 82%,#1f4a6b 0%,transparent 60%),
+    linear-gradient(150deg,#161a2b 0%,#101425 55%,#0b0f1c 100%);
+    display:grid;place-items:center}
+
+  #bloque{display:flex;flex-direction:column;align-items:center;gap:22px}
+
+  #ventana{width:430px;background:rgba(246,246,248,.98);backdrop-filter:blur(20px);border-radius:12px;
+    box-shadow:0 30px 70px rgba(0,0,0,.6),0 0 0 .5px rgba(255,255,255,.2) inset;overflow:hidden;text-align:center}
+
+  .cuerpo{padding:22px 26px 18px}
+  .squircle{width:66px;height:66px;border-radius:16px;margin:0 auto 14px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#7BE0B7 0%,#3FC7A6 55%,#1E9E8A 100%);
+    box-shadow:0 8px 18px rgba(0,0,0,.2)}
+  h1{font-size:13.5px;font-weight:600;line-height:1.35;color:#1d1d1f}
+  p{margin-top:9px;font-size:11.5px;line-height:1.45;color:#6b6b70}
+  .cuenta{margin-top:12px;display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#8a8a90;
+    border-top:1px solid #E0E0E4;padding-top:10px}
+
+  .botones{display:flex;border-top:1px solid #D7D7DC}
+  .botones button{flex:1;height:44px;border:none;background:transparent;font-family:inherit;font-size:12.5px;
+    color:#1d1d1f;cursor:default}
+  .botones button + button{border-left:1px solid #D7D7DC}
+  .botones .acento{color:#0a6cff;font-weight:600}
+
+  .pista{background:rgba(15,20,35,.78);border:1px solid rgba(120,220,180,.4);color:#dff7ee;font-size:12.5px;
+    padding:9px 16px;border-radius:10px;white-space:nowrap}
+  .pista b{color:#7BE0B7}
+</style>
+</head>
+<body>
+  <div id="bloque">
+  <div id="ventana">
+    <div class="cuerpo">
+      <div class="squircle">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 18V6.6l10-2v10" stroke="#08312a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="6.6" cy="18" r="2.6" stroke="#08312a" stroke-width="1.8"/>
+          <circle cx="16.6" cy="14.6" r="2.6" stroke="#08312a" stroke-width="1.8"/>
+        </svg>
+      </div>
+      <h1>«Bitly» no se puede abrir porque proviene de un desarrollador no identificado.</h1>
+      <p>Apple no puede verificar que esta app esté libre de software malicioso.</p>
+      <div class="cuenta">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3 4.6 5.7v5.6c0 4.3 3 8 7.4 9.4 4.4-1.4 7.4-5.1 7.4-9.4V5.7L12 3Z" stroke="#8a8a90" stroke-width="1.7" stroke-linejoin="round"/>
+        </svg>
+        Gatekeeper · Verificación de Apple
+      </div>
+    </div>
+
+    <div class="botones">
+      <button>Mover a la papelera</button>
+      <button class="acento">Abrir igualmente</button>
+    </div>
+  </div>
+
+  <div class="pista">Clic derecho sobre la app › <b>Abrir</b> › «Abrir»</div>
+  </div>
+</body>
+</html>

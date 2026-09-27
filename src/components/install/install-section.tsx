@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Apple, Laptop, MessageCircle, Monitor, Smartphone, Tv, Wrench } from "lucide-react";
+import { Apple, Download, Laptop, MessageCircle, Monitor, Smartphone, Tv, Wrench } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { GuiaCelular, GuiaIOS, GuiaMac, GuiaPC, GuiaTV } from "./guides";
 
@@ -31,7 +31,18 @@ const PESTANAS: { id: Plataforma; clave: string; Icono: typeof Smartphone }[] = 
   { id: "mac", clave: "installTabMac", Icono: Laptop },
 ];
 
-export default function InstallSection() {
+/** Botón de descarga al pie de cada guía: lleva al modal con los archivos. */
+const DESCARGA: Record<Plataforma, { plataforma: Descarga; clave: string }> = {
+  phone: { plataforma: "android", clave: "installGetPhone" },
+  pc: { plataforma: "windows", clave: "installGetPC" },
+  tv: { plataforma: "tv", clave: "installGetTV" },
+  ios: { plataforma: "ios", clave: "installGetIOS" },
+  mac: { plataforma: "macos", clave: "installGetMac" },
+};
+
+type Descarga = "windows" | "android" | "tv" | "ios" | "macos";
+
+export default function InstallSection({ onDownload }: { onDownload?: (p: Descarga) => void }) {
   const t = useI18n();
   const [activa, setActiva] = useState<Plataforma>("phone");
 
@@ -92,8 +103,19 @@ export default function InstallSection() {
           {activa === "phone" && <GuiaCelular conCapturas />}
           {activa === "pc" && <GuiaPC conCapturas />}
           {activa === "tv" && <GuiaTV conCapturas />}
-          {activa === "ios" && <GuiaIOS />}
-          {activa === "mac" && <GuiaMac />}
+          {activa === "ios" && <GuiaIOS conCapturas />}
+          {activa === "mac" && <GuiaMac conCapturas />}
+
+          {onDownload && (
+            <button
+              type="button"
+              onClick={() => onDownload(DESCARGA[activa].plataforma)}
+              className="group mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-foreground px-5 py-3.5 text-sm font-semibold text-background shadow-lg shadow-foreground/20 transition hover:scale-[1.01] active:scale-[0.99] sm:text-base"
+            >
+              <Download className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 sm:h-5 sm:w-5" />
+              {t(DESCARGA[activa].clave)}
+            </button>
+          )}
         </div>
 
         <a

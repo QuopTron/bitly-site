@@ -109,7 +109,7 @@ export default function Index() {
           onOpenFaq={() => setShowFaq(true)}
         />
       </main>
-      <InstallSection />
+      <InstallSection onDownload={(p) => handleDownload(p, null)} />
       <PlansSection />
       <Footer />
       <MobileModal open={showMobile} onClose={() => setShowMobile(false)} />

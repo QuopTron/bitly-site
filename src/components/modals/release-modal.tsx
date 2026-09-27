@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { ArrowRight, Download, Smartphone, Monitor, Tv, Cpu, Info, Apple } from "lucide-react";
+import { Download, Smartphone, Monitor, Tv, Cpu, Info, Apple, CircleHelp } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import ModalWrapper from "@/components/ui/modal-wrapper";
-import { GuiaCelular, GuiaIOS, GuiaMac, GuiaPC, GuiaTV } from "@/components/install/guides";
 
 type ReleaseAsset = { name: string; browser_download_url: string; size: number };
 
@@ -145,9 +144,62 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
       icon={<Icon className="h-6 w-6 text-primary" />}
     >
       <div className="space-y-4">
+        {/* 1. Los archivos, primero: quien ya sabe instalar no necesita nada más. */}
+        <div className="space-y-2">
+          {isWindows && <WinAssets assets={filteredAssets} t={t} />}
+          {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
+          {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
+              {filteredAssets.map((asset) => (
+                <a
+                  key={asset.name}
+                  href={asset.browser_download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-semibold sm:text-sm">{asset.name}</div>
+                    <div className="text-[10px] text-muted-foreground sm:text-xs">{formatSize(asset.size)}</div>
+                  </div>
+                  <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          )}
+          {filteredAssets.length === 0 && (
+            <div className="rounded-xl border border-border bg-card/30 p-4 text-center text-xs text-muted-foreground sm:text-sm">
+              {t("releaseNoAssets")}
+            </div>
+          )}
+          {version && latestVersion && version !== latestVersion && (
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+              {t("releasePlatformBehind").replace("{version}", version).replace("{latest}", latestVersion)}
+            </p>
+          )}
+        </div>
+
+        {/* 2. El botón que cierra el modal y baja a la guía con capturas. */}
+        {onOpenGuide && (
+          <button
+            onClick={onOpenGuide}
+            className="flex w-full items-center gap-3 rounded-2xl border border-primary/35 bg-primary/[0.08] px-4 py-3 text-left transition hover:bg-primary/15"
+          >
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+              <CircleHelp className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-semibold text-primary sm:text-sm">{t("releaseNotSure")}</span>
+              <span className="block text-[10px] text-muted-foreground sm:text-xs">{t("releaseNotSureDesc")}</span>
+            </span>
+          </button>
+        )}
+
+        {/* 3. Datos de arquitectura, para quien quiera verificar su equipo. */}
         <button
           onClick={() => setShowInfo(!showInfo)}
-          className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2.5 text-left text-xs transition hover:bg-primary/10 sm:text-sm"
+          className="flex w-full items-center gap-2 rounded-xl border border-border/60 bg-card/30 px-3 py-2.5 text-left text-xs transition hover:bg-card/60 sm:text-sm"
         >
           <Cpu className="h-4 w-4 flex-shrink-0 text-primary" />
           <div className="flex-1">
@@ -183,57 +235,6 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
             )}
             <p className="pt-1 text-muted-foreground/70">{t("releaseArchHint")}</p>
           </div>
-        )}
-
-        {isTv && <GuiaTV />}
-        {isAndroid && <GuiaCelular />}
-        {isWindows && <GuiaPC />}
-        {isMacos && <GuiaMac />}
-        {isIos && <GuiaIOS />}
-
-        <div className="border-t border-border/40 pt-3">
-          {version && latestVersion && version !== latestVersion && (
-            <p className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
-              {t("releasePlatformBehind").replace("{version}", version).replace("{latest}", latestVersion)}
-            </p>
-          )}
-          {isWindows && <WinAssets assets={filteredAssets} t={t} />}
-          {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
-          {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
-              {filteredAssets.map((asset) => (
-                <a
-                  key={asset.name}
-                  href={asset.browser_download_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
-                >
-                  <div>
-                    <div className="text-xs font-semibold sm:text-sm">{asset.name}</div>
-                    <div className="text-[10px] text-muted-foreground sm:text-xs">{formatSize(asset.size)}</div>
-                  </div>
-                  <Download className="h-4 w-4 text-muted-foreground" />
-                </a>
-              ))}
-            </div>
-          )}
-          {filteredAssets.length === 0 && (
-            <div className="rounded-xl border border-border bg-card/30 p-4 text-center text-xs text-muted-foreground sm:text-sm">
-              {t("releaseNoAssets")}
-            </div>
-          )}
-        </div>
-
-        {onOpenGuide && (
-          <button
-            onClick={onOpenGuide}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 text-xs font-semibold text-primary transition hover:bg-primary/15 sm:text-sm"
-          >
-            <ArrowRight className="h-4 w-4" />
-            {t("releaseSeeGuide")}
-          </button>
         )}
       </div>
     </ModalWrapper>
