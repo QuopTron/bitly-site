@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "vite build",
-    "start": "node .output/server/index.mjs"
+    "start": "node .output/server/index.mjs",
+    "capturas": "node scripts/capturas/capturar.mjs",
+    "capturas:reales": "node scripts/capturas/reemplazar.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.115.0",

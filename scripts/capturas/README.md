@@ -37,6 +37,21 @@ Las capturas del celular salen a 3x y las de escritorio a 2x, así se ven nítid
 alta densidad. Ojo con el peso: cada WebP queda entre 30 y 160 KB, y la galería carga sólo la
 pestaña activa.
 
+## Reemplazarlas por capturas reales
+
+Las maquetas están bien para explicar el paso, pero con capturas de un dispositivo real se ve mucho
+mejor. El flujo es soltar archivos y correr un script:
+
+```bash
+pnpm capturas:reales --lista   # qué capturar y con qué nombre
+# … copiás las capturas en capturas-reales/ …
+pnpm capturas:reales           # convierte a WebP y reemplaza los assets
+```
+
+El detalle de cada hueco está en [`capturas-reales/LEEME.md`](../../capturas-reales/LEEME.md). El
+script reencuadra, escala y convierte; si falta un archivo o la captura parece de la pantalla
+equivocada, lo dice y no toca nada más.
+
 ## Variables de entorno
 
 | Variable | Por defecto | Para qué |

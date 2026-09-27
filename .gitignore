@@ -6,6 +6,17 @@ node_modules/
 .tanstack/
 .capturas-perfil/
 
+# Capturas originales (se convierten a WebP en src/assets/capturas con
+# `pnpm capturas:reales`; lo que se publica es el resultado)
+/capturas-reales/*.png
+/capturas-reales/*.PNG
+/capturas-reales/*.jpg
+/capturas-reales/*.JPG
+/capturas-reales/*.jpeg
+/capturas-reales/*.JPEG
+/capturas-reales/*.webp
+/capturas-reales/*.WEBP
+
 # Environment files
 .env
 

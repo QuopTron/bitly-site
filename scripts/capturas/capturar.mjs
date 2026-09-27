@@ -10,136 +10,20 @@
  *
  * Salida: src/assets/capturas/*.webp
  */
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { CONSOLA, abrirChrome, dormir, js, nuevaSesion } from "./lib/cdp.mjs";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "../..");
 const SALIDA = path.join(RAIZ, "src/assets/capturas");
 const PERFIL = path.join(RAIZ, ".capturas-perfil");
-const CHROME = process.env.CHROME_PATH ?? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const SITIO = process.env.SITIO_URL ?? "https://bitly-site.pages.dev";
 const PUERTO = Number(process.env.CDP_PORT ?? 9333);
 const CALIDAD = Number(process.env.CAPTURA_CALIDAD ?? 92);
 
-/* ────────────────────────────── CDP ────────────────────────────── */
-
-/** Últimos mensajes de consola de la página (se usan para explicar los timeouts). */
-const CONSOLA = [];
-
-class CDP {
-  static async conectar(url) {
-    const ws = new WebSocket(url);
-    await new Promise((ok, mal) => {
-      ws.onopen = ok;
-      ws.onerror = () => mal(new Error("No se pudo abrir la conexión CDP"));
-    });
-    return new CDP(ws);
-  }
-
-  constructor(ws) {
-    this.ws = ws;
-    this.n = 0;
-    this.pendientes = new Map();
-    ws.onmessage = (ev) => {
-      const m = JSON.parse(ev.data);
-      if (m.method === "Runtime.consoleAPICalled" || m.method === "Runtime.exceptionThrown") {
-        const args = m.params?.args ?? [m.params?.exceptionDetails?.exception];
-        const texto = args
-          .map((a) => (a && typeof a === "object" ? a.value ?? a.description ?? a.type : String(a)))
-          .join(" ");
-        CONSOLA.push(`${m.params.type ?? "exception"}: ${String(texto).slice(0, 160)}`);
-        if (CONSOLA.length > 60) CONSOLA.shift();
-      }
-      if (m.id === undefined) return;
-      const p = this.pendientes.get(m.id);
-      if (!p) return;
-      this.pendientes.delete(m.id);
-      if (m.error) p.mal(new Error(m.error.message));
-      else p.ok(m.result);
-    };
-    ws.onclose = () => {
-      for (const p of this.pendientes.values()) p.mal(new Error("CDP cerrado"));
-      this.pendientes.clear();
-    };
-  }
-
-  enviar(method, params = {}, sessionId) {
-    const id = ++this.n;
-    const msg = { id, method, params };
-    if (sessionId) msg.sessionId = sessionId;
-    this.ws.send(JSON.stringify(msg));
-    return new Promise((ok, mal) => this.pendientes.set(id, { ok, mal }));
-  }
-
-  cerrar() {
-    try {
-      this.ws.close();
-    } catch {}
-  }
-}
-
-const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function esperarChrome(intentos = 60) {
-  for (let i = 0; i < intentos; i++) {
-    try {
-      const r = await fetch(`http://127.0.0.1:${PUERTO}/json/version`);
-      if (r.ok) return await r.json();
-    } catch {}
-    await dormir(250);
-  }
-  throw new Error("Chrome no respondió en el puerto " + PUERTO);
-}
-
-/* ─────────────────────────── Sesiones ─────────────────────────── */
-
-async function nuevaSesion(browser, viewport) {
-  const { targetId } = await browser.enviar("Target.createTarget", { url: "about:blank" });
-  const { sessionId } = await browser.enviar("Target.attachToTarget", { targetId, flatten: true });
-  const ses = {
-    id: sessionId,
-    ev: (m, p = {}) => browser.enviar(m, p, sessionId),
-    async cerrar() {
-      await browser.enviar("Target.closeTarget", { targetId });
-    },
-  };
-  await ses.ev("Page.enable");
-  await ses.ev("Runtime.enable");
-  // Guarda errores de la página para poder explicar mejor los timeouts.
-  await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
-    source:
-      "window.__errores=[];" +
-      "addEventListener('error',e=>window.__errores.push(String(e.message||e.error)));" +
-      "addEventListener('unhandledrejection',e=>window.__errores.push('rejection: '+String(e.reason)));",
-  });
-  await aplicarViewport(ses, viewport);
-  return ses;
-}
-
-async function aplicarViewport(ses, { w, h, dpr = 2, movil = false }) {
-  await ses.ev("Emulation.setDeviceMetricsOverride", {
-    width: w,
-    height: h,
-    deviceScaleFactor: dpr,
-    mobile: movil,
-    screenWidth: w,
-    screenHeight: h,
-  });
-  await ses.ev("Emulation.setTouchEmulationEnabled", movil ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
-}
-
-async function js(ses, expresion) {
-  const r = await ses.ev("Runtime.evaluate", {
-    expression: expresion,
-    returnByValue: true,
-    awaitPromise: true,
-  });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "Error al evaluar JS");
-  return r.result.value;
-}
+/* Las utilidades de Chrome viven en ./lib/cdp.mjs, compartidas con reemplazar.mjs. */
 
 async function ir(ses, url) {
   await ses.ev("Page.navigate", { url });
@@ -674,38 +558,17 @@ TAREAS.revision = ANCHOS_REVISION.map((w) => ({
 
 async function main() {
   const grupos = process.argv.slice(2).filter((a) => !a.startsWith("-"));
-  const seleccion = grupos.length ? grupos : Object.keys(TAREAS);
+  // `revision` no entra en la corrida normal: no guarda capturas y necesita otra URL.
+  const seleccion = grupos.length ? grupos : Object.keys(TAREAS).filter((g) => g !== "revision");
   for (const g of seleccion) if (!TAREAS[g]) throw new Error(`Grupo desconocido: ${g}`);
 
-  if (!fs.existsSync(CHROME)) throw new Error(`No encontré Chrome en ${CHROME} (usá CHROME_PATH=…)`);
   fs.mkdirSync(SALIDA, { recursive: true });
-  fs.rmSync(PERFIL, { recursive: true, force: true });
 
   console.log(`▸ Chrome …`);
-  const chrome = spawn(
-    CHROME,
-    [
-      "--headless",
-      `--remote-debugging-port=${PUERTO}`,
-      `--user-data-dir=${PERFIL}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-extensions",
-      "--hide-scrollbars",
-      "--allow-file-access-from-files",
-      "--force-color-profile=srgb",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "about:blank",
-    ],
-    { stdio: "ignore" },
-  );
-
-  let browser;
+  const chrome = await abrirChrome({ puerto: PUERTO, perfil: PERFIL });
+  const browser = chrome.browser;
   try {
-    const info = await esperarChrome();
-    browser = await CDP.conectar(info.webSocketDebuggerUrl);
-    console.log(`▸ ${info.Browser}\n`);
+    console.log(`▸ ${chrome.info.Browser}\n`);
 
     for (const g of seleccion) {
       console.log(`▸ Grupo: ${g}${g === "revision" ? " (sólo medición, no guarda capturas)" : ""}`);
@@ -738,10 +601,7 @@ async function main() {
 
     console.log(`\n✔ Capturas en ${path.relative(RAIZ, SALIDA)}`);
   } finally {
-    browser?.cerrar();
-    chrome.kill();
-    await dormir(300);
-    fs.rmSync(PERFIL, { recursive: true, force: true });
+    await chrome.cerrar();
   }
 }
 
