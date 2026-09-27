@@ -18,7 +18,7 @@ export default function PlansSection() {
   const lang = getLanguage();
 
   return (
-    <section className="container mx-auto px-4 py-12 sm:px-6 sm:py-16 md:py-20">
+    <section id="planes" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
       <div className="mb-8 text-center sm:mb-10">
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Gem className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />

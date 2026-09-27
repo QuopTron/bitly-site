@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
 import { getLanguage } from "@/lib/i18n";
+import PremiumBubble from "@/components/layout/premium-bubble";
 import "../styles.css";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -48,7 +49,12 @@ const ErrorPage: ErrorRouteComponent = ({ error, reset }) => {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  return <QueryClientProvider client={queryClient}><Outlet /></QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Outlet />
+      <PremiumBubble />
+    </QueryClientProvider>
+  );
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({

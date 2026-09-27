@@ -409,6 +409,11 @@ async function revisarSeccion(ses) {
   if (process.env.STUB_SIN_BACKEND === "1") {
     await ses.ev("Page.addScriptToEvaluateOnNewDocument", { source: SIN_BACKEND });
   }
+  // El perfil de Chrome es persistente entre corridas: fija el idioma y la moneda
+  // por defecto para que las medidas no dependan de la corrida anterior.
+  await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
+    source: `try { localStorage.setItem('bitly_currency', 'BOB'); localStorage.setItem('bitly_lang', 'es'); } catch {}`,
+  });
   await ir(ses, SITIO);
   await esperarPor(ses, "document.querySelectorAll('#instalar [role=tab]').length === 5", {
     nombre: "sección #instalar con sus 5 pestañas",
@@ -542,7 +547,159 @@ async function revisarSeccion(ses) {
   );
   if (!modal.diceNoSabes) throw new Error("El modal no muestra el botón «¿No sabés cómo instalar?»");
 
-  return `${medidas.ventana}px · scroll ${medidas.scroll} · sección ${medidas.seccion}×${medidas.alto} | ${detalle.join(" · ")} | lente: ${lente.texto} | modal: ${modal.archivos} enlaces`;
+  // La burbuja de Premium acompaña en todo el sitio: precio vigente + contacto.
+  await js(ses, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
+  await dormir(500);
+  const burbuja = await medir(
+    ses,
+    `(() => {
+      const b = document.querySelector('button[aria-controls="bitly-premium-burbuja"]');
+      if (!b) return JSON.stringify({ hay: false });
+      const r = b.getBoundingClientRect();
+      return JSON.stringify({
+        hay: true,
+        abierta: b.getAttribute('aria-expanded') === 'true',
+        texto: b.innerText.replace(/\\s+/g, ' ').trim(),
+        dentro: r.left >= -1 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1,
+      });
+    })()`,
+    (v) => v.hay && v.dentro,
+  );
+  if (!burbuja.hay) throw new Error("No está la burbuja de Premium");
+  if (!burbuja.dentro) throw new Error("La burbuja de Premium se sale de la pantalla");
+  if (!/30/.test(burbuja.texto)) throw new Error(`La burbuja no muestra el precio vigente: “${burbuja.texto}”`);
+  if (burbuja.abierta) throw new Error("La burbuja tendría que arrancar cerrada");
+
+  // Se abre, muestra el contacto de WhatsApp con el precio dentro del mensaje
+  // y el panel tampoco desborda ni en 320 px.
+  await js(ses, `document.querySelector('button[aria-controls="bitly-premium-burbuja"]').click()`);
+  await esperarPor(ses, "document.querySelector('#bitly-premium-burbuja')", { nombre: "burbuja abierta", tiempo: 4000 });
+  const panel = await medir(
+    ses,
+    `(() => {
+      const p = document.querySelector('#bitly-premium-burbuja');
+      const wa = decodeURIComponent(p.querySelector('a[href^="https://wa.me/"]')?.getAttribute('href') || '');
+      const ig = p.querySelector('a[href*="instagram.com"]')?.getAttribute('href') || '';
+      const r = p.getBoundingClientRect();
+      return JSON.stringify({
+        wa,
+        ig,
+        texto: p.innerText.replace(/\\s+/g, ' ').trim().slice(0, 80),
+        dentro: r.left >= -1 && r.right <= window.innerWidth + 1 && r.top >= -1,
+        desborda: p.scrollWidth > Math.ceil(r.width) + 1,
+      });
+    })()`,
+    (v) => !!v.wa,
+  );
+  if (panel.desborda) throw new Error("El panel de la burbuja desborda a lo ancho");
+  if (!panel.dentro) throw new Error("El panel de la burbuja se sale de la pantalla");
+  if (!/wa\.me\/59173427418/.test(panel.wa)) throw new Error(`El botón de WhatsApp no es el contacto del sitio: ${panel.wa.slice(0, 60)}`);
+  if (!/30/.test(panel.wa)) throw new Error(`El mensaje de WhatsApp no lleva el precio: ${panel.wa.slice(0, 90)}`);
+  if (!/instagram\.com\/flox_devs_sucre/.test(panel.ig)) throw new Error("El enlace de Instagram no es el del sitio");
+
+  // «Ver precios» cierra la burbuja y baja a la sección de planes.
+  await js(
+    ses,
+    `[...document.querySelectorAll('#bitly-premium-burbuja button')]
+      .find(b => /precios y todo|pricing and everything/i.test(b.innerText))?.click()`,
+  );
+  const planes = await medir(
+    ses,
+    `JSON.stringify({
+      cerrada: !document.querySelector('#bitly-premium-burbuja'),
+      top: Math.round(document.getElementById('planes').getBoundingClientRect().top),
+    })`,
+    (v) => v.cerrada && Math.abs(v.top) < 60,
+  );
+
+  // La burbuja tiene que leerse en los dos temas (texto vs fondo, WCAG ≥ 3:1).
+  const legible = await js(
+    ses,
+    `(() => {
+      const lum = (c) => {
+        const [r, g, b] = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => {
+          const s = v / 255;
+          return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const mide = () => {
+        const b = document.querySelector('button[aria-controls="bitly-premium-burbuja"]');
+        const span = b.querySelectorAll('span span');
+        // Los tokens del tema están en oklch: se pasan a rgb() para que la
+        // luminancia sea la real (si no, los números se leen como canales).
+        const aRgb = (c) => {
+          if (!c || c.indexOf('oklch') < 0) return c;
+          const p = c.slice(c.indexOf('(') + 1, c.indexOf(')')).split(' ').filter(Boolean);
+          const L = +p[0], C = +p[1], H = (+p[2]) * Math.PI / 180;
+          const a = C * Math.cos(H), bb = C * Math.sin(H);
+          const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * bb, 3);
+          const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * bb, 3);
+          const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * bb, 3);
+          const lin = [
+            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+            -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+            -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+          ];
+          return 'rgb(' + lin.map((v) => {
+            const x = Math.min(1, Math.max(0, v));
+            const g = x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
+            return Math.round(g * 255);
+          }).join(', ') + ')';
+        };
+        const l1 = lum(aRgb(getComputedStyle(span[span.length - 1] || b).color));
+        const l2 = lum(aRgb(getComputedStyle(document.body).backgroundColor));
+        return +((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)).toFixed(2);
+      };
+      const raiz = document.documentElement;
+      const original = raiz.className;
+      raiz.classList.remove('dark', 'light'); raiz.classList.add('light');
+      const claro = mide();
+      raiz.classList.remove('light'); raiz.classList.add('dark');
+      const oscuro = mide();
+      raiz.className = original;
+      return JSON.stringify({ claro, oscuro });
+    })()`,
+  );
+  const tema = JSON.parse(legible);
+  if (tema.claro < 3 || tema.oscuro < 3) {
+    throw new Error(`La burbuja se lee mal: contraste ${tema.claro}:1 en claro y ${tema.oscuro}:1 en oscuro`);
+  }
+  console.log(`    · contraste de la burbuja: ${tema.claro}:1 (claro) · ${tema.oscuro}:1 (oscuro)`);
+
+  // Opcional (`REVISAR_MONEDA=1`): el precio de la burbuja tiene que seguir a la
+  // moneda elegida, igual que el de la sección de planes.
+  if (process.env.REVISAR_MONEDA === "1") {
+    await js(
+      ses,
+      `(() => {
+        const b = [...document.querySelectorAll('header button')]
+          .find(x => /^(Bs|US\\$|€|\\$|S\\/|R\\$)$/.test(x.innerText.trim()));
+        if (!b) return false; b.click(); return true;
+      })()`,
+    );
+    await dormir(400);
+    await js(
+      ses,
+      `[...document.querySelectorAll('button')]
+        .find(b => /^US\\$\\s*USD$/.test(b.innerText.replace(/\\s+/g, ' ').trim()))?.click()`,
+    );
+    await dormir(2500);
+    const precios = await medir(
+      ses,
+      `JSON.stringify({
+        burbuja: (document.querySelector('button[aria-controls="bitly-premium-burbuja"]')?.innerText || '').replace(/\\s+/g, ' ').trim(),
+        planes: (document.querySelector('#planes')?.innerText || '').replace(/\\s+/g, ' ').trim(),
+      })`,
+      (v) => v.burbuja.length > 0,
+    );
+    console.log(`    · moneda USD -> burbuja: ${precios.burbuja} | planes: ${precios.planes.slice(0, 70)}`);
+    if (!/(US\$|\$|€|S\/|R\$)\s?[\d.,]+/.test(precios.burbuja)) {
+      throw new Error(`La burbuja no siguió a la moneda elegida: ${precios.burbuja}`);
+    }
+  }
+
+  return `${medidas.ventana}px · scroll ${medidas.scroll} · sección ${medidas.seccion}×${medidas.alto} | ${detalle.join(" · ")} | lente: ${lente.texto} | modal: ${modal.archivos} enlaces | burbuja: “${burbuja.texto.replace(/\n/g, " ")}”`;
 }
 
 TAREAS.revision = ANCHOS_REVISION.map((w) => ({

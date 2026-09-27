@@ -60,6 +60,7 @@ equivocada, lo dice y no toca nada más.
 | `SITIO_URL` | `https://bitly-site.pages.dev` | sitio a capturar |
 | `CAPTURA_CALIDAD` | `92` | calidad del WebP |
 | `REVISION_ANCHOS` | `320,390,430,768,1024,1440,1920` | anchos de la revisión |
+| `REVISAR_MONEDA` | `0` | con `1`, cambia a USD y comprueba que el precio de la burbuja siga a la moneda |
 
 ## Verificación
 
@@ -67,7 +68,14 @@ El script mide los píxeles de cada captura (luminancia media, desvío, tonos) y
 salió casi plana, es decir, si el maquetado se rompió y quedó una imagen en blanco o negro.
 
 La revisión comprueba además que la sección no desborde a lo ancho en ningún ancho, que las 5
-pestañas cambien de contenido, que las capturas se decodifiquen y que la vista ampliada abra.
+pestañas cambien de contenido, que las capturas se decodifiquen, que la vista ampliada abra y que el
+modal de descarga tenga el botón «¿No sabés cómo instalar?».
+
+También revisa la burbuja flotante de Premium (`src/components/layout/premium-bubble.tsx`): que
+esté siempre a la vista sin salirse de la pantalla, que muestre el precio vigente, que abra el
+contacto de WhatsApp con ese precio dentro del mensaje, que «Ver precios» cierre la burbuja y baje
+a `#planes`, y que el texto se lea bien en los dos temas (contraste WCAG ≥ 3:1, medido convirtiendo
+los colores oklch del tema).
 Para eso conviene servir la compilación real con los tipos MIME correctos (en Windows, Python
 sirve `.js` como `text/plain` por culpa del registro, y el navegador no ejecuta el módulo):
 

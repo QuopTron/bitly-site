@@ -46,8 +46,8 @@ export const DICT: Record<string, [string, string]> = {
   plansStep1:           ["Elige tu plan y contáctanos",            "Choose your plan and contact us"],
   plansStep2:           ["Recibe tu código de activación",         "Receive your activation code"],
   plansStep3:           ["Disfruta de por vida",                   "Enjoy for life"],
-  plansWhatsAppLabel:   ["Escríbenos por WhatsApp",                "Message us on WhatsApp"],
-  plansIGLabel:         ["Síguenos en Instagram",                  "Follow us on Instagram"],
+  plansWhatsAppLabel:   ["Escribime por WhatsApp",                 "Message me on WhatsApp"],
+  plansIGLabel:         ["Seguime en Instagram",                   "Follow me on Instagram"],
 
   // ── Free vs Premium compare ──
   freeCompare1:         ["Buscar canciones, álbumes y artistas",   "Search songs, albums and artists"],
@@ -520,4 +520,15 @@ export const DICT: Record<string, [string, string]> = {
   releaseDownloadFile:  ["Descargá el archivo:",                    "Download the file:"],
   releaseNotSure:       ["¿No sabés cómo instalar?",                "Not sure how to install?"],
   releaseNotSureDesc:   ["Te llevamos al paso a paso con capturas", "We'll take you to the step-by-step with screenshots"],
+
+  // ── Burbuja flotante de Premium ──
+  bubbleAria:           ["Abrir contacto y precios de Bitly Premium", "Open Bitly Premium contact and pricing"],
+  bubblePersonal:       ["Te respondo yo en persona",               "I answer you personally"],
+  bubbleLead:           ["Un solo pago y Bitly queda tuyo para siempre, sin suscripciones.",
+                                                                    "One single payment and Bitly is yours forever, no subscriptions."],
+  bubbleCta:            ["Quiero Premium",                        "I want Premium"],
+  bubbleIgLabel:        ["Seguime en Instagram",                   "Follow me on Instagram"],
+  bubbleSeePlans:       ["Ver precios y todo lo que incluye",       "See pricing and everything included"],
+  bubbleWaText:         ["Hola! Vi el sitio de Bitly y quiero el Premium ({precio}). ¿Me contás cómo lo activo?",
+                         "Hi! I saw the Bitly site and I want Premium ({precio}). Can you tell me how to activate it?"],
 };
