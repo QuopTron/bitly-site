@@ -292,6 +292,8 @@ export const DICT: Record<string, [string, string]> = {
   releaseRecommended:   ["Recomendado",                            "Recommended"],
   releaseDownload:      ["Descargar",                              "Download"],
   releaseNoAssets:      ["No hay versiones disponibles aún",       "No versions available yet"],
+  releasePlatformBehind:["Para esta plataforma la última versión es la v{latest}: su build todavía no se publicó, se ofrece la v{version}.",
+                          "The latest release for this platform is v{latest}: its build is not published yet, so v{version} is offered."],
   releaseArchArm64:     ["Para la mayoría de celulares Android modernos (2016 en adelante). Samsung Galaxy S7+, Xiaomi, Pixel, OnePlus, etc.",
                                                                     "For most modern Android phones (2016+). Samsung Galaxy S7+, Xiaomi, Pixel, OnePlus, etc."],
   releaseArchArm:       ["Para celulares Android antiguos o de gama baja con procesadores más viejos.",

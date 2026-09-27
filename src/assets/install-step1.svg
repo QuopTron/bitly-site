@@ -15,7 +15,7 @@
   <text x="240" y="30" text-anchor="middle" font-family="system-ui" font-size="14" fill="#8b949e">9:41</text>
   <!-- Browser bar -->
   <rect x="20" y="60" width="440" height="48" rx="24" fill="#21262d"/>
-  <text x="40" y="90" font-family="system-ui" font-size="13" fill="#8b949e">github.com/QuopTron/bitly/releases</text>
+  <text x="40" y="90" font-family="system-ui" font-size="13" fill="#8b949e">github.com/QuopTron/bitly-releases/releases</text>
   <!-- Download card -->
   <rect x="20" y="140" width="440" height="180" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
   <rect x="40" y="160" width="40" height="40" rx="10" fill="url(#mint)"/>

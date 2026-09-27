@@ -11,6 +11,7 @@ type Props = {
   platform: "windows" | "android" | "tv" | "ios" | "macos";
   assets: ReleaseAsset[];
   version: string;
+  latestVersion: string;
 };
 
 function formatSize(bytes: number): string {
@@ -254,7 +255,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
   );
 }
 
-export default function ReleaseModal({ open, onClose, platform, assets, version }: Props) {
+export default function ReleaseModal({ open, onClose, platform, assets, version, latestVersion }: Props) {
   const t = useI18n();
   const [detected, setDetected] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -337,6 +338,11 @@ export default function ReleaseModal({ open, onClose, platform, assets, version 
         {isIos && <IosGuide t={t} />}
 
         <div className="border-t border-border/40 pt-3">
+          {version && latestVersion && version !== latestVersion && (
+            <p className="mb-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+              {t("releasePlatformBehind").replace("{version}", version).replace("{latest}", latestVersion)}
+            </p>
+          )}
           {isWindows && <WinAssets assets={filteredAssets} t={t} />}
           {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
           {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (

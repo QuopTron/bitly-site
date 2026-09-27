@@ -13,8 +13,7 @@ import ReleaseModal from "@/components/modals/release-modal";
 import PlansSection from "@/components/plans-section";
 // import InstallModal from "@/components/modals/install-modal";
 import { initRates } from "@/lib/currency";
-
-type ReleaseAsset = { name: string; browser_download_url: string; size: number };
+import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -36,7 +35,7 @@ export default function Index() {
   const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
   // const [showInstall, setShowInstall] = useState(false);
   const [blocked, setBlocked] = useState(false);
-  const [release, setRelease] = useState<{ version: string; apkUrl: string | null; windowsUrl: string | null; iosUrl: string | null; macosUrl: string | null; assets: ReleaseAsset[] }>({ version: "", apkUrl: null, windowsUrl: null, iosUrl: null, macosUrl: null, assets: [] });
+  const [release, setRelease] = useState<ReleaseIndex | null>(null);
 
   useEffect(() => {
     const check = () => {
@@ -63,44 +62,17 @@ export default function Index() {
     })();
     initRates();
 
-    const CACHE_KEY = "bitly_release_v2";
-    const CACHE_TTL = 30 * 60 * 1000;
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const { data, ts } = JSON.parse(cached);
-        if (Date.now() - ts < CACHE_TTL) {
-          setRelease(data);
-          return;
-        }
-      }
-    } catch {}
-
-    fetch("https://api.github.com/repos/QuopTron/bitly/releases/latest")
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (!data) return;
-        const assets: ReleaseAsset[] = (data.assets ?? []).map((a: any) => ({
-          name: a.name,
-          browser_download_url: a.browser_download_url,
-          size: a.size ?? 0,
-        }));
-        const apk = assets.find((a) => a.name.includes("arm64")) ?? assets.find((a) => a.name.endsWith(".apk"));
-        const win = assets.find((a) => a.name.endsWith(".exe"));
-        const ios = assets.find((a) => a.name.endsWith(".ipa"));
-        const macos = assets.find((a) => a.name.endsWith(".dmg"));
-        const result = {
-          version: data.tag_name ?? "",
-          apkUrl: apk?.browser_download_url ?? null,
-          windowsUrl: win?.browser_download_url ?? null,
-          iosUrl: ios?.browser_download_url ?? null,
-          macosUrl: macos?.browser_download_url ?? null,
-          assets,
-        };
-        setRelease(result);
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: result, ts: Date.now() })); } catch {}
+    let vivo = true;
+    cargarReleases()
+      .then((r) => {
+        if (vivo) setRelease(r);
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.error("[Bitly] No se pudieron cargar las releases:", e);
+      });
+    return () => {
+      vivo = false;
+    };
   }, []);
 
   const handleDownload = async (platform: "windows" | "android" | "tv" | "ios" | "macos", url: string | null) => {
@@ -114,10 +86,14 @@ export default function Index() {
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
   const total = (stats.windows ?? 0) + (stats.android ?? 0);
-  const androidUrl = release.apkUrl ?? info.android_url;
-  const windowsUrl = release.windowsUrl ?? info.windows_url;
-  const iosUrl = release.iosUrl;
-  const macosUrl = release.macosUrl;
+  const platforms = release?.platforms;
+  const androidUrl = platforms?.android.url ?? info.android_url;
+  const windowsUrl = platforms?.windows.url ?? info.windows_url;
+  const iosUrl = platforms?.ios.url ?? null;
+  const macosUrl = platforms?.macos.url ?? null;
+  // Smart TV instala el mismo APK que Android.
+  const modalKey: PlatformKey = releasePlatform === "tv" ? "android" : releasePlatform;
+  const modalRelease = platforms?.[modalKey];
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -126,7 +102,7 @@ export default function Index() {
       <Header />
       <main className="flex-1 flex flex-col justify-center">
         <HeroSection
-          tagline={info.tagline} description={info.description} version={release.version || info.version}
+          tagline={info.tagline} description={info.description} version={release?.version || info.version}
           isBlocked={blocked} windowsUrl={windowsUrl} androidUrl={androidUrl} iosUrl={iosUrl} macosUrl={macosUrl}
           totalDownloads={total} windowsDownloads={stats.windows ?? 0} androidDownloads={stats.android ?? 0}
           onDownload={handleDownload}
@@ -142,8 +118,9 @@ export default function Index() {
         open={showRelease}
         onClose={() => setShowRelease(false)}
         platform={releasePlatform}
-        assets={release.assets}
-        version={release.version}
+        assets={modalRelease?.assets ?? []}
+        version={modalRelease?.version ?? ""}
+        latestVersion={release?.version ?? ""}
       />
       {/* <InstallModal open={showInstall} onClose={() => setShowInstall(false)} url={androidUrl} /> */}
     </div>
