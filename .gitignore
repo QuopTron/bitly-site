@@ -10,6 +10,10 @@ node_modules/
 # Bundles y capturas que generan los harness de `scripts/` en cada corrida
 /scripts/.cache/
 
+# Estado local de wrangler (miniflare: cache, kv, r2, d1)
+/.wrangler/
+/.wrangler-verif/
+
 # Capturas originales (se convierten a WebP en src/assets/capturas con
 # `pnpm capturas:reales`; lo que se publica es el resultado)
 /capturas-reales/*.png

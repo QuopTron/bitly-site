@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "vite build",
+    "postbuild": "node scripts/cloudflare-worker.mjs",
     "start": "node .output/server/index.mjs",
     "capturas": "node scripts/capturas/capturar.mjs",
-    "capturas:reales": "node scripts/capturas/reemplazar.mjs"
+    "capturas:reales": "node scripts/capturas/reemplazar.mjs",
+    "probar:cuota": "node scripts/probar-cuota.mjs",
+    "probar:demo": "node scripts/verificar-demo.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.115.0",

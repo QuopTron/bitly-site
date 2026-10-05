@@ -1,57 +1,83 @@
-# Deploy Bitly Site to Cloudflare Pages
+# Deploy de bitly-site en Cloudflare Pages
 
-## 1. Create a GitHub repository (if you don't have one)
-```bash
-# In the project root (e:/Pablo/proyectos/bitly-site)
-git init
-git add .
-git commit -m "Initial commit"
-# Replace <USERNAME> with your GitHub username
-git remote add origin https://github.com/<USERNAME>/bitly-site.git
-git branch -M main
-git push -u origin main
-```
+El sitio es una app de **TanStack Start**: la landing es estática
+(prerenderizada), pero la **demo necesita servidor**. Buscar, resolver el audio
+y canjear un código Premium pasan por server functions cifradas
+(`src/server/demo-proxy.ts`, `src/lib/premium-check.ts`); nada de eso puede
+correr en el navegador.
 
-## 2. Create a Cloudflare Pages project
-1. Log in to Cloudflare and go to **Pages → Create a project**.
-2. Connect the project to the GitHub repository you just created.
-3. Choose the **main** branch as the production branch.
+Por eso el proyecto se publica en **modo avanzado**: `pnpm build` deja, además
+del estático, un `_worker.js` que atiende las server functions.
 
-## 3. Configure the build settings
+## 1. Repositorio y rama
+
+- Repo: `github.com/QuopTron/bitly-site`
+- **Rama de producción: `master`** (no `main`: no existe en este repo).
+- El proyecto de Pages está conectado al repo: cada push a `master` dispara un
+  build y un deploy.
+
+## 2. Configuración del proyecto en Pages
+
 - **Build command:** `pnpm install && pnpm run build`
-- **Build output directory:** `dist`
-- **Environment variables:** none required for a static site.
+- **Build output directory:** `dist/client`
+- **Rama de producción:** `master`
 
-## 4. Adjust Vite configuration (optional)
-Cloudflare Pages serves the site from the root, so the default Vite `base` of `/` works fine. If you added a custom `base` earlier, make sure it is set to `/`:
-```ts
-// vite.config.ts
-export default defineConfig({
-  base: "/",
-  plugins: [
-    tailwindcss(),
-    tanstackStart(),
-    react(),
-    viteTsconfigPaths(),
-  ],
-});
-```
+`wrangler.toml` ya declara `pages_build_output_dir = "dist/client"`,
+`compatibility_date = "2024-09-23"` y `compatibility_flags = ["nodejs_compat"]`
+(esto último es lo que permite leer `process.env` en el Worker).
 
-## 5. Deploy
-After saving the settings, Cloudflare Pages will automatically run the build and publish the site at:
-```
-https://<PROJECT_NAME>.pages.dev
-```
-Replace `<PROJECT_NAME>` with the name you gave the Pages project.
+## 3. Cómo queda el modo avanzado
 
-## 6. Custom domain (optional)
-If you have a custom domain, add it in **Pages → Custom domains** and follow Cloudflare's DNS verification steps.
+`pnpm build` corre el `postbuild` (`scripts/cloudflare-worker.mjs`), que:
 
-## 7. Updating the site
-Whenever you make changes, just commit and push to the `main` branch:
+1. copia `dist/server` a `dist/client/_ssr/`;
+2. escribe `dist/client/_worker.js`, el entry de Pages.
+
+Ese `_worker.js` es **conservador a propósito**:
+
+| Petición | Quién la atiende |
+| --- | --- |
+| `GET` (HTML, `/assets/*`, `.well-known`) | el CDN de Pages, igual que antes |
+| `POST /_serverFn/*` (la demo) | la app |
+| el resto | la app y, si no contesta, el CDN |
+
+Las carpetas que empiezan con `_` **no se publican como estáticos**, así que
+`_worker.js` y `_ssr/` no quedan descargables.
+
+Verificado en local con el runtime real:
+
 ```bash
-git add .
-git commit -m "Update site"
-git push
+pnpm build
+npx wrangler pages dev dist/client --port 8799 \
+  --compatibility-date=2024-09-23 --compatibility-flags=nodejs_compat
+
+# en otra terminal
+DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 ```
-Cloudflare Pages will rebuild and redeploy automatically.
+
+## 4. Variables de entorno
+
+| Variable | Para qué |
+| --- | --- |
+| `BITLY_CODES_TOKEN` | **Obligatoria** para el canje de códigos Premium: token de GitHub con lectura al repo privado `QuopTron/bitly_codes_premium`. Sin ella el canje responde "no pudimos verificar". |
+| `VITE_SUPABASE_*`, `SUPABASE_*` | Las que ya usa el sitio. |
+
+Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
+`BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).
+
+## 5. Comprobar que quedó bien
+
+```bash
+# 1. La landing responde
+curl -s -o /dev/null -w "%{http_code}\n" https://bitly-site.pages.dev/
+
+# 2. Las server functions existen (403 = existe y pide Origin; 405 = NO está)
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  "https://bitly-site.pages.dev/_serverFn/abc" -H "x-tsr-serverfn: true"
+
+# 3. La demo entera, en un Chrome de verdad
+DEMO_URL=https://bitly-site.pages.dev node scripts/verificar-demo.mjs
+```
+
+Si el punto 2 devuelve **405**, el build volvió a publicar sólo estáticos: falta
+el `_worker.js` (¿se rompió el `postbuild`?).
