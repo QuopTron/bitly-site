@@ -12,6 +12,7 @@ import FaqModal from "@/components/modals/faq-modal";
 import ReleaseModal from "@/components/modals/release-modal";
 import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
+import DemoPlayer from "@/components/demo/demo-player";
 import { initRates } from "@/lib/currency";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 
@@ -109,6 +110,7 @@ export default function Index() {
           onOpenFaq={() => setShowFaq(true)}
         />
       </main>
+      <DemoPlayer />
       <InstallSection onDownload={(p) => handleDownload(p, null)} />
       <PlansSection />
       <Footer />

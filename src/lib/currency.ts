@@ -1,7 +1,16 @@
 import { useState, useEffect } from "react";
 
 const RATES_URL = "https://open.er-api.com/v6/latest/BOB";
-const MARKUP = 1.20;
+
+/**
+ * Margen sobre la cotización real para las monedas que NO son BOB.
+ *
+ * El precio se piensa en bolivianos (Bs 30) y BOB se muestra tal cual; el
+ * resto tiene que quedar un poco MÁS alto que la conversión pelada, no al
+ * cambio. Con 1.20 los 30 Bs daban US$ 3 (regalado) y € 3; con 1.60 quedan
+ * en US$ 4 y € 4. `scripts/capturas/revision` comprueba el valor en pantalla.
+ */
+const MARKUP = 1.6;
 
 export const CODES = ["BOB", "USD", "EUR", "ARS", "PEN", "CLP", "BRL", "MXN", "COP"] as const;
 export type Code = (typeof CODES)[number];
@@ -16,6 +25,23 @@ export const INFO: Record<Code, { sym: string; label: string }> = {
   BRL: { sym: "R$",  label: "BRL" },
   MXN: { sym: "$",   label: "MXN" },
   COP: { sym: "$",   label: "COP" },
+};
+
+/**
+ * Paso de redondeo "lindo" por moneda: 30 Bs no puede valer US$ 3,05 ni
+ * COL$ 13.221. Se redondea al múltiplo de este paso para que el precio se lea
+ * como una decisión y no como el resultado de una calculadora.
+ */
+const PASO: Record<Code, number> = {
+  BOB: 1,
+  USD: 1,
+  EUR: 1,
+  ARS: 100,
+  PEN: 1,
+  CLP: 100,
+  BRL: 5,
+  MXN: 5,
+  COP: 500,
 };
 
 let rates: Record<string, number> | null = null;
@@ -72,7 +98,10 @@ export function convert(priceBOB: number, to?: Code): number {
   if (c === "BOB" || !rates) return priceBOB;
   const rate = rates[c];
   if (!rate) return priceBOB;
-  return Math.round(priceBOB * rate * MARKUP);
+  const exacto = priceBOB * rate * MARKUP;
+  const paso = PASO[c] ?? 1;
+  // Nunca por debajo de un paso: un precio de 0 no existe.
+  return Math.max(paso, Math.round(exacto / paso) * paso);
 }
 
 export function format(priceBOB: number, to?: Code): string {

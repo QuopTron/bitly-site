@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { X, Clock, Gem, Send, Check, Timer, Zap, TrendingUp } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { useCurrency, convert, format, INFO } from "@/lib/currency";
-import { getPhasePrice } from "@/lib/pricing";
+import { getFaseActual } from "@/lib/pricing";
 
 function getCurrentPrice() {
-  return getPhasePrice().price;
+  return getFaseActual().precio;
 }
 
 function makePriceTable(normal: number) {

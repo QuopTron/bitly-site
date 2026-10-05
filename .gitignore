@@ -5,6 +5,10 @@ node_modules/
 /dist/
 .tanstack/
 .capturas-perfil/
+.capturas-perfil-*/
+
+# Bundles y capturas que generan los harness de `scripts/` en cada corrida
+/scripts/.cache/
 
 # Capturas originales (se convierten a WebP en src/assets/capturas con
 # `pnpm capturas:reales`; lo que se publica es el resultado)

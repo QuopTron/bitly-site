@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, Check, ChevronDown, Gem, MessageCircle, X } from "lucide-react";
 import { getLanguage, useI18n } from "@/lib/i18n";
 import { format, initRates, useCurrency } from "@/lib/currency";
-import { getPhasePrice } from "@/lib/pricing";
+import { getFaseActual } from "@/lib/pricing";
 
 const WHATSAPP = "+59173427418";
 const INSTAGRAM = "flox_devs_sucre";
@@ -55,10 +55,10 @@ export default function PremiumBubble() {
     };
   }, [abierto]);
 
-  const { price, originalPrice, label, labelEn, onOffer } = getPhasePrice();
+  const fase = getFaseActual();
   const lang = getLanguage();
-  const precio = moneda === "BOB" || cotizado ? format(price, moneda) : format(price, "BOB");
-  const precioAntes = onOffer ? format(originalPrice, moneda === "BOB" || cotizado ? moneda : "BOB") : null;
+  const precio = moneda === "BOB" || cotizado ? format(fase.precio, moneda) : format(fase.precio, "BOB");
+  const precioAntes = fase.enOferta ? format(fase.original, moneda === "BOB" || cotizado ? moneda : "BOB") : null;
   const mensaje = t("bubbleWaText").replace("{precio}", precio);
   const whatsapp = `https://wa.me/${WHATSAPP.replace("+", "")}?text=${encodeURIComponent(mensaje)}`;
 
@@ -118,9 +118,9 @@ export default function PremiumBubble() {
                 <Check className="h-3 w-3" />
                 {t("plansPremiumPrice")}
               </span>
-              {onOffer && (
+              {fase.enOferta && (
                 <span className="rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                  {lang === "es" ? label : labelEn}
+                  {lang === "es" ? fase.etiqueta : fase.etiquetaEn}
                 </span>
               )}
             </div>

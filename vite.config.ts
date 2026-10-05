@@ -16,4 +16,12 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  server: {
+    // Los harness de `scripts/` (y las capturas) escriben sus bundles y fotos
+    // dentro del árbol: sin esto, cada archivo dispara un page reload que deja
+    // la pestaña en blanco justo cuando se está verificando algo.
+    watch: {
+      ignored: ["**/scripts/.cache/**", "**/.capturas-perfil*/**"],
+    },
+  },
 });
