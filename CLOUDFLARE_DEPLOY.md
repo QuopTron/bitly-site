@@ -18,17 +18,26 @@ del estático, un `_worker.js` que atiende las server functions.
 
 ## 2. Configuración del proyecto en Pages
 
-- **Build command:** `pnpm install && pnpm run build`
+- **Build command:** `npm run build` (Cloudflare detecta pnpm por el lockfile y
+  corre `pnpm install` solo; el comando de build como tal es `npm run build`).
 - **Build output directory:** `dist/client`
 - **Rama de producción:** `master`
 
-`wrangler.toml` ya declara `pages_build_output_dir = "dist/client"`,
+`wrangler.toml` declara `pages_build_output_dir = "dist/client"`,
 `compatibility_date = "2024-09-23"` y `compatibility_flags = ["nodejs_compat"]`
 (esto último es lo que permite leer `process.env` en el Worker).
 
+> **Ojo con `wrangler.toml`:** el builder de Pages lo valida y **aborta el build**
+> si tiene claves que no soporta. `account_id` y `[build]` no están soportadas
+> (fue exactamente lo que hizo fallar el build de `084a209`). Si además falta
+> `pages_build_output_dir`, Pages **ignora el archivo en silencio** y publica
+> solo estáticos — que es lo que dejaba la demo en 405. Para comandos locales
+> que necesiten la cuenta, usá la variable `CLOUDFLARE_ACCOUNT_ID`.
+
 ## 3. Cómo queda el modo avanzado
 
-`pnpm build` corre el `postbuild` (`scripts/cloudflare-worker.mjs`), que:
+`pnpm build` (`vite build && node scripts/cloudflare-worker.mjs`) corre
+`scripts/cloudflare-worker.mjs`, que:
 
 1. copia `dist/server` a `dist/client/_ssr/`;
 2. escribe `dist/client/_worker.js`, el entry de Pages.
