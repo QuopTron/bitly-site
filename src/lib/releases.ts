@@ -111,7 +111,12 @@ export function indexar(releases: any[]): ReleaseIndex {
 }
 
 async function cargarRemoto(): Promise<ReleaseIndex> {
-  const res = await fetch(API, { headers: { Accept: "application/vnd.github+json" } });
+  // El User-Agent es obligatorio en la API de GitHub: sin él responde 403
+  // ("Request forbidden by administrative rules"). El `fetch` de Workers no
+  // manda uno, así que sin este header la lista de descargas falla en prod.
+  const res = await fetch(API, {
+    headers: { Accept: "application/vnd.github+json", "User-Agent": "bitly-site" },
+  });
   if (!res.ok) {
     throw new Error(`GitHub respondió ${res.status} ${res.statusText} (${RELEASES_REPO})`);
   }

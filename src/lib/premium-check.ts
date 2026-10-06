@@ -57,6 +57,11 @@ async function descargarRegistro(): Promise<Map<string, string>> {
     headers: {
       Authorization: `token ${token}`,
       Accept: "application/vnd.github.v3.raw",
+      // GitHub RECHAZA con 403 cualquier request sin User-Agent
+      // ("Request forbidden by administrative rules"). El `fetch` de Workers
+      // no manda uno, así que en producción el registro siempre fallaba aunque
+      // el token estuviera bien: el síntoma era "El registro no respondió".
+      "User-Agent": "bitly-site",
     },
     signal: AbortSignal.timeout(10_000),
   });
