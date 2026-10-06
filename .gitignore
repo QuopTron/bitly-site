@@ -12,7 +12,7 @@ node_modules/
 
 # Estado local de wrangler (miniflare: cache, kv, r2, d1)
 /.wrangler/
-/.wrangler-verif/
+/.wrangler-verif*/
 
 # Capturas originales (se convierten a WebP en src/assets/capturas con
 # `pnpm capturas:reales`; lo que se publica es el resultado)
@@ -42,3 +42,6 @@ yarn-error.log*
 # IDE/editor folders
 .vscode/
 .idea/
+
+# Estado local de wrangler pages dev
+.dev.vars

@@ -23,9 +23,9 @@ del estático, un `_worker.js` que atiende las server functions.
 - **Build output directory:** `dist/client`
 - **Rama de producción:** `master`
 
-Compatibilidad: `compatibility_date = "2024-09-23"` y
-`compatibility_flags = ["nodejs_compat"]` (esto último es lo que permite leer
-`process.env` en el Worker).
+Compatibility flags: **`nodejs_compat`** (necesario para que exista `process`) y
+una `compatibility_date` **reciente** (hoy `2026-05-16`). Las dos cosas se
+configuran en el dashboard (Settings → Functions / Runtime).
 
 > **NO agregar un `wrangler.toml` al repo.** Se probaron dos variantes y las dos
 > rompen algo:
@@ -61,12 +61,36 @@ Ese `_worker.js` es **conservador a propósito**:
 Las carpetas que empiezan con `_` **no se publican como estáticos**, así que
 `_worker.js` y `_ssr/` no quedan descargables.
 
+### El `_worker.js` siembra `process.env`
+
+El bundle del servidor trae su propio polyfill de `process` (unenv) con el
+`env` **vacío**: `process.env.X` es `undefined` aunque la variable esté
+perfectamente configurada en Pages. Por eso el entry, antes de delegar, copia
+las bindings de `env` a `process.env`:
+
+```js
+function sembrarEnv(env) {
+  if (typeof process === "undefined" || !process.env) return;
+  for (const [clave, valor] of Object.entries(env)) {
+    if (typeof valor === "string" && process.env[clave] === undefined) {
+      process.env[clave] = valor;
+    }
+  }
+}
+```
+
+Sin esto las `SUPABASE_*` y el `BITLY_CODES_TOKEN` no llegan al SSR: la búsqueda
+funciona (no las usa) pero el canje de códigos responde "no pudimos verificar"
+y el SSR de Supabase queda sin credenciales. Nota: `process` **sólo existe** con
+`nodejs_compat`, y `process.env` sólo se puebla desde `env` con una
+`compatibility_date` reciente — con `2024-09-23` venía vacío.
+
 Verificado en local con el runtime real:
 
 ```bash
 pnpm build
 npx wrangler pages dev dist/client --port 8799 \
-  --compatibility-date=2024-09-23 --compatibility-flags=nodejs_compat
+  --compatibility-date=2026-05-16 --compatibility-flags=nodejs_compat
 
 # en otra terminal
 DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
@@ -85,6 +109,11 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
 `BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).
 
+Para probar el canje en local alcanza con tenerla en `.env` y correr el server
+de desarrollo (`pnpm dev`): ahí las server functions corren en Node y leen
+`process.env` directo. Con `wrangler pages dev` el `.dev.vars` de la raíz no
+llega al `env` del runtime — es una limitación de ese comando, no del deploy.
+
 ## 5. Comprobar que quedó bien
 
 ```bash
@@ -97,7 +126,17 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
 
 # 3. La demo entera, en un Chrome de verdad
 DEMO_URL=https://bitly-site.pages.dev node scripts/verificar-demo.mjs
+
+# 4. El canje Premium contra el registro real. Necesita un código con estado
+#    "usado" (sólo lectura: el sitio nunca marca códigos).
+DEMO_URL=https://bitly-site.pages.dev CODIGO_USADO=<código> \
+  node scripts/probar-premium.mjs
 ```
 
 Si el punto 2 devuelve **405**, el build volvió a publicar sólo estáticos: falta
-el `_worker.js` (¿se rompió el `postbuild`?).
+el `_worker.js` (¿se rompió el `build`?).
+
+Si el punto 4 dice "El registro no respondió", el problema es de entorno, no del
+registro: revisá que `BITLY_CODES_TOKEN` esté en las env vars, que
+`nodejs_compat` esté activo y que la `compatibility_date` sea reciente (ver la
+sección 3 sobre la siembra).

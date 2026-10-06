@@ -53,11 +53,27 @@ const worker = `/**
  *     CDN no sabe hacer: van a la app. Antes devolvían 405 porque el proyecto
  *     publicaba solo estáticos.
  *   · Cualquier otra cosa cae a la app y, si no contesta, al CDN.
+ *
+ * Antes de delegar, SIEMBRA process.env desde env. El bundle trae su propio
+ * polyfill de process (unenv) con el env VACÍO: process.env no ve la
+ * configuración del proyecto aunque las bindings estén en env. Sin esto, el
+ * canje de códigos Premium (que lee process.env.BITLY_CODES_TOKEN) respondía
+ * "no pudimos verificar" con la variable perfectamente configurada.
  */
 import app from "./_ssr/server.js";
 
+function sembrarEnv(env) {
+  if (typeof process === "undefined" || !process.env) return;
+  for (const [clave, valor] of Object.entries(env)) {
+    if (typeof valor === "string" && process.env[clave] === undefined) {
+      process.env[clave] = valor;
+    }
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
+    sembrarEnv(env);
     const { pathname } = new URL(request.url);
     const esRpc = pathname.startsWith("/_serverFn/");
 
