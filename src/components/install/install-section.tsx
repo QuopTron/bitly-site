@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Apple, Download, Laptop, MessageCircle, Monitor, Smartphone, Tv, Wrench } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { enlaceWhatsApp } from "@/lib/contacto";
+import { retraso } from "@/lib/reveal";
 import { GuiaCelular, GuiaIOS, GuiaMac, GuiaPC, GuiaTV } from "./guides";
 
 export type Plataforma = "phone" | "pc" | "tv" | "ios" | "mac";
@@ -57,7 +59,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
 
   return (
     <section id="instalar" className="container mx-auto scroll-mt-6 px-4 pb-4 pt-6 sm:px-6 sm:pt-10">
-      <div className="mb-6 text-center sm:mb-8">
+      <div className="mb-6 text-center sm:mb-8" data-reveal>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Wrench className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("installSectionBadge")}
@@ -67,6 +69,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
             {t("installSectionTitle")}
           </span>
         </h2>
+        <span aria-hidden className="bit-regla mx-auto mt-3 block h-px w-24 opacity-60" />
         <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground sm:text-base">
           {t("installSectionDesc")}
         </p>
@@ -75,6 +78,8 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
       <div
         role="tablist"
         aria-label={t("installSectionBadge")}
+        data-reveal
+        style={retraso(80)}
         className="mx-auto mb-5 flex max-w-2xl snap-x gap-1.5 overflow-x-auto rounded-2xl border border-border/60 bg-card/30 p-1.5 backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:justify-center"
       >
         {PESTANAS.map(({ id, clave, Icono }) => {
@@ -85,7 +90,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
               role="tab"
               aria-selected={seleccionada}
               onClick={() => setActiva(id)}
-              className={`flex shrink-0 snap-start items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold transition sm:gap-2 sm:px-4 sm:text-xs ${
+              className={`flex shrink-0 snap-start items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold transition-all duration-200 active:scale-95 sm:gap-2 sm:px-4 sm:text-xs ${
                 seleccionada
                   ? "bg-primary/15 text-primary ring-1 ring-primary/30"
                   : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
@@ -98,7 +103,11 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
         })}
       </div>
 
-      <div className="mx-auto max-w-5xl rounded-3xl border border-border/50 bg-gradient-to-b from-card/50 to-card/20 p-4 backdrop-blur sm:p-6">
+      <div
+        data-reveal
+        style={retraso(140)}
+        className="mx-auto max-w-5xl rounded-3xl border border-border/50 bg-gradient-to-b from-card/50 to-card/20 p-4 backdrop-blur sm:p-6"
+      >
         <div key={activa} role="tabpanel" className="animate-in fade-in duration-300">
           {activa === "phone" && <GuiaCelular conCapturas />}
           {activa === "pc" && <GuiaPC conCapturas />}
@@ -119,12 +128,14 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
         </div>
 
         <a
-          href={`https://wa.me/59173427418?text=${encodeURIComponent("Hola! Necesito ayuda para instalar Bitly")}`}
+          href={enlaceWhatsApp(t("installHelpText"))}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/30 px-4 py-3 text-center text-[11px] font-medium text-muted-foreground transition hover:border-[#25D366]/40 hover:bg-[#25D366]/5 hover:text-foreground sm:text-xs"
+          className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/30 px-4 py-3 text-center text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-foreground sm:text-xs"
         >
-          <MessageCircle className="h-4 w-4 text-[#25D366]" />
+          {/* `primary` y no el verde de marca: en tema claro ese verde claro
+              sobre fondo claro no llega ni a 2:1 y el ícono se perdía. */}
+          <MessageCircle className="h-4 w-4 text-primary" />
           {t("installHelp")}
         </a>
       </div>

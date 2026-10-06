@@ -10,6 +10,15 @@ export type Captura = {
   titulo: string;
   /** Explicación de una línea. */
   pie?: string;
+  /**
+   * Ancho y alto reales de la imagen.
+   *
+   * Van como atributos del `<img>` para que el navegador reserve el espacio
+   * antes de que la imagen llegue: sin esto, cada captura empujaba el contenido
+   * hacia abajo al cargar (y un salto de ancla terminaba en el lugar equivocado).
+   */
+  w?: number;
+  h?: number;
 };
 
 export type TipoMarco = "telefono" | "ventana" | "plano" | "tv";
@@ -17,11 +26,11 @@ export type TipoMarco = "telefono" | "ventana" | "plano" | "tv";
 /* ─────────────────────────── Marcos ─────────────────────────── */
 
 /** Celular: bisel redondeado + cámara, para que la captura quede prolija. */
-function MarcoTelefono({ src, alt }: { src: string; alt: string }) {
+function MarcoTelefono({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
     <div className="relative rounded-[2rem] border border-border/70 bg-[#0a0d12] p-[5px] shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
       <div className="relative overflow-hidden rounded-[1.6rem] bg-black">
-        <img src={src} alt={alt} loading="lazy" decoding="async" className="block w-full" />
+        <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
         <span className="pointer-events-none absolute left-1/2 top-[7px] h-[6px] w-[6px] -translate-x-1/2 rounded-full bg-black ring-1 ring-white/20" />
       </div>
     </div>
@@ -29,7 +38,7 @@ function MarcoTelefono({ src, alt }: { src: string; alt: string }) {
 }
 
 /** Escritorio: barra de navegador con la dirección del sitio. */
-function MarcoVentana({ src, alt, url }: { src: string; alt: string; url: string }) {
+function MarcoVentana({ src, alt, url, w, h }: { src: string; alt: string; url: string; w?: number; h?: number }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
       <div className="flex items-center gap-2 border-b border-border/50 bg-card/90 px-3 py-2">
@@ -42,26 +51,26 @@ function MarcoVentana({ src, alt, url }: { src: string; alt: string; url: string
           {url}
         </span>
       </div>
-      <img src={src} alt={alt} loading="lazy" decoding="async" className="block w-full" />
+      <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
     </div>
   );
 }
 
 /** Diálogos y pantallas sueltas: tarjeta limpia sin cromo. */
-function MarcoPlano({ src, alt }: { src: string; alt: string }) {
+function MarcoPlano({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border/70 bg-black/40 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
-      <img src={src} alt={alt} loading="lazy" decoding="async" className="block w-full" />
+      <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
     </div>
   );
 }
 
 /** Televisor: bisel + base, para que la captura se lea como pantalla de TV. */
-function MarcoTv({ src, alt }: { src: string; alt: string }) {
+function MarcoTv({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
     <div className="rounded-2xl border border-border/70 bg-[#0a0d12] p-2 shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
       <div className="overflow-hidden rounded-lg bg-black">
-        <img src={src} alt={alt} loading="lazy" decoding="async" className="block w-full" />
+        <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
       </div>
       <div className="mx-auto mt-1.5 h-1.5 w-20 rounded-full bg-white/10" />
     </div>
@@ -78,10 +87,12 @@ const ANCHOS: Record<TipoMarco, string> = {
 };
 
 function Marco({ tipo, captura, url }: { tipo: TipoMarco; captura: Captura; url?: string }) {
-  if (tipo === "telefono") return <MarcoTelefono src={captura.src} alt={captura.alt} />;
-  if (tipo === "ventana") return <MarcoVentana src={captura.src} alt={captura.alt} url={url ?? "bitly-site.pages.dev"} />;
-  if (tipo === "tv") return <MarcoTv src={captura.src} alt={captura.alt} />;
-  return <MarcoPlano src={captura.src} alt={captura.alt} />;
+  const medidas = { w: captura.w, h: captura.h };
+  if (tipo === "telefono") return <MarcoTelefono src={captura.src} alt={captura.alt} {...medidas} />;
+  if (tipo === "ventana")
+    return <MarcoVentana src={captura.src} alt={captura.alt} url={url ?? "bitly-site.pages.dev"} {...medidas} />;
+  if (tipo === "tv") return <MarcoTv src={captura.src} alt={captura.alt} {...medidas} />;
+  return <MarcoPlano src={captura.src} alt={captura.alt} {...medidas} />;
 }
 
 /** Lente: vista ampliada con navegación por teclado. */

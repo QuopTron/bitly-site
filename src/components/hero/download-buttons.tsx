@@ -45,7 +45,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
     <>
       <button
         onClick={() => onDownload("windows", windowsUrl)}
-        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Monitor className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
@@ -55,7 +55,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       </button>
       <button
         onClick={() => onDownload("android", androidUrl)}
-        className="group flex flex-1 items-center gap-3 rounded-2xl bg-foreground px-5 py-3 text-background transition hover:scale-[1.02] sm:rounded-3xl sm:px-6 sm:py-3.5 shadow-lg shadow-foreground/20"
+        className="group flex flex-1 items-center gap-3 rounded-2xl bg-foreground px-5 py-3 text-background shadow-lg shadow-foreground/20 transition duration-200 hover:scale-[1.02] active:scale-[0.96] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Smartphone className="h-6 w-6 sm:h-7 sm:w-7" />
         <div className="text-left">
@@ -65,7 +65,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       </button>
       <button
         onClick={() => onDownload("tv", androidUrl)}
-        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Tv className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
@@ -75,7 +75,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       </button>
       <button
         onClick={() => onDownload("ios", iosUrl)}
-        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
@@ -85,7 +85,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       </button>
       <button
         onClick={() => onDownload("macos", macosUrl)}
-        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all hover:border-primary/40 hover:bg-primary/5 sm:rounded-3xl sm:px-6 sm:py-3.5"
+        className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Send, Smartphone, Shield, Clock, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useI18n } from "@/lib/i18n";
+import { useCurrency, convert, INFO } from "@/lib/currency";
 
 const PRE_RESERVA_END = new Date("2026-06-01T00:00:00-04:00");
 
@@ -27,6 +28,8 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currency] = useCurrency();
+  const sym = INFO[currency].sym;
 
   useEffect(() => {
     const update = () => setTimer(Math.max(0, PRE_RESERVA_END.getTime() - Date.now()));
@@ -78,7 +81,7 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
         {success ? (
           <div className="relative z-10 py-6 text-center">
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border border-green-500/30 bg-green-500/20 shadow-lg shadow-green-500/20 sm:h-16 sm:w-16">
-              <Shield className="h-7 w-7 text-green-500 sm:h-8 sm:w-8" />
+              <Shield className="h-7 w-7 text-green-600 dark:text-green-500 sm:h-8 sm:w-8" />
             </div>
             <h3 className="mb-1 text-lg font-bold text-foreground sm:text-xl">{t("preReservaSuccess")}</h3>
             <p className="text-xs text-muted-foreground sm:text-sm">{t("preReservaSuccessMsg")}</p>
@@ -93,10 +96,10 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
                     <h3 className="text-xs font-semibold text-foreground sm:text-sm">{t(p.nombreKey)}</h3>
                     <span className="relative -top-1.5 rounded-full bg-gradient-to-r from-primary to-accent px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-primary-foreground sm:px-2 sm:text-[9px]">40% OFF</span>
                   </div>
-                  <p className="mb-0.5 text-[10px] text-muted-foreground line-through opacity-60">{p.precio_original} Bs</p>
+                  <p className="mb-0.5 text-[10px] text-muted-foreground line-through opacity-60">{convert(p.precio_original, currency)} {sym}</p>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-lg font-bold text-primary sm:text-xl">{p.precio_descuento}</span>
-                    <span className="text-[10px] text-primary/70 sm:text-xs">Bs</span>
+                    <span className="text-lg font-bold text-primary sm:text-xl">{convert(p.precio_descuento, currency)}</span>
+                    <span className="text-[10px] text-primary/70 sm:text-xs">{sym}</span>
                   </div>
                   <p className="mt-1 text-[9px] text-muted-foreground sm:text-[10px]">{t(p.descripcionKey)}</p>
                   <div className="mt-1.5 space-y-0.5">

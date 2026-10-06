@@ -5,19 +5,34 @@
  * Es el mismo camino que usa la app (`go_backend/internal/provider/flacrescue`),
  * adaptado a lo que la landing sí puede hacer:
  *
- *   1. IDENTIDAD. Con un ISRC de un proveedor que puede dar fe de él
- *      (`matching.esProveedorAutoritativoISRC`) se le pide a la extensión
- *      `qobuz-web` su `checkAvailability(isrc, título, artista, {duration_ms})`,
- *      que devuelve el id de la pista VERIFICADA de Qobuz. Sin ISRC confiable se
- *      busca por nombre y se rankea con el matching del backend
+ *   1. IDENTIDAD. Se compara con el matching del backend
  *      (`bestOriginalAlbumDuracion`): título + artista + álbum + duración, con
- *      las versiones no originales descartadas.
+ *      las versiones no originales descartadas. El ISRC manda cuando existe, en
+ *      este orden de precisión:
+ *        a. El ISRC de una fuente que puede dar fe de él
+ *           (`matching.esProveedorAutoritativoISRC`) se resuelve con
+ *           `qobuz-web.checkAvailability`, primero SOLO por ISRC (exacto y
+ *           rápido) y después con el título sin créditos entre paréntesis (el
+ *           paréntesis hacía fallar su `titlesMatch`). Un ISRC que Qobuz no
+ *           indexa NO arma cuarentena: eso es un "no está", no un canal caído.
+ *        b. Si la fuente no publica ISRC (Spotify, TIDAL, Amazon, YouTube) o el
+ *           suyo no está indexado, se le pide el ISRC al catálogo de respaldo
+ *           (`isrcDeRespaldo`, Deezer es autoritativo) y se resuelve por él. Así
+ *           las 8 fuentes terminan matcheando por el mismo identificador.
+ *        c. Si tampoco, se busca por nombre en Qobuz y, cuando el título declara
+ *           `ARTISTA - Canción` (re-subidos), se reintenta con lo que el título
+ *           dice en vez del canal que figura como artista.
  *   2. AUDIO. Ese id se canjea por una URL de CDN de Qobuz con el relay del
  *      proyecto Stash (`stash_relay.go`): una config firmada y pública trae la
  *      `relay_key`, y el mint va firmado con HMAC-SHA256. La URL trae su propio
- *      vencimiento (`etsp`), que se usa como TTL de la caché.
+ *      vencimiento (`etsp`), que se usa como TTL de la caché. Un `503 busy` del
+ *      relay se reintenta con espera corta (dentro de un presupuesto de 7 s):
+ *      "ocupado" no es "no tengo esa pista" y bajar al adelanto por eso era
+ *      parte del "rescató una demo que no sirve".
  *   3. RESPALDO. Si el catálogo o el relay no responden, cae al adelanto público
- *      de 30 s (`extensions/rescate.ts`), igual que la demo hacía antes.
+ *      de 30 s (`extensions/rescate.ts`), igual que la demo hacía antes; ese
+ *      adelanto se COMPRUEBA con un GET de dos bytes antes de devolverlo, y si
+ *      no suena se prueba el siguiente candidato.
  *
  * NOTA de alcance: los otros canales del backend (`arcod`, `espejos`) viven de
  * pools de cuentas de terceros que hoy están vacíos/baneados (ver
@@ -27,13 +42,17 @@
  * una función a `canales` y llamarla antes que el respaldo.
  */
 
-import { buscarEnExtension, llamarExtension } from "@/server/extensions";
+import { buscarEnExtension, isrcDeRespaldo, llamarExtension } from "@/server/extensions";
 import { rescatarAudio } from "@/server/extensions/rescate";
 import type { Item } from "@/server/extensions";
 import {
   bestOriginalAlbumDuracion,
+  esISRCValido,
   esProveedorAutoritativoISRC,
+  normalizarISRC,
   preferirISRC,
+  sinCreditosParenteticos,
+  splitSearchQuery,
   type TrackResult,
 } from "@/server/matching";
 
@@ -178,62 +197,105 @@ function ttlDeEnlace(enlace: string): number {
   return Math.min(ttl, TTL_ENLACE_MAX_MS);
 }
 
-async function mintearEn(base: string, clave: string, trackId: string): Promise<{ url: string; bitDepth: number; sampleRate: number; ttl: number } | null> {
-  const ts = Math.floor(Date.now() / 1000);
-  const firma = await firmarStash(clave, trackId, FORMATO_FLAC, ts);
+/**
+ * El relay responde `503 {"error":"busy"}` cuando está saturado. Eso NO es
+ * "no tengo esa pista": es "volvé en un momento". Distinguirlo es la diferencia
+ * entre reintentar y bajar a un adelanto de 30 s sin motivo — justo el caso de
+ * "rescató una demo que no sirve". Se reintenta con una espera corta.
+ */
+const REINTENTOS_BUSY = 3;
+const ESPERA_BUSY_MS = [400, 800, 1600];
+/**
+ * Techo de TODOS los intentos de mint de una pista. Reintentar vale, pero no a
+ * cualquier precio: la demo no puede quedarse 20 s esperando al relay mientras
+ * el usuario mira un spinner. Al agotarse, cae al adelanto como antes.
+ */
+const PRESUPUESTO_MINT_MS = 7_000;
+
+function dormir(ms: number): Promise<void> {
+  return new Promise((ok) => setTimeout(ok, ms));
+}
+
+/** Espera del reintento: la del encabezado si el relay la manda, si no la fija. */
+function esperaDeBusy(res: Response, intento: number): number {
+  const cabecera = Number(res.headers.get("retry-after") ?? 0);
+  if (Number.isFinite(cabecera) && cabecera > 0) return Math.min(cabecera * 1000, 4000);
+  return ESPERA_BUSY_MS[Math.min(intento, ESPERA_BUSY_MS.length - 1)];
+}
+
+type Mint = { url: string; bitDepth: number; sampleRate: number; ttl: number };
+
+async function mintearEn(base: string, clave: string, trackId: string, limite: number): Promise<Mint | null> {
   const url = `${base}/v1/qobuz/file?track_id=${encodeURIComponent(trackId)}&format_id=${FORMATO_FLAC}`;
-  const control = new AbortController();
-  const reloj = setTimeout(() => control.abort(), TIMEOUT_MINT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: control.signal,
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "application/json",
-        "X-Stash-Version": "1",
-        "X-Stash-Install": INSTALL,
-        "X-Stash-Ts": String(ts),
-        "X-Stash-Auth": firma,
-        // "stream" (no "download"): el relay pacea las descargas y esto es una
-        // reproducción, igual que hace la app en el camino de streaming.
-        "X-Stash-Purpose": "stream",
-      },
-    });
-    if (!res.ok) return null;
-    const cuerpo = (await res.json()) as {
-      url?: string;
-      format_id?: number;
-      bit_depth?: number;
-      sample_rate?: number;
-    };
-    const audio = String(cuerpo.url ?? "");
-    // Un 200 con error adentro es el peor caso del contrato: se trata como fallo
-    // para no devolverle al reproductor una URL que no es.
-    if (!audio.startsWith("https://")) return null;
-    if (Number(cuerpo.format_id ?? 0) < 6) return null;
-    // Sin `etsp` el reproductor no puede derivar el vencimiento.
-    if (!/[?&]etsp=\d+/.test(audio)) return null;
-    return {
-      url: audio,
-      bitDepth: Number(cuerpo.bit_depth ?? 0),
-      sampleRate: Number(cuerpo.sample_rate ?? 0),
-      ttl: ttlDeEnlace(audio),
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(reloj);
+
+  for (let intento = 0; intento <= REINTENTOS_BUSY; intento++) {
+    if (Date.now() >= limite) return null;
+    const ts = Math.floor(Date.now() / 1000);
+    const firma = await firmarStash(clave, trackId, FORMATO_FLAC, ts);
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), Math.min(TIMEOUT_MINT_MS, Math.max(1000, limite - Date.now())));
+    try {
+      const res = await fetch(url, {
+        signal: control.signal,
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "application/json",
+          "X-Stash-Version": "1",
+          "X-Stash-Install": INSTALL,
+          "X-Stash-Ts": String(ts),
+          "X-Stash-Auth": firma,
+          // "stream" (no "download"): el relay pacea las descargas y esto es una
+          // reproducción, igual que hace la app en el camino de streaming.
+          "X-Stash-Purpose": "stream",
+        },
+      });
+      if (res.status === 429 || res.status === 503) {
+        const espera = esperaDeBusy(res, intento);
+        if (intento < REINTENTOS_BUSY && Date.now() + espera < limite) {
+          await dormir(espera);
+          continue;
+        }
+        return null;
+      }
+      if (!res.ok) return null;
+      const cuerpo = (await res.json()) as {
+        url?: string;
+        format_id?: number;
+        bit_depth?: number;
+        sample_rate?: number;
+      };
+      const audio = String(cuerpo.url ?? "");
+      // Un 200 con error adentro es el peor caso del contrato: se trata como fallo
+      // para no devolverle al reproductor una URL que no es.
+      if (!audio.startsWith("https://")) return null;
+      if (Number(cuerpo.format_id ?? 0) < 6) return null;
+      // Sin `etsp` el reproductor no puede derivar el vencimiento.
+      if (!/[?&]etsp=\d+/.test(audio)) return null;
+      return {
+        url: audio,
+        bitDepth: Number(cuerpo.bit_depth ?? 0),
+        sampleRate: Number(cuerpo.sample_rate ?? 0),
+        ttl: ttlDeEnlace(audio),
+      };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(reloj);
+    }
   }
+  return null;
 }
 
 /** Pide el FLAC de [trackId] probando las bases del relay en orden de prioridad. */
-async function mintaStash(trackId: string): Promise<{ url: string; bitDepth: number; sampleRate: number; ttl: number } | null> {
+async function mintaStash(trackId: string): Promise<Mint | null> {
+  const limite = Date.now() + PRESUPUESTO_MINT_MS;
   let config = await traerConfigStash();
   for (let intento = 0; intento < 2 && config; intento++) {
     for (const base of config.bases) {
-      const mint = await mintearEn(base, config.clave, trackId);
+      const mint = await mintearEn(base, config.clave, trackId, limite);
       if (mint) return mint;
     }
+    if (Date.now() >= limite) return null;
     // La config puede traer una clave rotada: se recarga UNA vez.
     config = intento === 0 ? await traerConfigStash(true) : null;
   }
@@ -259,37 +321,84 @@ function aTrackResult(i: Item): TrackResult {
 }
 
 /**
- * Cuarentena del contrato por ISRC: si `checkAvailability` acaba de fallar, no
- * se vuelve a pagar su ronda de red en cada reproducción. Es la misma idea que
- * la cuarentena de bases del canal en el backend: un canal caído no se consulta
- * en cada canción mientras siga caído.
+ * Cuarentena del contrato por ISRC: si el canal FALLA, no se vuelve a pagar su
+ * ronda de red en cada reproducción. Es la misma idea que la cuarentena de
+ * bases del canal en el backend: un canal caído no se consulta en cada canción
+ * mientras siga caído.
+ *
+ * Ojo con qué arma la cuarentena: solo la excepción (canal caído, timeout, geo
+ * bloqueo). Un "no está" (`available: false`) es una respuesta VÁLIDA y no dice
+ * nada del ISRC de la siguiente canción; tratarla como fallo dejaba 10 minutos
+ * sin verificar NINGÚN ISRC tras la primera pista que el catálogo no indexaba.
  */
 let isrcEnCuarentenaHasta = 0;
 const CUARENTENA_ISRC_MS = 10 * 60 * 1000;
 
-/** Id de la pista de Qobuz verificada por ISRC (contrato `checkAvailability`). */
+/**
+ * Id de la pista de Qobuz verificada por ISRC (contrato `checkAvailability`).
+ *
+ * Dos intentos, del más exacto al más flexible:
+ *
+ *   1. POR ISRC SOLO. Qobuz indexa el ISRC como consulta y devuelve la pista
+ *      exacta en ~1 s, sin depender de que el título coincida.
+ *   2. POR NOMBRE. Solo si el ISRC no está indexado. Se manda el título SIN los
+ *      créditos entre paréntesis: `Get Lucky (feat. Pharrell Williams and Nile
+ *      Rodgers)` hacía fallar `checkAvailability` —su `titlesMatch` no perdona
+ *      el paréntesis— mientras que `Get Lucky` lo resolvía al instante. El ISRC
+ *      sigue viajando en la llamada, así que la verificación sigue siendo exacta.
+ */
 async function idVerificadoPorISRC(p: PeticionAudio, isrc: string): Promise<string | null> {
   if (Date.now() < isrcEnCuarentenaHasta) return null;
-  try {
+
+  const pedirId = async (args: unknown[]): Promise<string | null> => {
     const r = await llamarExtension<{ available?: boolean; track_id?: string }>({
       sesion: SESION_CATALOGO,
       ext: "qobuz-web",
       metodo: "checkAvailability",
-      args: [
-        isrc,
-        p.titulo,
-        p.artista,
-        { duration_ms: Math.max(0, Math.round(p.duracionMs ?? 0)) },
-      ],
+      args,
     });
     const id = String(r?.track_id ?? "").trim();
-    if (r?.available && id) return id;
-    isrcEnCuarentenaHasta = Date.now() + CUARENTENA_ISRC_MS;
-    return null;
+    return r?.available && id ? id : null;
+  };
+
+  try {
+    const exacto = await pedirId([isrc, "", "", { duration_ms: 0 }]);
+    if (exacto) return exacto;
+
+    const sinCreditos = sinCreditosParenteticos(p.titulo).trim() || p.titulo;
+    return await pedirId([
+      isrc,
+      sinCreditos,
+      p.artista,
+      { duration_ms: Math.max(0, Math.round(p.duracionMs ?? 0)) },
+    ]);
   } catch {
     isrcEnCuarentenaHasta = Date.now() + CUARENTENA_ISRC_MS;
     return null;
   }
+}
+
+/**
+ * Identidad por el ISRC que publica el catálogo de respaldo.
+ *
+ * Es el puente entre fuentes: una pista que llegó de Spotify, TIDAL, Amazon o
+ * YouTube no trae ISRC (o trae uno inferido), y por eso no tenía con qué pedir
+ * el FLAC. Se le pide el ISRC a Deezer —autoritativo— con el matching estricto
+ * y con ESE código se resuelve la pista de Qobuz. Así las 8 fuentes terminan
+ * matcheando por el mismo identificador, no solo las que lo publican.
+ */
+async function idPorISRCDeRespaldo(
+  p: PeticionAudio,
+): Promise<{ id: string; isrc: string } | null> {
+  const isrc = await isrcDeRespaldo({
+    titulo: p.titulo,
+    artista: p.artista,
+    album: p.album ?? "",
+    duracionMs: p.duracionMs ?? 0,
+  });
+  if (!isrc) return null;
+  const id = await idVerificadoPorISRC(p, isrc);
+  return id ? { id, isrc } : null;
 }
 
 /** Id de la pista de Qobuz elegida por NOMBRE, con el ranking del backend. */
@@ -322,10 +431,13 @@ async function idPorNombre(p: PeticionAudio, isrcConfiable: string | null): Prom
   if (!best) return null;
   // CONFIRMACIÓN de identidad: si el ISRC del pedido es confiable y el candidato
   // declara OTRO, no es la misma grabación (el catálogo renombró o el ranking
-  // eligió un parecido). Un candidato sin ISRC sigue valiendo: SoundCloud y
-  // YouTube no lo publican y rechazarlos dejaría canciones sin audio.
-  if (isrcConfiable && best.isrc && best.isrc.trim().toUpperCase() !== isrcConfiable) return null;
-  return { id: best.id, duracionMs: best.durationMs, isrc: best.isrc };
+  // eligió un parecido). Se comparan plegados (sin guiones ni espacios), porque
+  // el mismo código llega escrito de formas distintas según la fuente. Un
+  // candidato sin ISRC sigue valiendo: SoundCloud y YouTube no lo publican y
+  // rechazarlos dejaría canciones sin audio.
+  const declarado = normalizarISRC(best.isrc);
+  if (isrcConfiable && declarado && declarado !== normalizarISRC(isrcConfiable)) return null;
+  return { id: best.id, duracionMs: best.durationMs, isrc: declarado };
 }
 
 /* ── Resolución ──────────────────────────────────────────────────── */
@@ -338,6 +450,8 @@ async function idPorNombre(p: PeticionAudio, isrcConfiable: string | null): Prom
 export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
   const titulo = (p.titulo ?? "").trim();
   const artista = (p.artista ?? "").trim();
+  const album = (p.album ?? "").trim();
+  const duracionMs = Math.max(0, Math.round(p.duracionMs ?? 0));
   if (!titulo && !p.isrc) return null;
 
   const clave = claveDe(p);
@@ -353,26 +467,66 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     };
   }
 
-  // Solo el ISRC de un proveedor que puede dar fe de él sirve para identificar.
+  const isrcPedido = normalizarISRC(p.isrc);
+  const bienFormado = esISRCValido(isrcPedido);
+  // Solo el ISRC de un proveedor que puede dar fe de él IDENTIFICA: el de
+  // YouTube/SoundCloud se infiere por parecido, así que no se usa para rechazar.
   const isrcConfiable =
-    p.isrc && esProveedorAutoritativoISRC(p.ext ?? "") ? String(p.isrc).trim().toUpperCase() : null;
+    bienFormado && esProveedorAutoritativoISRC(p.ext ?? "") ? isrcPedido : null;
+  // Como PISTA sirve igual aunque no sea autoritativo: si Qobuz tiene indexado
+  // ese ISRC, es la misma grabación por definición (el código es único).
+  const isrcPista = bienFormado ? isrcPedido : null;
+  const pedido = { ...p, titulo, artista, album, duracionMs };
 
-  const candidatos: Array<{ id: string; duracionMs: number; isrc: string | null; proveedor: string }> = [];
+  type Cand = { id: string; duracionMs: number; isrc: string | null; proveedor: string };
+  const porIsrc = isrcConfiable ?? isrcPista;
 
-  if (isrcConfiable) {
-    const id = await idVerificadoPorISRC({ ...p, titulo, artista }, isrcConfiable);
-    if (id) candidatos.push({ id, duracionMs: p.duracionMs ?? 0, isrc: isrcConfiable, proveedor: "qobuz-web" });
-  }
+  /** Identidad de una pista, en orden de precisión. */
+  const juntarCandidatos = async (q: PeticionAudio): Promise<Cand[]> => {
+    const lista: Cand[] = [];
+    if (porIsrc) {
+      const id = await idVerificadoPorISRC(q, porIsrc);
+      if (id) lista.push({ id, duracionMs, isrc: porIsrc, proveedor: "qobuz-web" });
+    }
+    if (lista.length > 0 || !q.titulo) return lista;
 
-  if (candidatos.length === 0) {
-    const porNombre = await idPorNombre({ ...p, titulo, artista }, isrcConfiable);
-    if (porNombre) {
-      candidatos.push({
-        id: porNombre.id,
-        duracionMs: porNombre.duracionMs,
-        isrc: porNombre.isrc || isrcConfiable,
+    // Dos caminos en PARALELO y en orden de precisión: identidad por el ISRC que
+    // publica el respaldo (todas las fuentes terminan matcheando por ISRC) y,
+    // como red, el ranking por nombre. Antes eran secuenciales y la red por
+    // nombre sola dejaba afuera a las fuentes sin ISRC.
+    const porRespaldo = porIsrc
+      ? Promise.resolve(null)
+      : idPorISRCDeRespaldo(q).catch(() => null);
+    const porNombre = idPorNombre(q, isrcConfiable).catch(() => null);
+
+    const [respaldo, nombre] = await Promise.all([porRespaldo, porNombre]);
+    if (respaldo) {
+      lista.push({ id: respaldo.id, duracionMs, isrc: respaldo.isrc, proveedor: "qobuz-web" });
+    }
+    if (nombre) {
+      lista.push({
+        id: nombre.id,
+        duracionMs: nombre.duracionMs,
+        isrc: nombre.isrc || isrcConfiable,
         proveedor: "qobuz-web",
       });
+    }
+    return lista;
+  };
+
+  let candidatos = await juntarCandidatos(pedido);
+
+  // El re-subido de YouTube/SoundCloud pone `ARTISTA - Canción` en el TÍTULO y
+  // el canal en el campo artista ("Monsieur Blaya", "Maitre 80"), así que el
+  // primer intento no acredita a nadie y el matching estricto —con razón— no
+  // resuelve. Se reintenta con lo que el TÍTULO declara: es la señal que el
+  // usuario tiene delante y la que el filtro por artista no pudo ver.
+  if (candidatos.length === 0) {
+    const partes = splitSearchQuery(titulo);
+    const artistaTitulo = partes.artist.trim();
+    const tituloTitulo = partes.title.trim();
+    if (artistaTitulo && tituloTitulo) {
+      candidatos = await juntarCandidatos({ ...pedido, titulo: tituloTitulo, artista: artistaTitulo });
     }
   }
 
@@ -403,7 +557,13 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
 
   // Último recurso: el adelanto público de 30 s, que es lo que la demo ya sabía
   // hacer. Se cachea con una vida corta para no repetir la búsqueda al saltar.
-  const preview = await rescatarAudio({ titulo, artista, isrc: p.isrc ?? null, duracionMs: p.duracionMs ?? 0 });
+  const preview = await rescatarAudio({
+    titulo,
+    artista,
+    album,
+    isrc: p.isrc ?? null,
+    duracionMs,
+  });
   if (!preview) return null;
   return {
     url: preview.url,
@@ -411,6 +571,7 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     canal: "preview",
     proveedor: "catalogo",
     id: null,
-    isrc: p.isrc ?? null,
+    // El ISRC real del adelanto cuando el catálogo lo publica; si no, el pedido.
+    isrc: normalizarISRC(preview.isrc) || (bienFormado ? isrcPedido : null),
   };
 }

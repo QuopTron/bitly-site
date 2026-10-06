@@ -11,6 +11,13 @@
  * demo nunca queda muda por un canal caído.
  */
 
+import {
+  bestOriginalAlbumDuracion,
+  esISRCValido,
+  normalizarISRC,
+  splitSearchQuery,
+  type TrackResult,
+} from "@/server/matching";
 import { categoriaDe } from "./normalizar";
 import type { Item, TipoResultado } from "./tipos";
 
@@ -110,7 +117,11 @@ function desdeDeezer(datos: any, tipo: TipoResultado): Item[] {
         r.picture_medium ??
         null,
       duracionMs: tipo === "track" && r.duration ? Number(r.duration) * 1000 : 0,
-      isrc: null,
+      // Deezer SÍ publica el ISRC en el resultado de búsqueda. Descartarlo (como
+      // se hacía) dejaba al respaldo sin la única identidad de la grabación: la
+      // pista venía con su ISRC y la interfaz mostraba `null`, así que no había
+      // nada con qué confirmar que lo rescatado era lo pedido.
+      isrc: normalizarISRC(r.isrc) || null,
     });
   }
   return items;
@@ -131,21 +142,63 @@ export async function buscarRespaldo(
 
 /* ── Rescate de audio ────────────────────────────────────────────── */
 
-export type Audio = { url: string; duracion: number };
+export type Audio = { url: string; duracion: number; isrc?: string | null };
 
-function conPreview(r: any): Audio | null {
-  return r?.preview ? { url: String(r.preview), duracion: PREVIEW_SEGUNDOS } : null;
+/* ── Validación del adelanto ─────────────────────────────────────── */
+
+/**
+ * Un adelanto que no suena no sirve de nada.
+ *
+ * Los CDN (Deezer sobre todo) devuelven URLs firmadas que caducan y a veces
+ * responden 403/404, así que el catálogo puede publicar un `preview` que el
+ * reproductor no puede abrir. Sirvió poner un `<audio>` que no arranca: acá se
+ * comprueba ANTES de devolverlo, con un GET de dos bytes, y si no suena se pasa
+ * al siguiente candidato en vez de dejar la demo muda.
+ */
+const TTL_VIVO_MS = 10 * 60 * 1000;
+const TTL_MUERTO_MS = 60 * 1000;
+const vivos = new Map<string, { ok: boolean; expira: number }>();
+
+async function suenaDeVerdad(url: string): Promise<boolean> {
+  const previo = vivos.get(url);
+  if (previo && previo.expira > Date.now()) return previo.ok;
+
+  let ok = false;
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), 5000);
+  try {
+    const res = await fetch(url, { signal: control.signal, headers: { Range: "bytes=0-1" } });
+    const tipo = (res.headers.get("content-type") ?? "").toLowerCase();
+    ok = (res.status === 200 || res.status === 206) && (tipo === "" || tipo.startsWith("audio/") || tipo.startsWith("application/octet-stream"));
+    if (ok) await res.arrayBuffer();
+  } catch {
+    ok = false;
+  } finally {
+    clearTimeout(reloj);
+  }
+
+  if (vivos.size > 200) vivos.clear();
+  vivos.set(url, { ok, expira: Date.now() + (ok ? TTL_VIVO_MS : TTL_MUERTO_MS) });
+  return ok;
+}
+
+function conPreview(r: any, isrc: string | null = null): Audio | null {
+  return r?.preview ? { url: String(r.preview), duracion: PREVIEW_SEGUNDOS, isrc } : null;
 }
 
 async function porIsrc(isrc: string): Promise<Audio | null> {
-  const datos = await pedir(`${DEEZER}/track/isrc:${encodeURIComponent(isrc)}`);
-  return conPreview(datos);
+  const codigo = normalizarISRC(isrc);
+  if (!esISRCValido(codigo)) return null;
+  const datos = await pedir(`${DEEZER}/track/isrc:${encodeURIComponent(codigo)}`);
+  const audio = conPreview(datos, codigo);
+  return audio && (await suenaDeVerdad(audio.url)) ? audio : null;
 }
 
 async function porDeezer(titulo: string, artista: string, duracionMs = 0): Promise<Audio | null> {
   const q = `artist:"${artista}" track:"${titulo}"`;
   const datos = await pedir(`${DEEZER}/search?q=${encodeURIComponent(q)}&limit=8`);
   const filas: any[] = Array.isArray(datos?.data) ? datos.data : [];
+  const candidatos: Audio[] = [];
   for (const r of filas) {
     if (!r?.preview) continue;
     const nombre = String(r?.title ?? "");
@@ -154,9 +207,9 @@ async function porDeezer(titulo: string, artista: string, duracionMs = 0): Promi
     if (!coincideTitulo(titulo, nombre)) continue;
     if (artista && !coincideArtista(artista, artistaFound)) continue;
     if (!duracionCoincide(duracionMs, durFound)) continue;
-    return conPreview(r);
+    candidatos.push({ url: String(r.preview), duracion: PREVIEW_SEGUNDOS, isrc: normalizarISRC(r.isrc) || null });
   }
-  return null;
+  return primerVivo(candidatos);
 }
 
 async function porItunes(titulo: string, artista: string, duracionMs = 0): Promise<Audio | null> {
@@ -164,6 +217,7 @@ async function porItunes(titulo: string, artista: string, duracionMs = 0): Promi
   const url = `${ITUNES}?${new URLSearchParams({ term, entity: "song", limit: "8", media: "music" })}`;
   const datos = await pedir(url);
   const filas: any[] = Array.isArray(datos?.results) ? datos.results : [];
+  const candidatos: Audio[] = [];
   for (const r of filas) {
     if (!r?.previewUrl) continue;
     const nombre = String(r.trackName ?? "");
@@ -172,7 +226,15 @@ async function porItunes(titulo: string, artista: string, duracionMs = 0): Promi
     if (!coincideTitulo(titulo, nombre)) continue;
     if (artista && !coincideArtista(artista, artistaFound)) continue;
     if (!duracionCoincide(duracionMs, durFound)) continue;
-    return { url: String(r.previewUrl), duracion: PREVIEW_SEGUNDOS };
+    candidatos.push({ url: String(r.previewUrl), duracion: PREVIEW_SEGUNDOS, isrc: null });
+  }
+  return primerVivo(candidatos);
+}
+
+/** Primer adelanto que REALMENTE suena (los demás se descartan, no se devuelven). */
+async function primerVivo(candidatos: Audio[]): Promise<Audio | null> {
+  for (const c of candidatos) {
+    if (await suenaDeVerdad(c.url)) return c;
   }
   return null;
 }
@@ -180,9 +242,59 @@ async function porItunes(titulo: string, artista: string, duracionMs = 0): Promi
 export type PistaParaRescatar = {
   titulo: string;
   artista: string;
+  album?: string | null;
   isrc?: string | null;
   duracionMs?: number | null;
 };
+
+/**
+ * ISRC de una pista que NO lo traía, sacado del catálogo de respaldo.
+ *
+ * Es el puente que faltaba entre las 8 fuentes: Spotify, TIDAL, Amazon y
+ * YouTube no publican el ISRC (o solo el de la fuente primaria), así que una
+ * pista que llegó de ahí no tenía con qué identificarse en el catálogo FLAC.
+ * Deezer sí es autoritativo y devuelve el ISRC en su búsqueda, de modo que se
+ * busca la MISMA grabación por título+artista+álbum+duración con el matching
+ * estricto del backend y de ahí sale un ISRC que sí se puede usar para pedir el
+ * FLAC completo. Sin esto, esas fuentes caían al adelanto de 30 s.
+ */
+export async function isrcDeRespaldo(p: PistaParaRescatar): Promise<string | null> {
+  const titulo = (p.titulo ?? "").trim();
+  const artista = (p.artista ?? "").trim();
+  if (!titulo) return null;
+
+  const consulta = `${titulo} ${artista}`.trim();
+  let items: Item[];
+  try {
+    items = await buscarRespaldo(consulta, "track", 10);
+  } catch {
+    return null;
+  }
+
+  const cands: TrackResult[] = items
+    .filter((i) => i.tipo === "track" && (i.isrc ?? "") !== "")
+    .map((i) => ({
+      id: i.id,
+      title: i.titulo,
+      artist: i.artista,
+      album: i.album,
+      coverUrl: i.caratula ?? "",
+      durationMs: i.duracionMs,
+      isrc: normalizarISRC(i.isrc),
+      provider: "deezer",
+    }));
+  if (cands.length === 0) return null;
+
+  const best = bestOriginalAlbumDuracion(
+    titulo,
+    artista,
+    (p.album ?? "").trim(),
+    Math.max(0, Math.round(p.duracionMs ?? 0)),
+    cands,
+  );
+  const isrc = normalizarISRC(best?.isrc);
+  return esISRCValido(isrc) ? isrc : null;
+}
 
 /**
  * Resuelve el adelanto de 30 s de una pista: primero por ISRC (identidad
@@ -202,5 +314,20 @@ export async function rescatarAudio(p: PistaParaRescatar): Promise<Audio | null>
     const porD = await porDeezer(titulo, artista, duracionMs);
     if (porD) return porD;
   }
-  return porItunes(titulo, artista, duracionMs);
+  const porI = await porItunes(titulo, artista, duracionMs);
+  if (porI) return porI;
+
+  // Último intento: el re-subido trae `ARTISTA - Canción` en el título y el
+  // CANAL en el campo artista, así que la búsqueda por artista no acreditó a
+  // nadie. Se prueba con lo que el título declara. Sin esto, las pistas de
+  // YouTube/SoundCloud quedaban MUDAS en vez de sonar su adelanto.
+  const partes = splitSearchQuery(titulo);
+  const artistaTitulo = partes.artist.trim();
+  const tituloTitulo = partes.title.trim();
+  if (!artistaTitulo || !tituloTitulo) return null;
+  if (artistaTitulo.toLowerCase() === artista.toLowerCase()) return null;
+
+  const porDTitulo = await porDeezer(tituloTitulo, artistaTitulo, duracionMs);
+  if (porDTitulo) return porDTitulo;
+  return porItunes(tituloTitulo, artistaTitulo, duracionMs);
 }

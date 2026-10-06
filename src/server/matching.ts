@@ -724,6 +724,24 @@ export function splitSearchQuery(q: string): { title: string; artist: string } {
 /* ── Autoridad del ISRC (matching_isrc_autoridad.go) ─────────────── */
 
 /**
+ * Pliega un ISRC a su forma comparable: mayúsculas y SOLO [A-Z0-9].
+ *
+ * El mismo ISRC llega escrito de tres maneras según la fuente: `USQX91300108`
+ * (Deezer, Qobuz), `US-QX9-13-00108` (etiquetas y algunos álbumes) y
+ * `USQX91 300108` (copiado a mano). Comparar las cadenas crudas hacía que dos
+ * formas del MISMO código se vieran distintas y la verificación por ISRC
+ * fallara sin motivo.
+ */
+export function normalizarISRC(valor: string | null | undefined): string {
+  return String(valor ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/** ¿Tiene forma de ISRC? 2 letras de país + 3 de registrante + 7 dígitos. */
+export function esISRCValido(valor: string | null | undefined): boolean {
+  return /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(normalizarISRC(valor));
+}
+
+/**
  * Proveedores cuyo ISRC viene del sello (catálogo) o cuyo índice ES el ISRC. En
  * los demás (YouTube/YouTube Music/SoundCloud) el ISRC se INFIERE por parecido
  * de nombre, así que no prueba identidad.
@@ -739,12 +757,12 @@ export function esProveedorAutoritativoISRC(nombre: string): boolean {
 
 /** Adelanta los candidatos que declaran [isrc] sin descartar al resto. */
 export function preferirISRC(isrc: string, cands: TrackResult[]): TrackResult[] {
-  const pedido = isrc.trim().toUpperCase();
+  const pedido = normalizarISRC(isrc);
   if (pedido === "" || cands.length < 2) return cands;
   const coinciden: TrackResult[] = [];
   const resto: TrackResult[] = [];
   for (const c of cands) {
-    if ((c.isrc ?? "").trim().toUpperCase() === pedido) coinciden.push(c);
+    if (normalizarISRC(c.isrc) === pedido) coinciden.push(c);
     else resto.push(c);
   }
   if (coinciden.length === 0) return cands;
@@ -757,9 +775,9 @@ export function preferirISRC(isrc: string, cands: TrackResult[]): TrackResult[] 
  */
 export function esCandidatoPorISRC(isrc: string, t: TrackResult | null | undefined): boolean {
   if (!t) return false;
-  const pedido = isrc.trim().toUpperCase();
-  const declarado = (t.isrc ?? "").trim().toUpperCase();
+  const pedido = normalizarISRC(isrc);
+  const declarado = normalizarISRC(t.isrc);
   if (pedido === "" || declarado === "" || pedido !== declarado) return false;
   const titulo = t.title.trim();
-  return titulo === "" || titulo.toLowerCase() === isrc.trim().toLowerCase();
+  return titulo === "" || normalizarISRC(titulo) === pedido;
 }

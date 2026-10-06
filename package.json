@@ -10,6 +10,7 @@
     "capturas": "node scripts/capturas/capturar.mjs",
     "capturas:reales": "node scripts/capturas/reemplazar.mjs",
     "probar:cuota": "node scripts/probar-cuota.mjs",
+    "probar:opiniones": "node scripts/probar-opiniones.mjs",
     "probar:demo": "node scripts/verificar-demo.mjs"
   },
   "dependencies": {

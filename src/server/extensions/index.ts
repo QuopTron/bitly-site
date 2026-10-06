@@ -13,5 +13,11 @@ export {
   type BusquedaExtension,
   type LlamadaExtension,
 } from "./runtime";
-export { buscarRespaldo, rescatarAudio, type Audio, type PistaParaRescatar } from "./rescate";
+export {
+  buscarRespaldo,
+  rescatarAudio,
+  isrcDeRespaldo,
+  type Audio,
+  type PistaParaRescatar,
+} from "./rescate";
 export type { Item, ResultadoBusqueda, TipoResultado } from "./tipos";

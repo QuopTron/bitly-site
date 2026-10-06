@@ -23,7 +23,9 @@ function textoFlexible(v: unknown): string {
   }
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
-    return textoDeCampo(o, "name", "title", "text", "label", "artist", "artists");
+    // `display_name` es el nombre visible del dueño de una lista en Spotify; sin
+    // él, el objeto `owner` se leía vacío y la lista quedaba sin autor.
+    return textoDeCampo(o, "name", "title", "text", "label", "display_name", "displayName", "artist", "artists");
   }
   return "";
 }
@@ -188,7 +190,21 @@ export function normalizarItems(resultado: unknown, tipoFijo?: TipoResultado): I
       id,
       tipo,
       titulo: textoDeCampo(m, "name", "title"),
-      artista: textoDeCampo(m, "artists", "artist", "album_artist", "artist_name", "owner", "creator"),
+      // Según la fuente, el autor de una lista o de un subido llega en `owner`,
+      // `creator`, `user` o `uploader`; sin leerlos, las categorías artista y
+      // lista llegaban sin su dato.
+      artista: textoDeCampo(
+        m,
+        "artists",
+        "artist",
+        "album_artist",
+        "artist_name",
+        "owner",
+        "creator",
+        "user",
+        "uploader",
+        "owner_name",
+      ),
       album:
         tipo === "track"
           ? textoDeCampo(m, "album_name", "album_title", "albumName", "album")

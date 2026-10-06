@@ -1,39 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Check, ChevronDown, Gem, MessageCircle, X } from "lucide-react";
 import { getLanguage, useI18n } from "@/lib/i18n";
-import { format, initRates, useCurrency } from "@/lib/currency";
+import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
-
-const WHATSAPP = "+59173427418";
-const INSTAGRAM = "flox_devs_sucre";
-const IG_URL = "https://www.instagram.com/flox_devs_sucre/";
+import { INSTAGRAM_URL, TIKTOK_URL, enlaceWhatsApp } from "@/lib/contacto";
+import TikTokIcon from "@/components/ui/tiktok-icon";
 
 /** Lo que más pesa al decidir, sacado de la comparativa de planes. */
 const BENEFICIOS = ["premiumCompare2", "premiumCompare3", "premiumCompare6"];
+
+/** Cuánto late el puntito de "sin leer" antes de quedarse quieto. */
+const LATIDO_MS = 6000;
 
 /**
  * Burbuja flotante que acompaña al visitante en todo el sitio.
  *
  * Muestra el precio vigente (se actualiza solo con la fase de `pricing.ts` y
- * con la moneda elegida) y lleva el contacto directo de WhatsApp/Instagram.
+ * con la moneda elegida) y lleva el contacto directo de WhatsApp/Instagram/TikTok.
  */
 export default function PremiumBubble() {
   const t = useI18n();
   const [moneda] = useCurrency();
   const [abierto, setAbierto] = useState(false);
   const [visto, setVisto] = useState(false);
-  const [cotizado, setCotizado] = useState(false);
+  const [latido, setLatido] = useState(true);
   const raiz = useRef<HTMLDivElement>(null);
 
-  // Cotizaciones: el precio en otra moneda nunca se muestra con el número de Bs.
+  // El puntito late un rato y después se queda quieto: un latido infinito deja
+  // un cuadro animándose para siempre, y en gama baja eso se paga en batería.
   useEffect(() => {
-    let vivo = true;
-    initRates().then(() => {
-      if (vivo) setCotizado(true);
-    });
-    return () => {
-      vivo = false;
-    };
+    const reloj = window.setTimeout(() => setLatido(false), LATIDO_MS);
+    return () => window.clearTimeout(reloj);
   }, []);
 
   // Cerrar con Escape o tocando afuera.
@@ -57,10 +54,11 @@ export default function PremiumBubble() {
 
   const fase = getFaseActual();
   const lang = getLanguage();
-  const precio = moneda === "BOB" || cotizado ? format(fase.precio, moneda) : format(fase.precio, "BOB");
-  const precioAntes = fase.enOferta ? format(fase.original, moneda === "BOB" || cotizado ? moneda : "BOB") : null;
-  const mensaje = t("bubbleWaText").replace("{precio}", precio);
-  const whatsapp = `https://wa.me/${WHATSAPP.replace("+", "")}?text=${encodeURIComponent(mensaje)}`;
+  // Sin cotización a mano, `format` cae solo a bolivianos: nunca un número de
+  // Bs con símbolo de dólar.
+  const precio = format(fase.precio, moneda);
+  const precioAntes = fase.enOferta ? format(fase.original, moneda) : null;
+  const whatsapp = enlaceWhatsApp(t("bubbleWaText").replace("{precio}", precio));
 
   const alternar = () => {
     setAbierto((v) => !v);
@@ -75,7 +73,7 @@ export default function PremiumBubble() {
   return (
     <div
       ref={raiz}
-      className="fixed bottom-4 right-3 z-40 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6"
+      className="fixed bottom-4 right-3 z-40 flex flex-col items-end gap-2 animate-in fade-in slide-in-from-bottom-4 duration-500 sm:bottom-6 sm:right-6"
     >
       {abierto && (
         <div
@@ -119,7 +117,7 @@ export default function PremiumBubble() {
                 {t("plansPremiumPrice")}
               </span>
               {fase.enOferta && (
-                <span className="rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                <span className="rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
                   {lang === "es" ? fase.etiqueta : fase.etiquetaEn}
                 </span>
               )}
@@ -145,19 +143,28 @@ export default function PremiumBubble() {
               href={whatsapp}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-[#25D366]/25 transition hover:scale-[1.02] hover:shadow-xl hover:shadow-[#25D366]/35 active:scale-[0.98]"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#15803D] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-[#15803D]/30 transition hover:bg-[#0E7A46] hover:scale-[1.02] hover:shadow-xl hover:shadow-[#15803D]/40 active:scale-[0.98]"
             >
               <MessageCircle className="h-4 w-4" />
               {t("bubbleCta")}
             </a>
             <a
-              href={IG_URL}
+              href={INSTAGRAM_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/40 px-3 py-2.5 text-xs font-semibold text-muted-foreground transition hover:border-[#833AB4]/40 hover:text-foreground"
             >
               <Camera className="h-3.5 w-3.5" />
               {t("bubbleIgLabel")}
+            </a>
+            <a
+              href={TIKTOK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/40 px-3 py-2.5 text-xs font-semibold text-muted-foreground transition hover:border-foreground/50 hover:text-foreground"
+            >
+              <TikTokIcon className="h-3.5 w-3.5" />
+              {t("bubbleTiktokLabel")}
             </a>
             <button
               type="button"
@@ -182,7 +189,9 @@ export default function PremiumBubble() {
       >
         {!visto && (
           <span aria-hidden className="absolute -right-0.5 -top-0.5 flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+            {latido && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+            )}
             <span className="relative inline-flex h-3 w-3 rounded-full bg-primary ring-2 ring-card" />
           </span>
         )}

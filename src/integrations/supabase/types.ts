@@ -131,12 +131,62 @@ export type Database = {
         }
         Relationships: []
       }
+      comentarios: {
+        Row: {
+          aprobado: boolean
+          creado: string
+          estrellas: number
+          id: number
+          nombre: string
+          texto: string
+        }
+        Insert: {
+          aprobado?: boolean
+          creado?: string
+          estrellas: number
+          id?: number
+          nombre: string
+          texto: string
+        }
+        Update: {
+          aprobado?: boolean
+          creado?: string
+          estrellas?: number
+          id?: number
+          nombre?: string
+          texto?: string
+        }
+        Relationships: []
+      }
+      vistas: {
+        Row: {
+          id: number
+          updated_at: string
+          visitas: number
+        }
+        Insert: {
+          id?: number
+          updated_at?: string
+          visitas?: number
+        }
+        Update: {
+          id?: number
+          updated_at?: string
+          visitas?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
       increment_download: { Args: { _platform: string }; Returns: number }
+      increment_vista: { Args: Record<PropertyKey, never>; Returns: number }
+      resumen_sitio: {
+        Args: Record<PropertyKey, never>
+        Returns: { opiniones: number; promedio: number; vistas: number; reparto: number[] }[]
+      }
     }
     Enums: {
       [_ in never]: never

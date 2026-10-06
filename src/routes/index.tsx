@@ -4,7 +4,9 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import Particles from "@/components/particles";
 import GlowBackground from "@/components/layout/glow-background";
+import ScrollProgress from "@/components/layout/scroll-progress";
 import Header from "@/components/layout/header";
+import SectionNav from "@/components/layout/section-nav";
 import HeroSection from "@/components/hero/hero-section";
 import Footer from "@/components/layout/footer";
 import MobileModal from "@/components/modals/mobile-modal";
@@ -12,6 +14,7 @@ import FaqModal from "@/components/modals/faq-modal";
 import ReleaseModal from "@/components/modals/release-modal";
 import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
+import Opiniones from "@/components/opiniones";
 import DemoPlayer from "@/components/demo/demo-player";
 import { initRates } from "@/lib/currency";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
@@ -97,9 +100,11 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <ScrollProgress />
       <Particles />
       <GlowBackground />
       <Header />
+      <SectionNav />
       <main className="flex-1 flex flex-col justify-center">
         <HeroSection
           tagline={info.tagline} description={info.description} version={release?.version || info.version}
@@ -112,6 +117,7 @@ export default function Index() {
       </main>
       <DemoPlayer />
       <InstallSection onDownload={(p) => handleDownload(p, null)} />
+      <Opiniones />
       <PlansSection />
       <Footer />
       <MobileModal open={showMobile} onClose={() => setShowMobile(false)} />

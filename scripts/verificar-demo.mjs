@@ -121,6 +121,15 @@ const foto = async (ses, nombre, clip) => {
 const { browser, cerrar } = await abrirChrome({ puerto: PUERTO, perfil: PERFIL });
 const ses = await nuevaSesion(browser, { w: 1100, h: 1000, dpr: 2 });
 
+// El sitio publica una Content-Security-Policy: acá se anota cualquier cosa que
+// esa política bloquee (una imagen de portada, una fuente, el audio), para que
+// una CSP mal puesta se vea como una aserción fallada y no como "no carga".
+await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
+  source:
+    "window.__csp=[];" +
+    "addEventListener('securitypolicyviolation',e=>window.__csp.push((e.violatedDirective||'?')+' <- '+(e.blockedURI||'?')));",
+});
+
 try {
   console.log(`${BASE} · marco de celular\n`);
   await ses.ev("Page.navigate", { url: `${BASE}/#demo` });
@@ -215,6 +224,60 @@ try {
   check("tiene silencio", estado?.controles?.silencio === true);
   check("tiene volumen", estado?.controles?.volumen === true);
   check("la cuota bajó a 3", /3/.test(estado?.cuota ?? ""), String(estado?.cuota));
+
+  // ── 4. Las cuatro categorías se pueden recorrer ──
+  // Cambiar de burbuja reabre la búsqueda: el listado tiene que pasar a
+  // álbumes, cada fila decir QUÉ es (insignia) y abrir una traer su música.
+  await clic(ses, "#demo form [role='group'] button:nth-child(2)");
+  await esperar(
+    ses,
+    `document.querySelectorAll("#demo ul li button [class*=uppercase]").length > 0`,
+    { nombre: "resultados de álbumes", tiempo: 30000 },
+  );
+  const insignias = await js(
+    ses,
+    `[...document.querySelectorAll("#demo ul li button [class*=uppercase]")].map((e) => e.innerText.trim())`,
+  );
+  console.log("insignias:", JSON.stringify(insignias.slice(0, 4)));
+  check(
+    "cambiar de burbuja cambia la categoría del listado",
+    /álbum|album/i.test(insignias?.[0] ?? ""),
+    insignias?.[0],
+  );
+
+  const album = await js(
+    ses,
+    `(() => { const b = document.querySelector("#demo ul li button"); if (!b) return null;
+      return { titulo: b.querySelector("span.truncate")?.innerText?.trim() ?? "",
+               insignia: b.querySelector("[class*=uppercase]")?.innerText?.trim() ?? "" }; })()`,
+  );
+  await clic(ses, "#demo ul li button");
+  await esperar(ses, `document.querySelectorAll("#demo ul li button").length > 0`, {
+    nombre: "música del álbum abierto",
+  });
+  await dormir(1200);
+  const trasAbrir = await js(
+    ses,
+    `({ valor: document.querySelector("#demo input")?.value ?? "",
+        insignias: [...document.querySelectorAll("#demo ul li button [class*=uppercase]")].length,
+        filas: [...document.querySelectorAll("#demo ul li button")].slice(0, 2).map((b) => b.innerText.replace(/\\s+/g, " ").trim()) })`,
+  );
+  console.log("tras abrir el álbum:", JSON.stringify(trasAbrir));
+  check(
+    "abrir un álbum busca su música",
+    Boolean(album?.titulo) && trasAbrir?.valor === album.titulo,
+    `${album?.titulo} → ${trasAbrir?.valor}`,
+  );
+  check("la música del álbum vuelve a ser canciones", (trasAbrir?.insignias ?? 1) === 0, String(trasAbrir?.insignias));
+
+  // Volver a Canciones para dejar el marco como estaba.
+  await clic(ses, "#demo form [role='group'] button:nth-child(1)");
+  await dormir(600);
+
+  // La CSP tiene que dejar pasar todo lo que la demo necesita de verdad.
+  const csp = await js(ses, `(window.__csp || []).slice(0, 8)`);
+  check("la CSP no bloquea nada de lo que carga la demo", (csp?.length ?? 0) === 0, JSON.stringify(csp));
+
   await foto(ses, "demo-miniplayer.png", "#demo [role='img']");
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);

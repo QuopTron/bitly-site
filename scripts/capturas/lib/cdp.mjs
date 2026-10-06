@@ -76,9 +76,20 @@ export async function esperarChrome(puerto, intentos = 60) {
   throw new Error("Chrome no respondió en el puerto " + puerto);
 }
 
-/** Cómo se agregó el perfil temporal (para poder borrarlo al salir). */
+/**
+ * Borra el perfil temporal. En Windows Chrome suelta los archivos un instante
+ * después de morir: sin reintentos, `rmSync` falla con EPERM y se lleva puesto
+ * el código de salida del harness aunque las aserciones hayan pasado.
+ */
 export function limpiarPerfil(perfil) {
-  fs.rmSync(perfil, { recursive: true, force: true });
+  for (let i = 0; i < 5; i++) {
+    try {
+      fs.rmSync(perfil, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+  }
 }
 
 /**
@@ -89,7 +100,9 @@ export function limpiarPerfil(perfil) {
  */
 export async function abrirChrome({ puerto, perfil, chrome = CHROME_POR_DEFECTO, extra = [] }) {
   if (!fs.existsSync(chrome)) throw new Error(`No encontré Chrome en ${chrome} (usá CHROME_PATH=…)`);
-  fs.rmSync(perfil, { recursive: true, force: true });
+  // Si una corrida anterior quedó a medio morir, el perfil puede estar tomado:
+  // se reintenta en vez de abortar.
+  limpiarPerfil(perfil);
 
   const proceso = spawn(
     chrome,

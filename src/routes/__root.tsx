@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
 import { getLanguage } from "@/lib/i18n";
+import { instalarReveals } from "@/lib/reveal";
+import { contarVista } from "@/lib/vistas";
 import PremiumBubble from "@/components/layout/premium-bubble";
+import { SCRIPT_TEMA_INICIAL } from "@/lib/tema";
 import "../styles.css";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -12,7 +15,24 @@ function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener("langchange", h);
     return () => window.removeEventListener("langchange", h);
   }, []);
-  return <html lang={lang}><head><HeadContent /></head><body>{children}<Scripts /></body></html>;
+  return (
+    // `anim` viaja en el HTML inicial: los bloques `data-reveal` se ocultan
+    // antes del primer pintado (nada de "aparecer y esconderse para animarse")
+    // y sólo si hay JS para volver a mostrarlos. Sin JS, el <noscript> los deja
+    // visibles.
+    <html lang={lang} className="anim">
+      <head>
+        {/* El tema guardado se aplica acá, antes de pintar: es lo único que
+            corre fuera de React y evita el destello del tema equivocado. */}
+        <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA_INICIAL }} />
+        <HeadContent />
+        <noscript>
+          <style>{`[data-reveal]{opacity:1!important;transform:none!important;animation:none!important}`}</style>
+        </noscript>
+      </head>
+      <body>{children}<Scripts /></body>
+    </html>
+  );
 }
 
 function NotFound() {
@@ -49,6 +69,14 @@ const ErrorPage: ErrorRouteComponent = ({ error, reset }) => {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // Un solo observador para todas las apariciones del sitio. Corre después de
+  // que los hijos montaron, así ya encuentra los `data-reveal` en el DOM.
+  useEffect(() => instalarReveals(), []);
+  // La visita se cuenta al entrar al sitio, en cualquier ruta. Va acá y no en
+  // la sección de opiniones: el contador no depende de que esa sección exista.
+  useEffect(() => {
+    void contarVista();
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />

@@ -1,11 +1,9 @@
-import { Check, X as XIcon, MessageCircle, Camera, Gem, Zap } from "lucide-react";
+import { Check, X as XIcon, MessageCircle, Gem } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { getFaseActual } from "@/lib/pricing";
 import { useCurrency, format } from "@/lib/currency";
-
-const WHATSAPP = "+59173427418";
-const INSTAGRAM = "flox_devs_sucre";
-const IG_URL = "https://www.instagram.com/flox_devs_sucre/";
+import { retraso } from "@/lib/reveal";
+import { enlaceWhatsApp } from "@/lib/contacto";
 
 const freeFeatures = ["freeCompare1", "freeCompare2", "freeCompare3", "freeCompare4"];
 const freeBlocked = ["freeNoUnlimited", "freeNoFlac", "freeNoBatch"];
@@ -19,7 +17,7 @@ export default function PlansSection() {
 
   return (
     <section id="planes" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
-      <div className="mb-8 text-center sm:mb-10">
+      <div className="mb-8 text-center sm:mb-10" data-reveal>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Gem className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("plansSubtitle")}
@@ -29,6 +27,7 @@ export default function PlansSection() {
             {t("plansTitle")}
           </span>
         </h2>
+        <span aria-hidden className="bit-regla mx-auto mt-3 block h-px w-24 opacity-60" />
         <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
           {t("plansDescription")}
         </p>
@@ -36,10 +35,16 @@ export default function PlansSection() {
 
       <div className="mx-auto grid max-w-4xl gap-4 sm:gap-6 md:grid-cols-2">
         {/* Free */}
-        <div className="rounded-2xl bg-gradient-to-b from-card to-card/80 p-5 ring-1 ring-border/60 sm:p-6">
+        <div
+          data-reveal
+          style={retraso(60)}
+          className="rounded-2xl bg-gradient-to-b from-card to-card/80 p-5 ring-1 ring-border/60 transition-all duration-300 hover:-translate-y-1 hover:ring-border/80 sm:p-6"
+        >
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-bold sm:text-xl">{t("plansFree")}</h3>
-            <span className="rounded-full bg-muted/50 px-3 py-1 text-xs font-semibold text-muted-foreground">{t("plansFreePrice")}</span>
+            <span className="rounded-full bg-muted/50 px-3 py-1 text-xs font-semibold text-muted-foreground">
+              {t("plansFreePrice").replace("{price}", format(0, currency))}
+            </span>
           </div>
           <ul className="space-y-3">
             {freeFeatures.map((k) => (
@@ -63,9 +68,13 @@ export default function PlansSection() {
         </div>
 
         {/* Premium */}
-        <div className="relative rounded-2xl bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 ring-1 ring-primary/25 shadow-xl shadow-primary/5 sm:p-6">
+        <div
+          data-reveal
+          style={retraso(150)}
+          className="relative rounded-2xl bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 ring-1 ring-primary/25 shadow-xl shadow-primary/5 transition-all duration-300 hover:-translate-y-1 hover:ring-primary/45 sm:p-6"
+        >
           {enOferta && (
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-green-500/30 sm:px-4 sm:text-xs">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-[#15803D]/30 sm:px-4 sm:text-xs">
               {lang === "es" ? etiqueta : etiquetaEn}
             </div>
           )}
@@ -92,7 +101,7 @@ export default function PlansSection() {
 
       {/* How to get it */}
       <div className="mx-auto mt-10 max-w-2xl sm:mt-12">
-        <div className="rounded-2xl border border-border bg-gradient-to-b from-card/60 to-card/30 p-5 backdrop-blur sm:p-6">
+        <div data-reveal className="rounded-2xl border border-border bg-gradient-to-b from-card/60 to-card/30 p-5 backdrop-blur sm:p-6">
           <h3 className="mb-4 text-center text-base font-bold sm:text-lg">{t("plansHowToGet")}</h3>
 
           <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
@@ -110,31 +119,23 @@ export default function PlansSection() {
             </div>
           </div>
 
-          {/* Contact buttons */}
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          {/* Contacto: SÓLO el de compra. El par WhatsApp + Instagram que había
+              acá se repetía tal cual, un scroll más abajo, en la tarjeta de
+              contacto (`#contacto`), que es además la que apunta la barra de
+              secciones. Los datos (número y usuario) viven en esa tarjeta y
+              salen de `@/lib/contacto`: acá el botón no los repite. */}
+          <div className="mt-5 flex justify-center">
             <a
-              href={`https://wa.me/59173427418?text=${encodeURIComponent("Hola! Quiero Bitly Premium")}`}
+              href={enlaceWhatsApp(t("plansWaText"))}
               target="_blank"
               rel="noopener noreferrer"
-              className="group flex items-center justify-center gap-2.5 rounded-xl bg-[#25D366] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#25D366]/20 transition-all hover:shadow-xl hover:shadow-[#25D366]/30 hover:scale-[1.02] active:scale-[0.98]"
+              className="group flex w-full items-center justify-center gap-2.5 rounded-xl bg-[#15803D] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#15803D]/25 transition-all hover:bg-[#0E7A46] hover:shadow-xl hover:shadow-[#15803D]/35 hover:scale-[1.02] active:scale-[0.98] sm:w-auto"
             >
-              <MessageCircle className="h-5 w-5" />
-              <div className="text-left">
-                <div className="text-[10px] font-normal opacity-80">{t("plansWhatsAppLabel")}</div>
-                <div>{WHATSAPP}</div>
-              </div>
-            </a>
-            <a
-              href={IG_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#FCAF45] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#833AB4]/20 transition-all hover:shadow-xl hover:shadow-[#833AB4]/30 hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <Camera className="h-5 w-5" />
-              <div className="text-left">
-                <div className="text-[10px] font-normal opacity-80">{t("plansIGLabel")}</div>
-                <div>@{INSTAGRAM}</div>
-              </div>
+              <MessageCircle className="h-5 w-5" aria-hidden />
+              <span className="text-left">
+                <span className="block text-[10px] font-normal opacity-80">{t("plansWhatsAppHint")}</span>
+                <span className="block">{t("plansWhatsAppLabel")}</span>
+              </span>
             </a>
           </div>
         </div>

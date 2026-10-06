@@ -1,18 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronRight, Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
 import { audioDe, buscar, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
-import { extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
+import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
+import { retraso } from "@/lib/reveal";
+import { enlaceWhatsApp } from "@/lib/contacto";
 import ExtensionPicker from "@/components/demo/extension-picker";
 import CategoriaChips from "@/components/demo/categoria-chips";
 import DemoCodigoModal from "@/components/modals/demo-codigo-modal";
-
-const WHATSAPP = "+59173427418";
 
 /** Rellena `{n}` / `{price}` sin sacar el texto del diccionario. */
 function Plantilla(texto: string, vars: Record<string, string | number>) {
@@ -28,6 +28,14 @@ const mmss = (seg: number) => {
 const restante = (ms: number) => {
   const min = Math.max(0, Math.ceil(ms / 60_000));
   return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+};
+
+/** Etiqueta corta de cada TIPO de resultado, para la insignia de la fila. */
+const CLAVES_TIPO: Record<Pista["tipo"], string> = {
+  track: "demoKindTrack",
+  album: "demoKindAlbum",
+  artist: "demoKindArtist",
+  playlist: "demoKindPlaylist",
 };
 
 /** Los tres marcos. El reproductor es el mismo; cambia el chasis. */
@@ -263,6 +271,31 @@ export default function DemoPlayer() {
     [aleatorio, indiceDe, pista, reproducir, resultados],
   );
 
+  /** Filtro de canciones de la fuente activa: adónde vuelve un item abierto. */
+  const filtroCanciones = info.filtros.find((f) => categoriaDeFiltro(f.id) === "tracks")?.id ?? null;
+
+  /**
+   * Abre un resultado que NO es una canción (álbum, artista, lista).
+   *
+   * Antes toda fila llamaba a `reproducir`, así que tocar un álbum pedía el
+   * audio de un álbum y terminaba en "esa pista no tiene audio". Ahora las
+   * cuatro categorías se pueden recorrer: tocar un álbum, artista o lista busca
+   * su música por nombre, que es el paso siguiente natural.
+   */
+  const abrirItem = useCallback(
+    (p: Pista) => {
+      if (!p.titulo.trim()) return;
+      setTermino(p.titulo);
+      setFiltro(filtroCanciones);
+      setPista(null);
+      setSonando(false);
+      setAvisoAudio(null);
+      audio.current?.pause();
+      void hacerBusqueda(p.titulo, extension, filtroCanciones);
+    },
+    [extension, filtroCanciones, hacerBusqueda],
+  );
+
   const alternar = useCallback(() => {
     const el = audio.current;
     if (!el || !pista) return;
@@ -302,8 +335,10 @@ export default function DemoPlayer() {
     ? Plantilla(t("demoLadderNext"), { price: format(fase.siguiente.precio, moneda) })
     : Plantilla(t("demoLadderFinal"), { price: format(fase.precio, moneda) });
 
-  const mensajeWa = `Hola! Probé la demo de Bitly y quiero el Premium (${format(fase.precio, moneda)}). ¿Me contás cómo lo activo?`;
-  const whatsapp = `https://wa.me/${WHATSAPP.replace("+", "")}?text=${encodeURIComponent(mensajeWa)}`;
+  // El número vive en `@/lib/contacto` (antes estaba copiado también acá).
+  const whatsapp = enlaceWhatsApp(
+    `Hola! Probé la demo de Bitly y quiero el Premium (${format(fase.precio, moneda)}). ¿Me contás cómo lo activo?`,
+  );
 
   const irADescargas = () => {
     setTopeAbierto(false);
@@ -312,9 +347,9 @@ export default function DemoPlayer() {
 
   return (
     <section id="demo" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
-      <div className="mb-8 text-center sm:mb-10">
+      <div className="mb-8 text-center sm:mb-10" data-reveal>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary backdrop-blur sm:px-4 sm:text-xs">
-          <Play className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+          <Play className="anim-late h-3.5 w-3.5 sm:h-4 sm:w-4" />
           {t("demoBadge")}
         </div>
         <h2 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
@@ -322,11 +357,15 @@ export default function DemoPlayer() {
             {t("demoTitle")}
           </span>
         </h2>
+        <span aria-hidden className="bit-regla mx-auto mt-3 block h-px w-24 opacity-60" />
         <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">{t("demoDescription")}</p>
       </div>
 
+      {/* `min-w-0` en las columnas: por defecto un ítem de grid no baja de su
+          ancho mínimo de contenido, así que en un celular de 320 px la columna
+          del marco empujaba la página 20 px a lo ancho. */}
       <div className="mx-auto grid max-w-5xl items-start gap-5 lg:grid-cols-[1fr_15rem]">
-        <div>
+        <div className="min-w-0">
           {/* ── Conmutador de marco ── */}
           <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             <div
@@ -344,10 +383,10 @@ export default function DemoPlayer() {
                     onClick={() => setMarco(id)}
                     aria-pressed={activo}
                     title={t(MARCOS[id].etiqueta)}
-                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all duration-300 ease-out active:scale-95 ${
                       activo
-                        ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
-                        : "text-muted-foreground hover:text-foreground"
+                        ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 ring-1 ring-primary/40"
+                        : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
                     }`}
                   >
                     <Icono className="h-3.5 w-3.5" />
@@ -359,6 +398,20 @@ export default function DemoPlayer() {
           </div>
 
           {/* ── El chasis ── */}
+          {/* El halo late detrás del aparato (y no dentro: así el recorte del
+              chasis lo sigue tapando). En celular queda quieto, que es donde
+              una capa con blur moviéndose se paga cara. */}
+          {/* `min(20rem,100%)`: el ancho de "teléfono" de 20rem no entra en el
+              recuadro de un celular de 320 px (la página tiene 288 px útiles). */}
+          <div className="relative mx-auto w-full max-w-[min(20rem,100%)] sm:max-w-none">
+            {/* El halo sangra hacia arriba y abajo, pero a los costados sólo 1
+                píxel: con `-inset-6` se salía del viewport en un celular de 360
+                px y aparecía scroll horizontal. */}
+            <div
+              aria-hidden
+              className="anim-halo pointer-events-none absolute inset-x-0 -inset-y-6 rounded-[3rem] opacity-20 blur-2xl"
+              style={{ background: "var(--gradient-hero)" }}
+            />
           <div
             role="img"
             aria-label={t("demoAriaMarco")}
@@ -405,13 +458,23 @@ export default function DemoPlayer() {
                 <button
                   type="submit"
                   disabled={cargando}
-                  className="shrink-0 rounded-xl bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-40"
+                  className="shrink-0 rounded-xl bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground transition-all duration-200 hover:opacity-90 active:scale-95 disabled:opacity-40"
                 >
                   {cargando ? t("demoSearching") : t("demoSearchBtn")}
                 </button>
               </div>
 
-              <CategoriaChips extension={info} filtro={filtro} onCambiado={setFiltro} />
+              <CategoriaChips
+                extension={info}
+                filtro={filtro}
+                onCambiado={(f) => {
+                  setFiltro(f);
+                  // Cambiar de burbuja REABRE la búsqueda con la categoría nueva:
+                  // si no, el listado seguía mostrando canciones con la burbuja
+                  // "Álbumes" encendida hasta apretar Buscar de nuevo.
+                  if (termino.trim()) void hacerBusqueda(termino, extension, f);
+                }}
+              />
             </form>
 
             {/* Cuota + botón de canje */}
@@ -419,7 +482,7 @@ export default function DemoPlayer() {
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
                   cuota.premium
-                    ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white ring-transparent"
+                    ? "bg-gradient-to-r from-[#15803D] to-[#0E7A46] text-white ring-transparent"
                     : cuota.sinCuota
                       ? "bg-destructive/10 text-destructive ring-destructive/25"
                       : "bg-primary/15 text-primary ring-primary/25"
@@ -503,14 +566,31 @@ export default function DemoPlayer() {
 
               {resultados && resultados.length > 0 && (
                 <ul className="space-y-1">
-                  {resultados.map((p) => {
+                  {resultados.map((p, i) => {
                     const esActual = pista?.id === p.id;
+                    // Canciones, álbumes, artistas y listas conviven en el mismo
+                    // listado: cada fila dice QUÉ es y con qué dato cuenta
+                    // (artista, álbum o dueño de la lista), y las que no son
+                    // canciones se ABREN en vez de intentar sonar.
+                    const esCancion = p.tipo === "track";
+                    const secundaria = [p.artista, esCancion ? p.album : ""]
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .join(" · ");
+                    // Cada fila entra con un pelín más de retraso que la
+                    // anterior: el listado "cae" en cascada en vez de aparecer
+                    // de golpe.
                     return (
-                      <li key={p.id}>
+                      <li
+                        key={p.id}
+                        className="anim-entra"
+                        style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}
+                      >
                         <button
                           type="button"
-                          onClick={() => void reproducir(p)}
-                          className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition ${
+                          onClick={() => (esCancion ? void reproducir(p) : abrirItem(p))}
+                          title={esCancion ? undefined : Plantilla(t("demoAbrirItem"), { nombre: p.titulo })}
+                          className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-all duration-200 active:scale-[0.985] ${
                             esActual ? "bg-primary/15 ring-1 ring-primary/25" : "hover:bg-card/60"
                           }`}
                         >
@@ -522,8 +602,17 @@ export default function DemoPlayer() {
                             </span>
                           )}
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold">{p.titulo}</span>
-                            <span className="block truncate text-[10px] text-muted-foreground">{p.artista}</span>
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-xs font-semibold">{p.titulo}</span>
+                              {!esCancion && (
+                                <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[8px] font-bold uppercase tracking-wide text-primary ring-1 ring-primary/25">
+                                  {t(CLAVES_TIPO[p.tipo])}
+                                </span>
+                              )}
+                            </span>
+                            <span className="block truncate text-[10px] text-muted-foreground">
+                              {secundaria || "\u00a0"}
+                            </span>
                           </span>
                           <span
                             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${
@@ -532,6 +621,8 @@ export default function DemoPlayer() {
                           >
                             {preparando === p.id ? (
                               <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : !esCancion ? (
+                              <ChevronRight className="h-3.5 w-3.5" />
                             ) : esActual && sonando ? (
                               <Pause className="h-3 w-3" />
                             ) : (
@@ -556,11 +647,32 @@ export default function DemoPlayer() {
                   />
                 </div>
                 <div className="mt-2.5 flex items-center gap-2.5">
+                  {/* Ecualizador: tres barritas que suben y bajan. Son tres
+                      `scaleY` en el compositor, no valen nada. */}
+                  {sonando && (
+                    <span aria-hidden className="flex h-3.5 shrink-0 items-end gap-[2px]">
+                      {[0, 1, 2].map((i) => (
+                        <span
+                          key={i}
+                          className="anim-eco h-full w-[2px] rounded-full bg-primary"
+                          style={{ animationDelay: `${i * 0.18}s`, animationDuration: `${0.85 + i * 0.14}s` }}
+                        />
+                      ))}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-semibold">{pista.titulo}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-xs font-semibold">{pista.titulo}</span>
+                      {pista.canal === "preview" && (
+                        <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-[8px] font-bold uppercase tracking-wide text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-400">
+                          {t("demoPreviewTag")}
+                        </span>
+                      )}
+                    </span>
                     <span className="block truncate text-[10px] text-muted-foreground">
                       {pista.artista ? `${pista.artista} · ` : ""}
                       {mmss(avance)} / {mmss(pista.duracion || 30)}
+                      {pista.isrc ? ` · ISRC ${pista.isrc}` : ""}
                     </span>
                   </span>
                 </div>
@@ -595,7 +707,7 @@ export default function DemoPlayer() {
                     onClick={alternar}
                     aria-label={t("demoPlayPause")}
                     aria-pressed={sonando}
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition hover:scale-105 active:scale-95"
+                    className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition duration-200 hover:scale-105 active:scale-90"
                   >
                     {sonando ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                   </button>
@@ -648,7 +760,9 @@ export default function DemoPlayer() {
                   {t("demoMiniCta")}
                 </button>
 
-                <p className="mt-1.5 text-center text-[9px] text-muted-foreground/50">{t("demoPreviewNote")}</p>
+                <p className="mt-1.5 text-center text-[9px] text-muted-foreground/50">
+                  {pista.canal === "preview" ? t("demoPreviewTag") : t("demoPreviewNote")}
+                </p>
               </div>
             )}
 
@@ -657,10 +771,11 @@ export default function DemoPlayer() {
               <div className="mx-auto mb-1.5 mt-1 h-1 w-24 rounded-full bg-foreground/15" />
             )}
           </div>
+          </div>
         </div>
 
         {/* ── Indicador de precio ── */}
-        <aside className="rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
+        <aside data-reveal style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
           <h3 className="text-sm font-bold">{t("demoLadderTitle")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -737,7 +852,7 @@ export default function DemoPlayer() {
                 href={whatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#25D366] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-[#25D366]/20 transition hover:opacity-90 active:scale-[0.98]"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#15803D] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-[#15803D]/25 transition hover:bg-[#0E7A46] hover:opacity-90 active:scale-[0.98]"
               >
                 {t("plansWhatsAppLabel")}
               </a>

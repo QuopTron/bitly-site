@@ -180,7 +180,16 @@ try {
     ["youtube", "ytmusic-spotiflac", "soundcloud", ""].map((n) => m.esProveedorAutoritativoISRC(n)),
     Array(4).fill(false),
   );
+  // El MISMO ISRC llega escrito distinto según la fuente; compararlo crudo hacía
+  // que la verificación fallara sin motivo.
+  igual("ISRC con guiones se pliega", m.normalizarISRC("US-QX9-13-00108"), "USQX91300108");
+  igual("ISRC con espacios y minúsculas se pliega", m.normalizarISRC("us qx91300108"), "USQX91300108");
+  igual("ISRC con forma válida", m.esISRCValido("USQX91300108"), true);
+  igual("ISRC corto no es válido", m.esISRCValido("USQX9130010"), false);
+  igual("ISRC sin forma (guiones de más) no es válido", m.esISRCValido("US-QX9-13"), false);
+  igual("preferirISRC cruza guiones", m.preferirISRC("US-QX9-13-00108", [t("a", {}), t("b", { isrc: "USQX91300108" })]).map((x) => x.id), ["b", "a"]);
   igual("esCandidatoPorISRC por índice", m.esCandidatoPorISRC("USRC17607839", t("x", { title: "USRC17607839", isrc: "USRC17607839" })), true);
+  igual("esCandidatoPorISRC cruza guiones", m.esCandidatoPorISRC("US-QX9-13-00108", t("x", { title: "USQX91300108", isrc: "USQX91300108" })), true);
   igual("esCandidatoPorISRC con título real", m.esCandidatoPorISRC("USRC17607839", t("x", { title: "Mi Cancion", isrc: "USRC17607839" })), false);
   igual("preferirISRC adelanta sin descartar", m.preferirISRC("USRC17607839", [t("a", {}), t("b", { isrc: "OTRO0000001" }), t("c", { isrc: "USRC17607839" })]).map((x) => x.id), ["c", "a", "b"]);
   igual("preferirISRC sin match no reordena", m.preferirISRC("XXXX0000000", [t("a", {}), t("b", {}), t("c", {})]).map((x) => x.id), ["a", "b", "c"]);

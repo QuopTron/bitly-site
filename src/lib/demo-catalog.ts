@@ -29,6 +29,11 @@ export type Pista = {
   isrc: string | null;
   /** URL del audio; vacía hasta que se pide reproducir. */
   preview: string | null;
+  /**
+   * De dónde salió el audio ya resuelto: "stash-relay" = FLAC completo;
+   * "preview" = adelanto público de 30 s. Null hasta que se pide reproducir.
+   */
+  canal: "stash-relay" | "preview" | null;
   /** Vino del catálogo de respaldo (la extensión no pudo responder). */
   respaldada: boolean;
 };
@@ -60,6 +65,7 @@ function desdeItem(item: Item, ext: ExtensionId, respaldada: boolean): Pista {
     duracion: item.duracionMs > 0 ? Math.round(item.duracionMs / 1000) : 0,
     isrc: item.isrc,
     preview: null,
+    canal: null,
     respaldada,
   };
 }
@@ -99,7 +105,9 @@ export async function buscar(
  * artista, álbum y duración porque el matching de la app desempata con ellos.
  */
 export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
-  if (p.preview) return { url: p.preview, duracion: p.duracion || PREVIEW_SEGUNDOS };
+  if (p.preview) {
+    return { url: p.preview, duracion: p.duracion || PREVIEW_SEGUNDOS, canal: p.canal ?? undefined };
+  }
   const audio = await rescatarDemo({
     titulo: p.titulo,
     artista: p.artista,
@@ -110,6 +118,7 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
   });
   if (!audio) return null;
   p.preview = audio.url;
+  p.canal = audio.canal ?? null;
   if (audio.duracion > 0) p.duracion = audio.duracion;
   else if (!p.duracion) p.duracion = PREVIEW_SEGUNDOS;
   return audio;

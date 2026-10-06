@@ -1,5 +1,6 @@
 import { TrendingUp, Monitor, Smartphone } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { retraso } from "@/lib/reveal";
 
 type Props = { total: number; windows: number; android: number };
 
@@ -11,7 +12,7 @@ export default function StatsBar({ total, windows, android }: Props) {
   const t = useI18n();
 
   return (
-    <div className="flex flex-wrap items-center gap-3 pt-2 sm:gap-4">
+    <div data-reveal style={retraso(400)} className="flex flex-wrap items-center gap-3 pt-2 sm:gap-4">
       <div className="flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />

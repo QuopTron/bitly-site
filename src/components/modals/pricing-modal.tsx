@@ -55,11 +55,11 @@ function getOffer(): Offer {
     if (entry.price < NORMAL_PRICE) {
       return { price: entry.price, pct, label: `${pct}% OFF`, tag: "rising", icon: TrendingUp, end: nextHour, hourSlot: slot + 1 };
     }
-    return { price: NORMAL_PRICE, pct: 0, label: `${NORMAL_PRICE} Bs`, tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
+    return { price: NORMAL_PRICE, pct: 0, label: format(NORMAL_PRICE), tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
 
   if (currentHour >= END_HOUR) {
-    return { price: NORMAL_PRICE, pct: 0, label: `${NORMAL_PRICE} Bs`, tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
+    return { price: NORMAL_PRICE, pct: 0, label: format(NORMAL_PRICE), tag: "permanent", icon: Gem, end: null, hourSlot: 8 };
   }
 
   const timeToStart = at(START_HOUR);
@@ -77,8 +77,8 @@ function formatCountdown(s: number): string {
 }
 
 const TAG_META: Record<string, { label: [string, string]; grad: string }> = {
-  flash:     { label: ["¡Oferta relámpago!", "Flash offer!"],         grad: "from-green-400 to-emerald-500" },
-  rising:    { label: ["¡Precio sube cada hora!", "Price rises hourly!"], grad: "from-amber-400 to-orange-500" },
+  flash:     { label: ["¡Oferta relámpago!", "Flash offer!"],         grad: "from-[#15803D] to-[#0E7A46]" },
+  rising:    { label: ["¡Precio sube cada hora!", "Price rises hourly!"], grad: "from-amber-600 to-orange-600" },
   special:   { label: ["Precio especial", "Special price"],           grad: "from-primary to-accent" },
   permanent: { label: ["Precio normal", "Regular price"],             grad: "from-primary to-accent" },
 };
@@ -135,11 +135,11 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
         <div className="mb-4 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/5 p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-amber-400" />
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">{t("pricingRising")}</span>
+              <TrendingUp className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">{t("pricingRising")}</span>
             </div>
             {showCount && (
-              <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400">
+              <div className="flex items-center gap-1.5 text-xs font-mono text-amber-600 dark:text-amber-400">
                 <Timer className="h-3.5 w-3.5" />
                 {formatCountdown(countdown)}
               </div>
@@ -160,17 +160,17 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
                         : "bg-muted/20"
                   }`}
                 >
-                  <span className={`font-bold ${isActive ? "text-amber-400" : isPast ? "text-muted-foreground" : "text-foreground"}`}>
-                    {entry.price}
+                  <span className={`font-bold ${isActive ? "text-amber-600 dark:text-amber-400" : isPast ? "text-muted-foreground" : "text-foreground"}`}>
+                    {convert(entry.price, currency)}
                   </span>
-                  <span className="text-[8px] text-muted-foreground">Bs</span>
+                  <span className="text-[8px] text-muted-foreground">{sym}</span>
                 </div>
               );
             })}
           </div>
           <p className="mt-2 text-center text-[10px] text-muted-foreground/60">
             {offer.hourSlot <= 8
-              ? `${t("pricingHour")} ${offer.hourSlot}/8 — ${t("pricingNext")}: ${offer.hourSlot < 8 ? makePriceTable(getCurrentPrice())[offer.hourSlot]?.price ?? getCurrentPrice() : getCurrentPrice()} Bs`
+              ? `${t("pricingHour")} ${offer.hourSlot}/8 — ${t("pricingNext")}: ${format(offer.hourSlot < 8 ? makePriceTable(getCurrentPrice())[offer.hourSlot]?.price ?? getCurrentPrice() : getCurrentPrice(), currency)}`
               : t("pricingEnded")}
           </p>
         </div>
@@ -205,7 +205,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
             }`} />
             <span className={`absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-white shadow-lg sm:px-4 sm:text-[10px] ${
               isPct
-                ? "bg-gradient-to-r from-green-500 to-emerald-600 shadow-green-500/40"
+                ? "bg-gradient-to-r from-[#15803D] to-[#0E7A46] shadow-[#15803D]/40"
                 : "bg-gradient-to-r from-primary to-accent shadow-primary/30"
             }`}>
               {t("pricingRecommended")}
@@ -225,7 +225,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
                 <span className="line-through">{convert(getCurrentPrice(), currency)} {sym}</span>
                 <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm ${
                   isPct
-                    ? "bg-gradient-to-r from-green-400/30 to-emerald-400/10 text-green-400 shadow-green-500/20"
+                    ? "bg-gradient-to-r from-green-400/30 to-emerald-400/10 text-green-600 dark:text-green-400 shadow-green-500/20"
                     : "bg-gradient-to-r from-primary/20 to-primary/10 text-primary"
                 }`}>
                   {isPct ? `-${offer.pct}%` : offer.label}
@@ -255,23 +255,23 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
                   : "from-primary/25 to-primary/5 shadow-primary/15 ring-primary/25"
             }`}>
               <offer.icon className={`h-6 w-6 ${
-                offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" :
-                offer.tag === "rising" ? "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" :
+                offer.tag === "flash" ? "text-green-600 dark:text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]" :
+                offer.tag === "rising" ? "text-amber-600 dark:text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" :
                 "text-primary"
               }`} />
             </div>
             <div>
               <p className={`text-sm font-bold ${
-                offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_12px_rgba(74,222,128,0.3)]" :
-                offer.tag === "rising" ? "text-amber-400" :
+                offer.tag === "flash" ? "text-green-600 dark:text-green-400 drop-shadow-[0_0_12px_rgba(74,222,128,0.3)]" :
+                offer.tag === "rising" ? "text-amber-600 dark:text-amber-400" :
                 "text-foreground"
               }`}>
                 {tagLabel}
               </p>
               {showCount && (
                 <div className={`mt-2 flex items-center justify-center gap-2 text-base font-mono font-bold tracking-wider ${
-                  offer.tag === "flash" ? "text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]" :
-                  offer.tag === "rising" ? "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]" :
+                  offer.tag === "flash" ? "text-green-600 dark:text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.4)]" :
+                  offer.tag === "rising" ? "text-amber-600 dark:text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]" :
                   "text-primary"
                 }`}>
                   <Timer className="h-4 w-4" />
@@ -289,15 +289,15 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
                   "https://wa.me/59173427418?text=" +
                     encodeURIComponent(
                       getLanguage() === "es"
-                        ? `¡Hola! Quiero Bitly Premium a ${format(offer.price, "BOB")}${offer.pct > 0 ? ` (${offer.pct}% OFF)` : ""}`
-                        : `Hi! I want Bitly Premium at ${format(offer.price, "BOB")}${offer.pct > 0 ? ` (${offer.pct}% OFF)` : ""}`
+                        ? `¡Hola! Quiero Bitly Premium a ${format(offer.price, currency)}${offer.pct > 0 ? ` (${offer.pct}% OFF)` : ""}`
+                        : `Hi! I want Bitly Premium at ${format(offer.price, currency)}${offer.pct > 0 ? ` (${offer.pct}% OFF)` : ""}`
                     ),
                   "_blank", "noopener,noreferrer"
                 )
               }
               className={`w-full rounded-xl bg-gradient-to-r py-3 text-sm font-bold shadow-lg transition-all duration-200 hover:shadow-xl active:scale-[0.97] ${
                 isPct
-                  ? "text-white from-green-500 to-emerald-600 shadow-green-500/30 hover:shadow-green-500/50"
+                  ? "text-white from-[#15803D] to-[#0E7A46] shadow-[#15803D]/30 hover:shadow-[#15803D]/50"
                   : "text-primary-foreground from-primary to-accent shadow-primary/20 hover:shadow-primary/30"
               }`}
             >

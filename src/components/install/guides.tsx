@@ -55,8 +55,8 @@ export function Aviso({
 }) {
   const estilos = {
     info: { caja: "border-primary/30 bg-primary/5", color: "text-primary" },
-    atencion: { caja: "border-amber-500/30 bg-amber-500/5", color: "text-amber-400" },
-    listo: { caja: "border-emerald-500/30 bg-emerald-500/5", color: "text-emerald-400" },
+    atencion: { caja: "border-amber-500/30 bg-amber-500/5", color: "text-amber-600 dark:text-amber-400" },
+    listo: { caja: "border-emerald-500/30 bg-emerald-500/5", color: "text-emerald-600 dark:text-emerald-400" },
   }[tono];
   const Icono = tono === "atencion" ? AlertCircle : tono === "listo" ? CheckCircle2 : Info;
 
@@ -93,7 +93,7 @@ export function CopiarBoton({ texto, etiqueta }: { texto: string; etiqueta?: str
       onClick={copiar}
       className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold transition sm:text-xs ${
         copiado
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           : "border-border/60 bg-card/40 text-foreground hover:border-primary/40 hover:bg-primary/5"
       }`}
     >
@@ -166,8 +166,19 @@ function Enlace({ href, children }: { href: string; children: ReactNode }) {
 /* ─────────────────────────── Capturas ─────────────────────────── */
 
 function capturasCelular(t: (k: string) => string): Captura[] {
+  // Ancho y alto reales: con eso el navegador reserva el alto antes de que la
+  // imagen llegue, así la sección no se estira cuando carga.
+  const medidas: Array<[number, number]> = [
+    [1170, 2400],
+    [1170, 2259],
+    [1170, 2532],
+    [1170, 2532],
+    [1170, 2532],
+  ];
   return [1, 2, 3, 4, 5].map((n) => ({
     src: [celular1, celular2, celular3, celular4, celular5][n - 1],
+    w: medidas[n - 1][0],
+    h: medidas[n - 1][1],
     alt: t(`installPhoneShot${n}`),
     titulo: t(`installPhoneShot${n}`),
     pie: t(`installPhoneShot${n}Desc`),
@@ -175,8 +186,15 @@ function capturasCelular(t: (k: string) => string): Captura[] {
 }
 
 function capturasPC(t: (k: string) => string): Captura[] {
+  const medidas: Array<[number, number]> = [
+    [2560, 1494],
+    [1120, 1306],
+    [1504, 848],
+  ];
   return [1, 2, 3].map((n) => ({
     src: [pc1, pc2, pc3][n - 1],
+    w: medidas[n - 1][0],
+    h: medidas[n - 1][1],
     alt: t(`installPCShot${n}`),
     titulo: t(`installPCShot${n}`),
     pie: t(`installPCShot${n}Desc`),
@@ -184,8 +202,15 @@ function capturasPC(t: (k: string) => string): Captura[] {
 }
 
 function capturasIOS(t: (k: string) => string): Captura[] {
+  const medidas: Array<[number, number]> = [
+    [1170, 2532],
+    [1170, 2532],
+    [1170, 2532],
+  ];
   return [1, 2, 3].map((n) => ({
     src: [ios1, ios2, ios3][n - 1],
+    w: medidas[n - 1][0],
+    h: medidas[n - 1][1],
     alt: t(`installIOSShot${n}`),
     titulo: t(`installIOSShot${n}`),
     pie: t(`installIOSShot${n}Desc`),
@@ -193,8 +218,15 @@ function capturasIOS(t: (k: string) => string): Captura[] {
 }
 
 function capturasMac(t: (k: string) => string): Captura[] {
+  const medidas: Array<[number, number]> = [
+    [1624, 1128],
+    [1036, 828],
+    [1696, 528],
+  ];
   return [1, 2, 3].map((n) => ({
     src: [mac1, mac2, mac3][n - 1],
+    w: medidas[n - 1][0],
+    h: medidas[n - 1][1],
     alt: t(`installMacShot${n}`),
     titulo: t(`installMacShot${n}`),
     pie: t(`installMacShot${n}Desc`),
@@ -272,7 +304,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
       {conCapturas && (
         <Gallery
           capturas={[
-            { src: tv1, alt: t("installTVShot"), titulo: t("installTVShot"), pie: t("installTVShotDesc") },
+            { src: tv1, w: 3200, h: 1800, alt: t("installTVShot"), titulo: t("installTVShot"), pie: t("installTVShotDesc") },
           ]}
           tipo={"tv" as TipoMarco}
         />
@@ -344,7 +376,7 @@ export function GuiaIOS({ conCapturas = false }: { conCapturas?: boolean }) {
                 key={k}
                 className={`rounded-full px-2.5 py-1 text-[10px] ${
                   i === 2
-                    ? "border border-amber-500/30 bg-amber-500/5 text-amber-400"
+                    ? "border border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400"
                     : "border border-primary/30 bg-primary/5 text-primary"
                 }`}
               >
