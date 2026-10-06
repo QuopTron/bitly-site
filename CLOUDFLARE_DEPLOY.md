@@ -23,16 +23,24 @@ del estático, un `_worker.js` que atiende las server functions.
 - **Build output directory:** `dist/client`
 - **Rama de producción:** `master`
 
-`wrangler.toml` declara `pages_build_output_dir = "dist/client"`,
-`compatibility_date = "2024-09-23"` y `compatibility_flags = ["nodejs_compat"]`
-(esto último es lo que permite leer `process.env` en el Worker).
+Compatibilidad: `compatibility_date = "2024-09-23"` y
+`compatibility_flags = ["nodejs_compat"]` (esto último es lo que permite leer
+`process.env` en el Worker).
 
-> **Ojo con `wrangler.toml`:** el builder de Pages lo valida y **aborta el build**
-> si tiene claves que no soporta. `account_id` y `[build]` no están soportadas
-> (fue exactamente lo que hizo fallar el build de `084a209`). Si además falta
-> `pages_build_output_dir`, Pages **ignora el archivo en silencio** y publica
-> solo estáticos — que es lo que dejaba la demo en 405. Para comandos locales
-> que necesiten la cuenta, usá la variable `CLOUDFLARE_ACCOUNT_ID`.
+> **NO agregar un `wrangler.toml` al repo.** Se probaron dos variantes y las dos
+> rompen algo:
+>
+> 1. Con claves no soportadas (`account_id`, `[build]`) el builder de Pages
+>    **aborta el build** — fue lo que dejó el sitio congelado en un deploy viejo.
+> 2. Con un archivo *válido* (o sea, con `pages_build_output_dir`), Pages lo toma
+>    como **fuente de verdad** y **descarta la configuración del dashboard**: el
+>    deploy de `67bc602` quedó con `env_vars` vacío, borrando las `SUPABASE_*` y
+>    `BITLY_CODES_TOKEN`.
+>
+> Lo correcto es que **toda la configuración viva en el dashboard** (build
+> command, output dir, env vars, compatibility flags). El repo solo aporta el
+> `_worker.js` que genera el build. Para comandos locales que necesiten la
+> cuenta, usá la variable `CLOUDFLARE_ACCOUNT_ID`.
 
 ## 3. Cómo queda el modo avanzado
 
@@ -63,6 +71,9 @@ npx wrangler pages dev dist/client --port 8799 \
 # en otra terminal
 DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 ```
+
+> Ojo con el gestor: usá el `pnpm` instalado (hoy 10.x). `npx pnpm` puede bajar
+> una major nueva y romper por el campo `pnpm` de `package.json`.
 
 ## 4. Variables de entorno
 
