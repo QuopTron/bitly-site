@@ -30,13 +30,13 @@ const SITIO = "bitly-site.pages.dev";
 export function Paso({ num, titulo, children }: { num: number; titulo: string; children?: ReactNode }) {
   return (
     <li className="flex gap-3">
-      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary sm:h-7 sm:w-7 sm:text-xs">
+      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary sm:h-7 sm:w-7 sm:text-xs">
         {num}
       </div>
       <div className="flex-1 space-y-1">
         <p className="text-xs font-semibold sm:text-sm md:text-[15px]">{titulo}</p>
         {children && (
-          <div className="text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{children}</div>
+          <div className="text-xs leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{children}</div>
         )}
       </div>
     </li>
@@ -62,7 +62,7 @@ export function Aviso({
 
   return (
     <div
-      className={`rounded-xl border p-3 text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px] ${estilos.caja}`}
+      className={`rounded-xl border p-3 text-xs leading-relaxed text-muted-foreground sm:text-xs md:text-[13px] ${estilos.caja}`}
     >
       <p className="flex items-start gap-2">
         <Icono className={`mt-[1px] h-3.5 w-3.5 flex-shrink-0 ${estilos.color}`} />
@@ -91,7 +91,7 @@ export function CopiarBoton({ texto, etiqueta }: { texto: string; etiqueta?: str
     <button
       type="button"
       onClick={copiar}
-      className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold transition sm:text-xs ${
+      className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition sm:text-xs ${
         copiado
           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           : "border-border/60 bg-card/40 text-foreground hover:border-primary/40 hover:bg-primary/5"
@@ -107,9 +107,9 @@ export function CopiarBoton({ texto, etiqueta }: { texto: string; etiqueta?: str
 export function Comando({ titulo, texto }: { titulo: string; texto: string }) {
   return (
     <div className="rounded-xl border border-border/60 bg-card/30 p-2.5">
-      <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">{titulo}</p>
+      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{titulo}</p>
       <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-background/60 px-2 py-1.5 font-mono text-[10px] text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:text-[11px]">
+        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-background/60 px-2 py-1.5 font-mono text-xs text-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:text-xs">
           {texto}
         </code>
         <CopiarBoton texto={texto} />
@@ -138,12 +138,12 @@ function Via({
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h4 className="text-sm font-bold text-foreground">{titulo}</h4>
         {insignia && (
-          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary">
+          <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-primary">
             {insignia}
           </span>
         )}
       </div>
-      <p className="text-[11px] leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{descripcion}</p>
+      <p className="text-xs leading-relaxed text-muted-foreground sm:text-xs md:text-[13px]">{descripcion}</p>
       {nota && <div className="mb-4 mt-3">{nota}</div>}
       <ol className="space-y-3">{children}</ol>
     </div>
@@ -156,7 +156,7 @@ function Enlace({ href, children }: { href: string; children: ReactNode }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:underline sm:text-xs"
+      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline sm:text-xs"
     >
       {children} <ExternalLink className="h-3 w-3" />
     </a>
@@ -311,7 +311,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
       )}
 
       <div>
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {t("installTVCodeTitle")}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -323,7 +323,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
               }`}
             >
               <p className="text-xs font-bold text-primary">{c.titulo}</p>
-              <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground sm:text-[11px]">{c.lista}</p>
+              <p className="mt-0.5 text-xs leading-snug text-muted-foreground sm:text-xs">{c.lista}</p>
               <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-background/50 px-3 py-2 ring-1 ring-border/50">
                 <span className="font-mono text-lg font-bold tracking-[0.16em] text-foreground sm:text-xl md:text-2xl">
                   {c.codigo}
@@ -333,7 +333,7 @@ export function GuiaTV({ conCapturas = false }: { conCapturas?: boolean }) {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-center text-[10px] text-muted-foreground sm:text-[11px]">{t("installTVCodeIn")}</p>
+        <p className="mt-2 text-center text-xs text-muted-foreground sm:text-xs">{t("installTVCodeIn")}</p>
       </div>
 
       <ol className="space-y-3">
@@ -368,13 +368,13 @@ export function GuiaIOS({ conCapturas = false }: { conCapturas?: boolean }) {
         descripcion={t("installIOSMethodADesc")}
         nota={
           <div className="flex flex-wrap gap-2">
-            <span className="rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-[10px] text-muted-foreground">
+            <span className="rounded-full border border-border/60 bg-card/40 px-2.5 py-1 text-xs text-muted-foreground">
               {t("installIOSReqTitle")}
             </span>
             {["installIOSReq1", "installIOSReq2", "installIOSReq3"].map((k, i) => (
               <span
                 key={k}
-                className={`rounded-full px-2.5 py-1 text-[10px] ${
+                className={`rounded-full px-2.5 py-1 text-xs ${
                   i === 2
                     ? "border border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400"
                     : "border border-primary/30 bg-primary/5 text-primary"

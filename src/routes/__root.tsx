@@ -6,6 +6,7 @@ import { instalarReveals } from "@/lib/reveal";
 import { contarVista } from "@/lib/vistas";
 import PremiumBubble from "@/components/layout/premium-bubble";
 import { SCRIPT_TEMA_INICIAL } from "@/lib/tema";
+import { DESCRIPCION, OG_IMAGE, SITIO, TITULO, jsonLd } from "@/lib/seo";
 import "../styles.css";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -25,12 +26,34 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* El tema guardado se aplica acá, antes de pintar: es lo único que
             corre fuera de React y evita el destello del tema equivocado. */}
         <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA_INICIAL }} />
+        {/* Los datos estructurados van en el <head> del shell: así existen
+            aunque la ruta todavía no pinte nada. Sale del mismo diccionario que
+            la sección #faq, así que siempre coinciden con lo visible. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLd() }}
+        />
         <HeadContent />
         <noscript>
           <style>{`[data-reveal]{opacity:1!important;transform:none!important;animation:none!important}`}</style>
         </noscript>
       </head>
-      <body>{children}<Scripts /></body>
+      <body>
+        {children}
+        {/* Revela lo que ya está a la vista EN EL PRIMER PINTADO, sin esperar a
+            que llegue el bundle. El observador de `reveal.ts` sigue siendo el
+            dueño de todo lo que aparece al hacer scroll: este guion sólo saca
+            del ocultamiento al primer plato. Corre durante el parseo del HTML,
+            así que no hay frame en el que la portada se vea vacía (FCP, LCP y
+            Speed Index suben y, encima, la portada no "aparece" al hidratar). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){try{var m=document.querySelectorAll("[data-reveal]");for(var i=0;i<m.length;i++){if(m[i].getBoundingClientRect().top<=window.innerHeight)m[i].classList.add("dentro")}}catch(e){}})();',
+          }}
+        />
+        <Scripts />
+      </body>
     </html>
   );
 }
@@ -89,13 +112,46 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Bitly — Tu música, sin límites" },
-      { name: "description", content: "Descarga música FLAC sin pérdida desde Tidal, Qobuz, Deezer y más." },
+      { title: TITULO },
+      { name: "description", content: DESCRIPCION },
+      { name: "robots", content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" },
       { name: "author", content: "Bitly" },
-      { property: "og:title", content: "Bitly — Tu música, sin límites" },
-      { property: "og:description", content: "Descarga música FLAC sin pérdida desde Tidal, Qobuz, Deezer y más." },
+      { name: "theme-color", content: "#f3fbf7", media: "(prefers-color-scheme: light)" },
+      // Va el oscuro el ÚLTIMO: TanStack deduplica las `meta` por nombre y se
+      // queda con la última, y el tema de marca es el oscuro (el que se ve al
+      // entrar sin preferencia guardada).
+      { name: "theme-color", content: "#001f2a", media: "(prefers-color-scheme: dark)" },
+      { name: "color-scheme", content: "dark light" },
+      { property: "og:type", content: "website" },
+      { property: "og:site_name", content: "Bitly" },
+      { property: "og:locale", content: "es_ES" },
+      { property: "og:locale:alternate", content: "en_US" },
+      { property: "og:url", content: `${SITIO}/` },
+      { property: "og:title", content: TITULO },
+      { property: "og:description", content: DESCRIPCION },
+      { property: "og:image", content: OG_IMAGE },
+      { property: "og:image:secure_url", content: OG_IMAGE },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:alt", content: TITULO },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: TITULO },
+      { name: "twitter:description", content: DESCRIPCION },
+      { name: "twitter:image", content: OG_IMAGE },
+      { name: "twitter:image:alt", content: TITULO },
     ],
-    links: [{ rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" }],
+    links: [
+      { rel: "canonical", href: `${SITIO}/` },
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
+      { rel: "icon", type: "image/png", sizes: "16x16", href: "/favicon-16x16.png" },
+      { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
+      { rel: "manifest", href: "/site.webmanifest" },
+      { rel: "preload", href: "/fonts/inter-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://api.github.com" },
+      { rel: "dns-prefetch", href: "https://api.github.com" },
+    ],
   }),
   shellComponent: Shell,
   component: RootComponent,

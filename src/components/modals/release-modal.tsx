@@ -47,7 +47,7 @@ function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => st
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
+      <p className="text-xs font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
       {exeAssets.map((asset) => {
         const isArm = asset.name.toLowerCase().includes("arm64") || asset.name.toLowerCase().includes("aarch64");
         return (
@@ -60,7 +60,7 @@ function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => st
           >
             <div>
               <div className="text-xs font-semibold sm:text-sm">{isArm ? "Windows ARM64" : "Windows x64"}</div>
-              <div className="text-[10px] text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
+              <div className="text-xs text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
             </div>
             <Download className="h-4 w-4 text-muted-foreground" />
           </a>
@@ -76,7 +76,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
+      <p className="text-xs font-medium text-muted-foreground sm:text-xs">{t("releaseSelectArch")}</p>
       {apkAssets.map((asset) => {
         const isArm64 = asset.name.includes("arm64");
         const isArm32 = asset.name.includes("armeabi-v7a") || asset.name.includes("arm-v7a");
@@ -96,9 +96,9 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold sm:text-sm">{label}</span>
-                {recommended && <span className="rounded-full bg-primary px-1.5 py-0.5 text-[8px] font-bold text-background">{t("releaseRecommended")}</span>}
+                {recommended && <span className="rounded-full bg-primary px-1.5 py-0.5 text-xs font-bold text-background">{t("releaseRecommended")}</span>}
               </div>
-              <div className="text-[10px] text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
+              <div className="text-xs text-muted-foreground sm:text-xs">{asset.name} · {formatSize(asset.size)}</div>
             </div>
             <Download className="h-4 w-4 text-muted-foreground" />
           </a>
@@ -150,7 +150,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
           {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
           {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (
             <div className="space-y-2">
-              <p className="text-[10px] font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
+              <p className="text-xs font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
               {filteredAssets.map((asset) => (
                 <a
                   key={asset.name}
@@ -161,7 +161,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
                 >
                   <div className="min-w-0">
                     <div className="truncate text-xs font-semibold sm:text-sm">{asset.name}</div>
-                    <div className="text-[10px] text-muted-foreground sm:text-xs">{formatSize(asset.size)}</div>
+                    <div className="text-xs text-muted-foreground sm:text-xs">{formatSize(asset.size)}</div>
                   </div>
                   <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                 </a>
@@ -174,7 +174,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
             </div>
           )}
           {version && latestVersion && version !== latestVersion && (
-            <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-[10px] leading-relaxed text-muted-foreground sm:text-xs">
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs leading-relaxed text-muted-foreground sm:text-xs">
               {t("releasePlatformBehind").replace("{version}", version).replace("{latest}", latestVersion)}
             </p>
           )}
@@ -191,7 +191,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-xs font-semibold text-primary sm:text-sm">{t("releaseNotSure")}</span>
-              <span className="block text-[10px] text-muted-foreground sm:text-xs">{t("releaseNotSureDesc")}</span>
+              <span className="block text-xs text-muted-foreground sm:text-xs">{t("releaseNotSureDesc")}</span>
             </span>
           </button>
         )}
@@ -216,7 +216,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
         </button>
 
         {showInfo && (
-          <div className="rounded-xl border border-border bg-card/30 p-3 text-[10px] leading-relaxed text-muted-foreground sm:text-xs space-y-1.5">
+          <div className="rounded-xl border border-border bg-card/30 p-3 text-xs leading-relaxed text-muted-foreground sm:text-xs space-y-1.5">
             {isAndroid || isTv ? (
               <>
                 <p><strong className="text-foreground">ARM64:</strong> {t("releaseArchArm64")}</p>
@@ -233,7 +233,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
                 <p><strong className="text-foreground">ARM64:</strong> {t("releaseWinArm64")}</p>
               </>
             )}
-            <p className="pt-1 text-muted-foreground/70">{t("releaseArchHint")}</p>
+            <p className="pt-1 text-muted-foreground">{t("releaseArchHint")}</p>
           </div>
         )}
       </div>

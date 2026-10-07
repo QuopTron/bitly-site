@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, Home, MessageCircle, MessageSquare, Music, Smartphone } from "lucide-react";
+import { CreditCard, HelpCircle, Home, MessageCircle, MessageSquare, Music, Smartphone } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 /**
@@ -31,6 +31,7 @@ const SECCIONES = [
   { id: "demo", clave: "navDemo", Icono: Music },
   { id: "instalar", clave: "navInstalar", Icono: Smartphone },
   { id: "opiniones", clave: "navOpiniones", Icono: MessageSquare },
+  { id: "faq", clave: "navFaq", Icono: HelpCircle },
   { id: "planes", clave: "navPlanes", Icono: CreditCard },
   { id: "contacto", clave: "navContacto", Icono: MessageCircle },
 ] as const;
@@ -114,7 +115,7 @@ export default function SectionNav() {
               }}
               href={`#${id}`}
               aria-current={activo ? "location" : undefined}
-              className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-1.5 sm:px-3.5 sm:text-xs ${
+              className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs font-semibold outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-1.5 sm:px-3.5 sm:text-xs ${
                 activo
                   ? "bg-primary/10 text-primary ring-1 ring-primary/30"
                   : "text-muted-foreground hover:bg-card/60 hover:text-foreground"

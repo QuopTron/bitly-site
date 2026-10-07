@@ -94,17 +94,17 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
                 <div key={p.id} onClick={() => setPlan(p.id)} className={`cursor-pointer rounded-xl border-2 p-3 transition-all hover:shadow-lg hover:shadow-primary/20 sm:p-4 ${plan === p.id ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-border bg-card/50 hover:border-primary/60 hover:bg-card/80"}`}>
                   <div className="mb-2 flex items-center justify-between">
                     <h3 className="text-xs font-semibold text-foreground sm:text-sm">{t(p.nombreKey)}</h3>
-                    <span className="relative -top-1.5 rounded-full bg-gradient-to-r from-primary to-accent px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-primary-foreground sm:px-2 sm:text-[9px]">40% OFF</span>
+                    <span className="relative -top-1.5 rounded-full bg-gradient-to-r from-primary to-accent px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-primary-foreground sm:px-2 sm:text-xs">40% OFF</span>
                   </div>
-                  <p className="mb-0.5 text-[10px] text-muted-foreground line-through opacity-60">{convert(p.precio_original, currency)} {sym}</p>
+                  <p className="mb-0.5 text-xs text-muted-foreground line-through opacity-60">{convert(p.precio_original, currency)} {sym}</p>
                   <div className="flex items-baseline gap-1">
                     <span className="text-lg font-bold text-primary sm:text-xl">{convert(p.precio_descuento, currency)}</span>
-                    <span className="text-[10px] text-primary/70 sm:text-xs">{sym}</span>
+                    <span className="text-xs text-primary/70 sm:text-xs">{sym}</span>
                   </div>
-                  <p className="mt-1 text-[9px] text-muted-foreground sm:text-[10px]">{t(p.descripcionKey)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground sm:text-xs">{t(p.descripcionKey)}</p>
                   <div className="mt-1.5 space-y-0.5">
                     {p.featureKeys.slice(0, 4).map((key, i) => (
-                      <div key={i} className="flex items-center gap-1.5 text-[9px] text-muted-foreground sm:text-[10px]">
+                      <div key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground sm:text-xs">
                         <Shield className="h-3 w-3 flex-shrink-0 text-primary/50" />
                         <span className="leading-tight">{t(key)}</span>
                       </div>
@@ -113,21 +113,21 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
                   {plan === p.id && (
                     <div className="mt-3 flex items-center justify-center gap-1.5">
                       <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary shadow-[0_0_6px_hsl(var(--primary))]" />
-                      <span className="text-[9px] font-medium text-primary sm:text-[10px]">{t("preReservaIncludes")}</span>
+                      <span className="text-xs font-medium text-primary sm:text-xs">{t("preReservaIncludes")}</span>
                     </div>
                   )}
                 </div>
               ))}
             </div>
             <div className="rounded-xl border border-border/70 bg-gradient-to-br from-background/80 to-background/60 p-3 backdrop-blur sm:p-4">
-              <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:text-xs">{t("preReservaCellphone")}</label>
+              <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-muted-foreground sm:text-xs">{t("preReservaCellphone")}</label>
               <div className="relative">
-                <Smartphone className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
+                <Smartphone className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input type="tel" value={celular} onChange={(e) => { setCelular(e.target.value.replace(/\D/g, "").slice(0, 8)); if (error) setError(null); }} placeholder="Ej: 71234567" className="w-full rounded-xl border border-border bg-background py-2 pl-9 pr-2.5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition shadow-sm sm:py-2.5 sm:text-sm" />
               </div>
-              <p className="mt-1.5 text-[10px] text-muted-foreground">{t("preReservaCellphoneHelp")}</p>
+              <p className="mt-1.5 text-xs text-muted-foreground">{t("preReservaCellphoneHelp")}</p>
             </div>
-            {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-2.5 text-center sm:p-3"><p className="text-[10px] font-medium text-destructive sm:text-xs">{error}</p></div>}
+            {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-2.5 text-center sm:p-3"><p className="text-xs font-medium text-destructive sm:text-xs">{error}</p></div>}
             <button type="submit" disabled={loading} className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-primary to-primary/90 py-2.5 text-xs font-semibold text-primary-foreground shadow-xl shadow-primary/30 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:py-3 sm:text-sm">
               <div className="relative flex items-center justify-center gap-2">
                 {loading ? (
@@ -140,7 +140,7 @@ export default function PrereserveModal({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             </button>
-            <p className="text-center text-[10px] text-muted-foreground">{t("preReservaTerm")}</p>
+            <p className="text-center text-xs text-muted-foreground">{t("preReservaTerm")}</p>
           </form>
         )}
       </div>

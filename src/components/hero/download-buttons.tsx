@@ -17,7 +17,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
           <Lock className="absolute left-3 top-2 h-3 w-3 text-muted-foreground sm:left-4 sm:top-2.5 sm:h-3.5 sm:w-3.5" />
           <Monitor className="h-6 w-6 text-muted-foreground sm:h-7 sm:w-7" />
           <div className="text-left">
-            <div className="text-[9px] uppercase opacity-70 sm:text-[10px]">Descargar para</div>
+            <div className="text-xs uppercase opacity-70 sm:text-xs">Descargar para</div>
             <div className="text-sm font-semibold leading-tight text-muted-foreground sm:text-base">Windows</div>
           </div>
         </div>
@@ -25,7 +25,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
           <Lock className="absolute left-3 top-2 h-3 w-3 text-muted-foreground sm:left-4 sm:top-2.5 sm:h-3.5 sm:w-3.5" />
           <Smartphone className="h-6 w-6 text-muted-foreground sm:h-7 sm:w-7" />
           <div className="text-left">
-            <div className="text-[9px] uppercase opacity-70 sm:text-[10px]">Descargar para</div>
+            <div className="text-xs uppercase opacity-70 sm:text-xs">Descargar para</div>
             <div className="text-sm font-semibold leading-tight text-muted-foreground sm:text-base">Android</div>
           </div>
         </div>
@@ -33,7 +33,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
           <Lock className="absolute left-3 top-2 h-3 w-3 text-muted-foreground sm:left-4 sm:top-2.5 sm:h-3.5 sm:w-3.5" />
           <Tv className="h-6 w-6 text-muted-foreground sm:h-7 sm:w-7" />
           <div className="text-left">
-            <div className="text-[9px] uppercase opacity-70 sm:text-[10px]">Descargar para</div>
+            <div className="text-xs uppercase opacity-70 sm:text-xs">Descargar para</div>
             <div className="text-sm font-semibold leading-tight text-muted-foreground sm:text-base">Smart TV</div>
           </div>
         </div>
@@ -49,7 +49,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       >
         <Monitor className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
-          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
           <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Windows</div>
         </div>
       </button>
@@ -59,7 +59,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       >
         <Smartphone className="h-6 w-6 sm:h-7 sm:w-7" />
         <div className="text-left">
-          <div className="text-[9px] uppercase opacity-70 sm:text-[10px]">Descargar APK</div>
+          <div className="text-xs uppercase opacity-70 sm:text-xs">Descargar APK</div>
           <div className="text-sm font-semibold leading-tight sm:text-base">Android</div>
         </div>
       </button>
@@ -69,7 +69,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       >
         <Tv className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
-          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
           <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Smart TV</div>
         </div>
       </button>
@@ -79,7 +79,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
-          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
           <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">iOS</div>
         </div>
       </button>
@@ -89,7 +89,7 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
         <div className="text-left">
-          <div className="text-[9px] uppercase opacity-70 group-hover:text-primary sm:text-[10px]">Descargar para</div>
+          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
           <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">macOS</div>
         </div>
       </button>

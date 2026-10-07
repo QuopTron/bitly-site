@@ -45,3 +45,6 @@ yarn-error.log*
 
 # Estado local de wrangler pages dev
 .dev.vars
+
+# Informes de Lighthouse (`pnpm auditar` + npx lighthouse --output-path=lhN.json)
+/lh*.json

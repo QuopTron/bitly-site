@@ -22,7 +22,7 @@ export default function Footer() {
     <footer id="contacto" className="container mx-auto px-4 pb-28 pt-10 text-center sm:px-6 sm:pb-20">
       <div className="mx-auto max-w-md rounded-3xl border border-primary/20 bg-gradient-to-b from-card/50 to-card/20 p-5 sm:p-6">
         <h2 className="text-sm font-bold sm:text-base">{t("footerRedes")}</h2>
-        <p className="mt-1 text-[11px] text-muted-foreground sm:text-xs">{t("footerRedesDesc")}</p>
+        <p className="mt-1 text-xs text-muted-foreground sm:text-xs">{t("footerRedesDesc")}</p>
 
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
           <a
@@ -58,32 +58,32 @@ export default function Footer() {
             se puede tocar para llamar y el usuario queda a la vista. Antes el
             número también estaba escrito dentro del botón de Planes, que ya
             lleva a este mismo chat: quedaba repetido. */}
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/80">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <a
             href={`tel:${WHATSAPP}`}
             className="rounded px-1 font-semibold tabular-nums outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
           >
             {WHATSAPP}
           </a>
-          <span aria-hidden className="text-muted-foreground/40">
+          <span aria-hidden className="text-muted-foreground">
             ·
           </span>
           <span className="px-1">@{INSTAGRAM}</span>
-          <span aria-hidden className="text-muted-foreground/40">
+          <span aria-hidden className="text-muted-foreground">
             ·
           </span>
           <span className="px-1">@{TIKTOK}</span>
         </div>
       </div>
 
-      <p className="mt-8 text-[10px] text-muted-foreground sm:text-xs">{t("footerDisclaimer")}</p>
-      <p className="mt-1 text-[10px] text-muted-foreground sm:text-xs">
+      <p className="mt-8 text-xs text-muted-foreground sm:text-xs">{t("footerDisclaimer")}</p>
+      <p className="mt-1 text-xs text-muted-foreground sm:text-xs">
         {t("footerCopyright").replace("{name}", "Bitly")}
       </p>
 
       <a
         href="#inicio"
-        className="mt-4 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[11px] font-semibold text-muted-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
+        className="mt-4 inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold text-muted-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
       >
         <ArrowUp className="h-3.5 w-3.5" aria-hidden />
         {t("footerVolverArriba")}

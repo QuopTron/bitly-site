@@ -152,7 +152,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
               return (
                 <div
                   key={entry.hour}
-                  className={`flex flex-col items-center rounded-lg py-1.5 text-[10px] transition-all ${
+                  className={`flex flex-col items-center rounded-lg py-1.5 text-xs transition-all ${
                     isActive
                       ? "bg-amber-500/20 ring-2 ring-amber-400/50 shadow-lg shadow-amber-500/20"
                       : isPast
@@ -163,12 +163,12 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
                   <span className={`font-bold ${isActive ? "text-amber-600 dark:text-amber-400" : isPast ? "text-muted-foreground" : "text-foreground"}`}>
                     {convert(entry.price, currency)}
                   </span>
-                  <span className="text-[8px] text-muted-foreground">{sym}</span>
+                  <span className="text-xs text-muted-foreground">{sym}</span>
                 </div>
               );
             })}
           </div>
-          <p className="mt-2 text-center text-[10px] text-muted-foreground/60">
+          <p className="mt-2 text-center text-xs text-muted-foreground">
             {offer.hourSlot <= 8
               ? `${t("pricingHour")} ${offer.hourSlot}/8 — ${t("pricingNext")}: ${format(offer.hourSlot < 8 ? makePriceTable(getCurrentPrice())[offer.hourSlot]?.price ?? getCurrentPrice() : getCurrentPrice(), currency)}`
               : t("pricingEnded")}
@@ -203,7 +203,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
             <div className={`absolute inset-0 rounded-2xl bg-gradient-to-b via-transparent to-transparent pointer-events-none ${
               isPct ? "from-green-400/15" : "from-primary/10"
             }`} />
-            <span className={`absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-3 py-1 text-[9px] font-bold uppercase tracking-wider text-white shadow-lg sm:px-4 sm:text-[10px] ${
+            <span className={`absolute -top-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider text-white shadow-lg sm:px-4 sm:text-xs ${
               isPct
                 ? "bg-gradient-to-r from-[#15803D] to-[#0E7A46] shadow-[#15803D]/40"
                 : "bg-gradient-to-r from-primary to-accent shadow-primary/30"
@@ -221,9 +221,9 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
             </div>
             <p className="relative mt-1 text-xs text-muted-foreground">{t("pricingLifetime")}</p>
             {offer.price < getCurrentPrice() && (
-              <p className="relative text-xs text-muted-foreground/60">
+              <p className="relative text-xs text-muted-foreground">
                 <span className="line-through">{convert(getCurrentPrice(), currency)} {sym}</span>
-                <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm ${
+                <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-xs font-bold shadow-sm ${
                   isPct
                     ? "bg-gradient-to-r from-green-400/30 to-emerald-400/10 text-green-600 dark:text-green-400 shadow-green-500/20"
                     : "bg-gradient-to-r from-primary/20 to-primary/10 text-primary"
@@ -307,7 +307,7 @@ export default function PricingModal({ onClose, onPreReserve }: { onClose: () =>
           </div>
         </div>
 
-        <p className="mt-4 text-center text-[10px] text-muted-foreground/40">
+        <p className="mt-4 text-center text-xs text-muted-foreground">
           {t("currencyCompany")} · {t("currencyBs")}
         </p>
       </div>

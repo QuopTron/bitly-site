@@ -47,7 +47,7 @@ function MarcoVentana({ src, alt, url, w, h }: { src: string; alt: string; url: 
           <i className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
           <i className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
         </span>
-        <span className="mx-auto max-w-[70%] truncate rounded-md bg-background/70 px-2.5 py-1 text-[10px] text-muted-foreground">
+        <span className="mx-auto max-w-[70%] truncate rounded-md bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
           {url}
         </span>
       </div>
@@ -181,7 +181,7 @@ function Lente({
       <div className="max-w-xl text-center" onClick={(e) => e.stopPropagation()}>
         <p className="text-sm font-semibold text-white">{captura.titulo}</p>
         {captura.pie && <p className="mt-1 text-xs text-white/70">{captura.pie}</p>}
-        <p className="mt-1 text-[10px] text-white/40">
+        <p className="mt-1 text-xs text-white/40">
           {indice + 1} / {capturas.length}
         </p>
       </div>
@@ -226,7 +226,7 @@ export default function Gallery({
               >
                 <Marco tipo={tipo} captura={captura} url={url} />
                 <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-                  <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-medium text-white backdrop-blur">
+                  <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium text-white backdrop-blur">
                     <ZoomIn className="h-3.5 w-3.5" />
                     {t("installZoom")}
                   </span>
@@ -234,13 +234,13 @@ export default function Gallery({
               </button>
 
               <figcaption className="mt-2.5 flex gap-2">
-                <span className="mt-[1px] flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">
+                <span className="mt-[1px] flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
                   {i + 1}
                 </span>
                 <span className="min-w-0">
                   <span className="block text-[12px] font-semibold leading-snug text-foreground">{captura.titulo}</span>
                   {captura.pie && (
-                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{captura.pie}</span>
+                    <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{captura.pie}</span>
                   )}
                 </span>
               </figcaption>
@@ -249,7 +249,7 @@ export default function Gallery({
         </div>
 
         {capturas.length > 1 && (
-          <p className="mt-2 text-center text-[11px] text-muted-foreground md:hidden">{t("installSwipe")}</p>
+          <p className="mt-2 text-center text-xs text-muted-foreground md:hidden">{t("installSwipe")}</p>
         )}
       </div>
 

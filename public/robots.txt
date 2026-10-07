@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /_serverFn/
+Disallow: /_ssr/
+Disallow: /open
+
+User-agent: GPTBot
+Allow: /
+
+Sitemap: https://bitly-site.pages.dev/sitemap.xml

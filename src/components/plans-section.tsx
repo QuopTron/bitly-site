@@ -18,7 +18,7 @@ export default function PlansSection() {
   return (
     <section id="planes" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
       <div className="mb-8 text-center sm:mb-10" data-reveal>
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Gem className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("plansSubtitle")}
         </div>
@@ -56,15 +56,15 @@ export default function PlansSection() {
               </li>
             ))}
             {freeBlocked.map((k) => (
-              <li key={k} className="flex items-center gap-2.5 text-sm text-muted-foreground/50">
+              <li key={k} className="flex items-center gap-2.5 text-sm text-muted-foreground">
                 <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-muted/30">
-                  <XIcon className="h-3 w-3 text-muted-foreground/50" />
+                  <XIcon className="h-3 w-3 text-muted-foreground" />
                 </span>
                 <span className="line-through">{t(k)}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-xs text-muted-foreground/60">{t("plansSeeMore")}</p>
+          <p className="mt-4 text-xs text-muted-foreground">{t("plansSeeMore")}</p>
         </div>
 
         {/* Premium */}
@@ -74,7 +74,7 @@ export default function PlansSection() {
           className="relative rounded-2xl bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 ring-1 ring-primary/25 shadow-xl shadow-primary/5 transition-all duration-300 hover:-translate-y-1 hover:ring-primary/45 sm:p-6"
         >
           {enOferta && (
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg shadow-[#15803D]/30 sm:px-4 sm:text-xs">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-3 py-1 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-[#15803D]/30 sm:px-4 sm:text-xs">
               {lang === "es" ? etiqueta : etiquetaEn}
             </div>
           )}
@@ -82,7 +82,7 @@ export default function PlansSection() {
             <h3 className="text-lg font-bold text-primary sm:text-xl">{t("plansPremium")}</h3>
             <div className="mt-2 flex items-baseline gap-2">
               <span className="text-3xl font-bold text-foreground sm:text-4xl">{format(precio, currency)}</span>
-              {enOferta && <span className="text-sm text-muted-foreground/60 line-through">{format(original, currency)}</span>}
+              {enOferta && <span className="text-sm text-muted-foreground line-through">{format(original, currency)}</span>}
             </div>
             <p className="mt-1 text-xs text-primary font-medium">{t("plansPremiumPrice")}</p>
           </div>
@@ -133,7 +133,7 @@ export default function PlansSection() {
             >
               <MessageCircle className="h-5 w-5" aria-hidden />
               <span className="text-left">
-                <span className="block text-[10px] font-normal opacity-80">{t("plansWhatsAppHint")}</span>
+                <span className="block text-xs font-normal opacity-80">{t("plansWhatsAppHint")}</span>
                 <span className="block">{t("plansWhatsAppLabel")}</span>
               </span>
             </a>

@@ -4,6 +4,12 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  // Source maps: sin ellos Lighthouse baja "best practices" con
+  // "missing source maps for large first-party JavaScript". Sólo se descargan
+  // con las devtools abiertas, así que no pesan para el visitante.
+  build: {
+    sourcemap: true,
+  },
   plugins: [
     tailwindcss(),
     tanstackStart({

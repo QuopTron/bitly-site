@@ -97,12 +97,12 @@ export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
         )}
 
         {aviso === "intentos" && (
-          <p className="rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
+          <p className="rounded-xl bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
             {t("codigoDemasiados")}
           </p>
         )}
         {aviso === "registro" && (
-          <p className="rounded-xl bg-muted/40 px-3 py-2.5 text-[11px] text-muted-foreground">
+          <p className="rounded-xl bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
             {t("codigoSinRegistro")}
           </p>
         )}
@@ -116,7 +116,7 @@ export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
           {t("codigoCanjear")}
         </button>
 
-        <p className="flex items-start gap-2 pt-1 text-[11px] leading-relaxed text-muted-foreground/70">
+        <p className="flex items-start gap-2 pt-1 text-xs leading-relaxed text-muted-foreground">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {t("codigoNota")}
         </p>

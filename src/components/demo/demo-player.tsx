@@ -348,7 +348,7 @@ export default function DemoPlayer() {
   return (
     <section id="demo" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
       <div className="mb-8 text-center sm:mb-10" data-reveal>
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary backdrop-blur sm:px-4 sm:text-xs">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary backdrop-blur sm:px-4 sm:text-xs">
           <Play className="anim-late h-3.5 w-3.5 sm:h-4 sm:w-4" />
           {t("demoBadge")}
         </div>
@@ -383,7 +383,7 @@ export default function DemoPlayer() {
                     onClick={() => setMarco(id)}
                     aria-pressed={activo}
                     title={t(MARCOS[id].etiqueta)}
-                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all duration-300 ease-out active:scale-95 ${
+                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300 ease-out active:scale-95 ${
                       activo
                         ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 ring-1 ring-primary/40"
                         : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
@@ -425,7 +425,7 @@ export default function DemoPlayer() {
             )}
 
             {/* Barra del sistema */}
-            <div className={`flex items-center justify-between text-[10px] font-semibold text-muted-foreground/70 ${chasis.barra}`}>
+            <div className={`flex items-center justify-between text-xs font-semibold text-muted-foreground ${chasis.barra}`}>
               <span>9:41</span>
               <span className="flex items-center gap-1">
                 <Music className="h-3 w-3 text-primary" />
@@ -458,7 +458,7 @@ export default function DemoPlayer() {
                 <button
                   type="submit"
                   disabled={cargando}
-                  className="shrink-0 rounded-xl bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground transition-all duration-200 hover:opacity-90 active:scale-95 disabled:opacity-40"
+                  className="shrink-0 rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-all duration-200 hover:opacity-90 active:scale-95 disabled:opacity-40"
                 >
                   {cargando ? t("demoSearching") : t("demoSearchBtn")}
                 </button>
@@ -480,7 +480,7 @@ export default function DemoPlayer() {
             {/* Cuota + botón de canje */}
             <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4">
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${
                   cuota.premium
                     ? "bg-gradient-to-r from-[#15803D] to-[#0E7A46] text-white ring-transparent"
                     : cuota.sinCuota
@@ -495,7 +495,7 @@ export default function DemoPlayer() {
                 <button
                   type="button"
                   onClick={() => setCodigoAbierto(true)}
-                  className="inline-flex items-center gap-1 rounded-full bg-card/60 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-border/60 transition hover:text-primary"
+                  className="inline-flex items-center gap-1 rounded-full bg-card/60 px-2 py-0.5 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 transition hover:text-primary"
                 >
                   <KeyRound className="h-3 w-3" />
                   {t("demoCanjear")}
@@ -505,7 +505,7 @@ export default function DemoPlayer() {
 
             {/* Con la cuota agotada se dice CUÁNDO vuelve: son 2 horas, no el fin. */}
             {!cuota.premium && cuota.sinCuota && (
-              <p className="px-3 pt-1.5 text-[10px] font-medium text-primary sm:px-4">
+              <p className="px-3 pt-1.5 text-xs font-medium text-primary sm:px-4">
                 {Plantilla(t("demoFreeRefill"), { tiempo: restante(cuota.reiniciaEnMs) })}
               </p>
             )}
@@ -518,7 +518,7 @@ export default function DemoPlayer() {
             >
               {resultados === null && !cargando && (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-2 text-center">
-                  <Search className="h-8 w-8 text-muted-foreground/30" />
+                  <Search className="h-8 w-8 text-muted-foreground" />
                   <p className="text-xs text-muted-foreground">{t("demoIdle")}</p>
                   <div className="flex flex-wrap justify-center gap-1.5">
                     {SUGERIDAS.map((s) => (
@@ -529,7 +529,7 @@ export default function DemoPlayer() {
                           setTermino(s);
                           void hacerBusqueda(s, extension, filtro);
                         }}
-                        className="rounded-full bg-card/60 px-2.5 py-1 text-[10px] font-medium text-muted-foreground ring-1 ring-border/50 transition hover:text-foreground"
+                        className="rounded-full bg-card/60 px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border/50 transition hover:text-foreground"
                       >
                         {s}
                       </button>
@@ -551,17 +551,17 @@ export default function DemoPlayer() {
               )}
 
               {respaldada && resultados && resultados.length > 0 && (
-                <p className="px-1 pb-1.5 text-[9px] text-muted-foreground/70">{t("demoFallback")}</p>
+                <p className="px-1 pb-1.5 text-xs text-muted-foreground">{t("demoFallback")}</p>
               )}
 
               {!respaldada && otraFuente && (
-                <p className="px-1 pb-1.5 text-[9px] text-muted-foreground/70">
+                <p className="px-1 pb-1.5 text-xs text-muted-foreground">
                   {Plantilla(t("demoFuenteCambio"), { fuente: otraFuente })}
                 </p>
               )}
 
               {avisoAudio && (
-                <p className="px-1 pb-1.5 text-[9px] text-destructive/80">{avisoAudio}</p>
+                <p className="px-1 pb-1.5 text-xs text-destructive/80">{avisoAudio}</p>
               )}
 
               {resultados && resultados.length > 0 && (
@@ -605,12 +605,12 @@ export default function DemoPlayer() {
                             <span className="flex min-w-0 items-center gap-1.5">
                               <span className="truncate text-xs font-semibold">{p.titulo}</span>
                               {!esCancion && (
-                                <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-[8px] font-bold uppercase tracking-wide text-primary ring-1 ring-primary/25">
+                                <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-xs font-bold uppercase tracking-wide text-primary ring-1 ring-primary/25">
                                   {t(CLAVES_TIPO[p.tipo])}
                                 </span>
                               )}
                             </span>
-                            <span className="block truncate text-[10px] text-muted-foreground">
+                            <span className="block truncate text-xs text-muted-foreground">
                               {secundaria || "\u00a0"}
                             </span>
                           </span>
@@ -664,12 +664,12 @@ export default function DemoPlayer() {
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-xs font-semibold">{pista.titulo}</span>
                       {pista.canal === "preview" && (
-                        <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-[8px] font-bold uppercase tracking-wide text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-400">
+                        <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-xs font-bold uppercase tracking-wide text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-400">
                           {t("demoPreviewTag")}
                         </span>
                       )}
                     </span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
+                    <span className="block truncate text-xs text-muted-foreground">
                       {pista.artista ? `${pista.artista} · ` : ""}
                       {mmss(avance)} / {mmss(pista.duracion || 30)}
                       {pista.isrc ? ` · ISRC ${pista.isrc}` : ""}
@@ -745,7 +745,7 @@ export default function DemoPlayer() {
                     title={t("demoVolume")}
                     className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
                   />
-                  <span className="w-7 shrink-0 text-right text-[9px] tabular-nums text-muted-foreground">
+                  <span className="w-7 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
                     {Math.round(volumen * 100)}%
                   </span>
                 </div>
@@ -754,13 +754,13 @@ export default function DemoPlayer() {
                 <button
                   type="button"
                   onClick={irADescargas}
-                  className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-[11px] font-bold text-primary ring-1 ring-primary/25 transition hover:bg-primary/15 active:scale-[0.98]"
+                  className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-bold text-primary ring-1 ring-primary/25 transition hover:bg-primary/15 active:scale-[0.98]"
                 >
                   <Download className="h-3.5 w-3.5" />
                   {t("demoMiniCta")}
                 </button>
 
-                <p className="mt-1.5 text-center text-[9px] text-muted-foreground/50">
+                <p className="mt-1.5 text-center text-xs text-muted-foreground">
                   {pista.canal === "preview" ? t("demoPreviewTag") : t("demoPreviewNote")}
                 </p>
               </div>
@@ -778,7 +778,7 @@ export default function DemoPlayer() {
         <aside data-reveal style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
           <h3 className="text-sm font-bold">{t("demoLadderTitle")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("plansPremium")}
             </span>
             <span className="text-2xl font-bold text-primary">{format(fase.precio, moneda)}</span>
@@ -794,7 +794,7 @@ export default function DemoPlayer() {
                 }}
               />
             </div>
-            <div className="mt-2 flex items-center justify-between text-[10px]">
+            <div className="mt-2 flex items-center justify-between text-xs">
               <span className="font-semibold text-foreground">{siguienteTexto}</span>
               {diasTexto && <span className="text-muted-foreground">{diasTexto}</span>}
             </div>
@@ -860,7 +860,7 @@ export default function DemoPlayer() {
                 <button
                   type="button"
                   onClick={cuota.limpiarPremium}
-                  className="w-full pt-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+                  className="w-full pt-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
                 >
                   {t("demoSalirPremium")}
                 </button>

@@ -1,5 +1,6 @@
 import { Sparkles, Smartphone, HelpCircle } from "lucide-react";
-import logo from "@/assets/bitly-logo.png";
+import logo640 from "@/assets/bitly-logo-640.webp";
+import logo320 from "@/assets/bitly-logo-320.webp";
 import { useI18n } from "@/lib/i18n";
 import { retraso } from "@/lib/reveal";
 import DownloadButtons from "./download-buttons";
@@ -13,7 +14,7 @@ type Props = {
   onOpenMobile: () => void; onOpenFaq: () => void;
 };
 
-const btnClass = "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/30 px-3 py-1.5 text-[10px] font-medium text-muted-foreground backdrop-blur transition-all duration-200 hover:border-primary/40 hover:text-primary hover:bg-primary/5 active:scale-95 sm:px-4 sm:py-2 sm:text-xs";
+const btnClass = "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/30 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur transition-all duration-200 hover:border-primary/40 hover:text-primary hover:bg-primary/5 active:scale-95 sm:px-4 sm:py-2 sm:text-xs";
 
 export default function HeroSection(props: Props) {
   const t = useI18n();
@@ -24,7 +25,7 @@ export default function HeroSection(props: Props) {
         <div
           data-reveal
           style={retraso(0)}
-          className="inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs"
+          className="inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs"
         >
           <Sparkles className="anim-late h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {props.version ? `${t("heroBadge")} — ${props.version}` : t("heroBadge")}
@@ -87,8 +88,14 @@ export default function HeroSection(props: Props) {
             style={{ background: "var(--gradient-mint)" }}
           />
           <img
-            src={logo}
-            alt="Logo"
+            src={logo640}
+            srcSet={`${logo320} 320w, ${logo640} 640w`}
+            sizes="(min-width: 1024px) 300px, (min-width: 640px) 260px, 200px"
+            alt="Bitly — Tu música, sin límites"
+            width={640}
+            height={640}
+            fetchPriority="high"
+            decoding="async"
             className="anim-flota relative w-[200px] max-w-full drop-shadow-2xl sm:w-[260px] lg:w-[300px] logo-hero"
           />
         </div>

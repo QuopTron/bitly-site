@@ -90,7 +90,7 @@ export default function PremiumBubble() {
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-bold leading-tight">{t("navPremium")}</p>
-                <p className="text-[11px] leading-tight text-muted-foreground">{t("bubblePersonal")}</p>
+                <p className="text-xs leading-tight text-muted-foreground">{t("bubblePersonal")}</p>
               </div>
             </div>
             <button
@@ -108,16 +108,16 @@ export default function PremiumBubble() {
             <div className="flex flex-wrap items-end gap-x-2 gap-y-0.5">
               <span className="text-3xl font-bold leading-none text-foreground">{precio}</span>
               {precioAntes && (
-                <span className="pb-0.5 text-sm text-muted-foreground/60 line-through">{precioAntes}</span>
+                <span className="pb-0.5 text-sm text-muted-foreground line-through">{precioAntes}</span>
               )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary ring-1 ring-primary/25">
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary ring-1 ring-primary/25">
                 <Check className="h-3 w-3" />
                 {t("plansPremiumPrice")}
               </span>
               {fase.enOferta && (
-                <span className="rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                <span className="rounded-full bg-gradient-to-r from-[#15803D] to-[#0E7A46] px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-white">
                   {lang === "es" ? fase.etiqueta : fase.etiquetaEn}
                 </span>
               )}
@@ -169,7 +169,7 @@ export default function PremiumBubble() {
             <button
               type="button"
               onClick={irAPlanes}
-              className="group flex w-full items-center justify-center gap-1.5 pt-0.5 text-[11px] font-medium text-primary transition hover:gap-2.5"
+              className="group flex w-full items-center justify-center gap-1.5 pt-0.5 text-xs font-medium text-primary transition hover:gap-2.5"
             >
               {t("bubbleSeePlans")}
               <ChevronDown className="h-3.5 w-3.5" />
@@ -184,7 +184,6 @@ export default function PremiumBubble() {
         onClick={alternar}
         aria-expanded={abierto}
         aria-controls="bitly-premium-burbuja"
-        aria-label={`${t("bubbleAria")} — ${precio}`}
         className="group relative flex items-center gap-2 rounded-full border border-primary/30 bg-card/90 py-1.5 pl-1.5 pr-2.5 shadow-2xl shadow-primary/15 backdrop-blur-xl transition hover:scale-[1.03] hover:border-primary/50 active:scale-[0.97] sm:gap-2.5 sm:py-2 sm:pl-2 sm:pr-3.5"
       >
         {!visto && (
@@ -199,11 +198,16 @@ export default function PremiumBubble() {
           <Gem className="h-4 w-4 text-primary" />
         </span>
         <span className="leading-tight">
-          <span className="block text-[10px] font-semibold text-muted-foreground sm:text-[11px]">
+          <span className="block text-xs font-semibold text-muted-foreground sm:text-xs">
             {t("navPremium")}
           </span>
           <span className="block text-sm font-bold text-foreground sm:text-base">{precio}</span>
         </span>
+        {/* El nombre accesible lo arma el propio contenido del botón: un
+            `aria-label` que no contuviera el texto visible tal cual hacía
+            fallar "label in name". El detalle va en un `sr-only`, que sí entra
+            en el nombre y no se ve. */}
+        <span className="sr-only">— {t("bubbleAria")}</span>
         <ChevronDown
           className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${abierto ? "rotate-180" : "group-hover:translate-y-0.5"}`}
         />

@@ -60,7 +60,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
   return (
     <section id="instalar" className="container mx-auto scroll-mt-6 px-4 pb-4 pt-6 sm:px-6 sm:pt-10">
       <div className="mb-6 text-center sm:mb-8" data-reveal>
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Wrench className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("installSectionBadge")}
         </div>
@@ -90,7 +90,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
               role="tab"
               aria-selected={seleccionada}
               onClick={() => setActiva(id)}
-              className={`flex shrink-0 snap-start items-center gap-1.5 rounded-xl px-3 py-2 text-[11px] font-semibold transition-all duration-200 active:scale-95 sm:gap-2 sm:px-4 sm:text-xs ${
+              className={`flex shrink-0 snap-start items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 active:scale-95 sm:gap-2 sm:px-4 sm:text-xs ${
                 seleccionada
                   ? "bg-primary/15 text-primary ring-1 ring-primary/30"
                   : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
@@ -131,7 +131,7 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
           href={enlaceWhatsApp(t("installHelpText"))}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/30 px-4 py-3 text-center text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-foreground sm:text-xs"
+          className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-border/60 bg-card/30 px-4 py-3 text-center text-xs font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-foreground sm:text-xs"
         >
           {/* `primary` y no el verde de marca: en tema claro ese verde claro
               sobre fondo claro no llega ni a 2:1 y el ícono se perdía. */}

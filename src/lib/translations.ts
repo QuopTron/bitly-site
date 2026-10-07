@@ -293,10 +293,16 @@ export const DICT: Record<string, [string, string]> = {
 
   // ── Barra de navegación de secciones ──
   navSecciones:         ["Secciones",                              "Sections"],
+  headerMenuOpen:       ["Abrir menú",                             "Open menu"],
+  headerMenuClose:      ["Cerrar menú",                            "Close menu"],
+  headerTemaLight:      ["Cambiar a tema claro",                   "Switch to light theme"],
+  headerTemaDark:       ["Cambiar a tema oscuro",                  "Switch to dark theme"],
+  headerIdioma:         ["Cambiar idioma",                         "Switch language"],
   navInicio:            ["Inicio",                                 "Home"],
   navDemo:              ["Demo",                                   "Demo"],
   navInstalar:          ["Instalar",                               "Install"],
   navOpiniones:         ["Opiniones",                              "Reviews"],
+  navFaq:               ["Preguntas",                              "FAQ"],
   navPlanes:            ["Planes",                                 "Plans"],
   navContacto:          ["Contacto",                               "Contact"],
 

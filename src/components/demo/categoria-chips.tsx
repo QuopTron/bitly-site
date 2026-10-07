@@ -54,7 +54,7 @@ export default function CategoriaChips({
             type="button"
             onClick={() => onCambiado(sel ? null : f.id)}
             aria-pressed={sel}
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 transition-all duration-200 active:scale-90 ${
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-all duration-200 active:scale-90 ${
               sel
                 ? "bg-primary/20 text-foreground ring-primary/40 shadow-sm shadow-primary/20"
                 : "text-muted-foreground ring-border/60 hover:bg-card/60 hover:text-foreground"

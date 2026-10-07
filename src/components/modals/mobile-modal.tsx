@@ -20,7 +20,7 @@ export default function MobileModal({ open, onClose }: Props) {
 
   return (
     <ModalWrapper open={open} onClose={onClose} title="Bitly Mobile" subtitle="Music utility built with Flutter and Go" icon={<Smartphone className="h-6 w-6 text-primary" />}>
-      <div className="mb-3 flex flex-wrap justify-center gap-1.5 text-[10px] text-muted-foreground sm:text-xs">
+      <div className="mb-3 flex flex-wrap justify-center gap-1.5 text-xs text-muted-foreground sm:text-xs">
         <span className="rounded-full border border-border/60 bg-card/40 px-2 py-0.5 backdrop-blur sm:px-3 sm:py-1">Android 7.0+</span>
       </div>
       <div className="space-y-1.5">
@@ -39,7 +39,7 @@ export default function MobileModal({ open, onClose }: Props) {
                 <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-muted-foreground transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} />
               </div>
               <div className={`grid transition-all duration-300 ${isOpen ? "grid-rows-[1fr] opacity-100 mt-2" : "grid-rows-[0fr] opacity-0"}`}>
-                <div className="overflow-hidden"><p className="text-[10px] leading-relaxed text-muted-foreground sm:text-xs">{t(f.descKey)}</p></div>
+                <div className="overflow-hidden"><p className="text-xs leading-relaxed text-muted-foreground sm:text-xs">{t(f.descKey)}</p></div>
               </div>
             </button>
           );

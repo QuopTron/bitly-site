@@ -23,7 +23,7 @@ export default function StatsBar({ total, windows, android }: Props) {
         <span className="hidden text-muted-foreground sm:inline">{t("heroDownloadsTotal")}</span>
         <span className="text-muted-foreground sm:hidden">{t("heroDownloads")}</span>
       </div>
-      <div className="flex gap-2 text-[10px] text-muted-foreground sm:text-xs">
+      <div className="flex gap-2 text-xs text-muted-foreground sm:text-xs">
         <span className="rounded-full border border-border bg-card/40 px-2 py-1 backdrop-blur sm:px-3">
           <Monitor className="mr-1 inline h-2.5 w-2.5 sm:h-3 sm:w-3" /> {fmt(windows)}
         </span>

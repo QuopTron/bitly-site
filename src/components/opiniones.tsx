@@ -48,7 +48,7 @@ function Estrellas({ valor, etiqueta, tam = "h-3.5 w-3.5" }: { valor: number; et
         <Star
           key={n}
           aria-hidden
-          className={`${tam} transition-colors duration-200 ${n <= Math.round(valor) ? "fill-primary text-primary" : "text-muted-foreground/40"}`}
+          className={`${tam} transition-colors duration-200 ${n <= Math.round(valor) ? "fill-primary text-primary" : "text-muted-foreground"}`}
         />
       ))}
     </span>
@@ -128,7 +128,7 @@ function Reparto({ reparto, total, etiqueta, tituloId }: { reparto: number[]; to
         const cuenta = reparto[n - 1] ?? 0;
         const ancho = total > 0 ? cuenta / total : 0;
         return (
-          <li key={n} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <li key={n} className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex w-7 shrink-0 items-center justify-end gap-0.5 tabular-nums">
               <span aria-hidden>{n}</span>
               <Star aria-hidden className="h-2.5 w-2.5 fill-primary text-primary" />
@@ -140,7 +140,7 @@ function Reparto({ reparto, total, etiqueta, tituloId }: { reparto: number[]; to
                 style={{ transform: `scaleX(${ancho})` }}
               />
             </span>
-            <span className="w-6 shrink-0 text-right tabular-nums text-muted-foreground/60">{cuenta}</span>
+            <span className="w-6 shrink-0 text-right tabular-nums text-muted-foreground">{cuenta}</span>
           </li>
         );
       })}
@@ -366,7 +366,7 @@ export default function Opiniones() {
         style={{ background: "radial-gradient(50% 60% at 50% 0%, var(--primary), transparent 70%)" }}
       />
       <div className="mb-8 text-center sm:mb-10" data-reveal>
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <MessageSquare className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("opinionesBadge")}
         </div>
@@ -412,7 +412,7 @@ export default function Opiniones() {
               min-content`, así que su mínimo de contenido se filtra hasta la
               grilla y empujaba la página 100 px a lo ancho en un celular. */}
           <fieldset className="mt-4 min-w-0">
-            <legend className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("opinionesEstrellas")}
             </legend>
             {/* La calificación es un radiogroup de verdad (se recorre con las
@@ -454,7 +454,7 @@ export default function Opiniones() {
                         className={`h-7 w-7 transition-colors duration-200 ${
                           pintadas
                             ? "fill-primary text-primary"
-                            : "text-muted-foreground/35 group-hover/star:text-primary/70"
+                            : "text-muted-foreground group-hover/star:text-primary/70"
                         }`}
                       />
                     </button>
@@ -463,8 +463,8 @@ export default function Opiniones() {
               </div>
               <span
                 aria-hidden
-                className={`min-w-0 flex-1 truncate text-right text-[11px] font-semibold transition-colors duration-200 ${
-                  estrellas > 0 ? "text-primary" : "text-muted-foreground/70"
+                className={`min-w-0 flex-1 truncate text-right text-xs font-semibold transition-colors duration-200 ${
+                  estrellas > 0 ? "text-primary" : "text-muted-foreground"
                 }`}
               >
                 {estrellas > 0 ? t(NOMBRE_NOTA[estrellas]) : t("opinionesNotaHint")}
@@ -473,7 +473,7 @@ export default function Opiniones() {
           </fieldset>
 
           <label className="mt-3 block">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("opinionesNombre")}</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("opinionesNombre")}</span>
             <input
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
@@ -485,7 +485,7 @@ export default function Opiniones() {
           </label>
 
           <label className="mt-3 block">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("opinionesTexto")}</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("opinionesTexto")}</span>
             <textarea
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
@@ -496,7 +496,7 @@ export default function Opiniones() {
             />
           </label>
 
-          <div aria-hidden className="mt-1 flex items-center justify-between text-[10px] tabular-nums text-muted-foreground/60">
+          <div aria-hidden className="mt-1 flex items-center justify-between text-xs tabular-nums text-muted-foreground">
             <span>{texto.length}/400</span>
             <span>{nombre.length}/24</span>
           </div>
@@ -512,7 +512,7 @@ export default function Opiniones() {
           </button>
 
           {falta && (
-            <p id="opiniones-falta" className="mt-2 text-center text-[10px] text-muted-foreground/70">
+            <p id="opiniones-falta" className="mt-2 text-center text-xs text-muted-foreground">
               {t("opinionesFalta")}
             </p>
           )}
@@ -520,7 +520,7 @@ export default function Opiniones() {
           <div role="status" aria-live="polite">
             {aviso && (
               <p
-                className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-medium animate-in fade-in slide-in-from-bottom-1 duration-300 ${
+                className={`mt-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium animate-in fade-in slide-in-from-bottom-1 duration-300 ${
                   aviso.tipo === "ok" ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive"
                 }`}
               >
@@ -540,7 +540,7 @@ export default function Opiniones() {
         >
           {!noDisponible && total > 0 && (
             <div className="mb-4 rounded-2xl border border-border/40 bg-background/30 p-3.5">
-              <p id="opiniones-reparto" className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p id="opiniones-reparto" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {t("opinionesReparto")}
               </p>
               <Reparto reparto={reparto} total={total} tituloId="opiniones-reparto" etiqueta={(n) => con(t("opinionesEstrella"), { n })} />
@@ -549,7 +549,7 @@ export default function Opiniones() {
 
           {noDisponible && (
             <div className="flex flex-col items-center gap-3 px-2 py-10 text-center">
-              <MessageSquare className="h-7 w-7 text-muted-foreground/40" aria-hidden />
+              <MessageSquare className="h-7 w-7 text-muted-foreground" aria-hidden />
               <p className="text-sm text-muted-foreground">{t("opinionesNoDisponible")}</p>
             </div>
           )}
@@ -590,7 +590,7 @@ export default function Opiniones() {
                       <span className="flex min-w-0 items-center gap-2">
                         <span
                           aria-hidden
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/10 text-[11px] font-bold uppercase text-primary ring-1 ring-primary/20"
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/10 text-xs font-bold uppercase text-primary ring-1 ring-primary/20"
                         >
                           {o.nombre.slice(0, 1)}
                         </span>
@@ -599,7 +599,7 @@ export default function Opiniones() {
                       <Estrellas valor={o.estrellas} etiqueta={con(t("opinionesEstrella"), { n: o.estrellas })} />
                     </div>
                     <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground sm:text-sm">{o.texto}</p>
-                    <p className="mt-1.5 text-[10px] text-muted-foreground/50">{cuando(o.creado, es)}</p>
+                    <p className="mt-1.5 text-xs text-muted-foreground">{cuando(o.creado, es)}</p>
                   </article>
                 ))}
               </div>
@@ -614,7 +614,7 @@ export default function Opiniones() {
                 >
                   <ChevronLeft className="h-4 w-4" aria-hidden />
                 </button>
-                <span className="min-w-14 text-center text-[11px] font-semibold tabular-nums text-muted-foreground">
+                <span className="min-w-14 text-center text-xs font-semibold tabular-nums text-muted-foreground">
                   {con(t("opinionesPagina"), { n: Math.min(pagina + 1, totalTarjetas), total: totalTarjetas })}
                 </span>
                 <button
