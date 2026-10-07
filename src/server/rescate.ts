@@ -10,18 +10,24 @@
  *      las versiones no originales descartadas. El ISRC manda cuando existe, en
  *      este orden de precisión:
  *        a. El ISRC de una fuente que puede dar fe de él
- *           (`matching.esProveedorAutoritativoISRC`) se resuelve con
- *           `qobuz-web.checkAvailability`, primero SOLO por ISRC (exacto y
- *           rápido) y después con el título sin créditos entre paréntesis (el
- *           paréntesis hacía fallar su `titlesMatch`). Un ISRC que Qobuz no
- *           indexa NO arma cuarentena: eso es un "no está", no un canal caído.
+ *           (`matching.esProveedorAutoritativoISRC`) se resuelve contra el
+ *           catálogo de Qobuz por DOS caminos en paralelo: la extensión
+ *           `qobuz-web.checkAvailability` (vía su espejo, primero SOLO por ISRC
+ *           y después con el título sin créditos entre paréntesis: el
+ *           paréntesis hacía fallar su `titlesMatch`) y, sin espejo de por
+ *           medio, la API pública `qobuz.com/api.json/0.2` —la del backend—
+ *           que además devuelve el ISRC de cada pista. Cuando el espejo se
+ *           cae, el camino directo es el que evita bajar al adelanto. Un ISRC
+ *           que Qobuz no indexa NO arma cuarentena: eso es un "no está", no un
+ *           canal caído.
  *        b. Si la fuente no publica ISRC (Spotify, TIDAL, Amazon, YouTube) o el
  *           suyo no está indexado, se le pide el ISRC al catálogo de respaldo
  *           (`isrcDeRespaldo`, Deezer es autoritativo) y se resuelve por él. Así
  *           las 8 fuentes terminan matcheando por el mismo identificador.
- *        c. Si tampoco, se busca por nombre en Qobuz y, cuando el título declara
- *           `ARTISTA - Canción` (re-subidos), se reintenta con lo que el título
- *           dice en vez del canal que figura como artista.
+ *        c. Si tampoco, se busca por nombre (también por los dos caminos) y,
+ *           cuando el título declara `ARTISTA - Canción` (re-subidos), se
+ *           reintenta con lo que el título dice en vez del canal que figura
+ *           como artista.
  *   2. AUDIO. Ese id se canjea por una URL de CDN de Qobuz con el relay del
  *      proyecto Stash (`stash_relay.go`): una config firmada y pública trae la
  *      `relay_key`, y el mint va firmado con HMAC-SHA256. La URL trae su propio
@@ -440,6 +446,157 @@ async function idPorNombre(p: PeticionAudio, isrcConfiable: string | null): Prom
   return { id: best.id, duracionMs: best.durationMs, isrc: declarado };
 }
 
+/* ── Catálogo público de Qobuz (api.json/0.2) ────────────────────── */
+
+/**
+ * El mismo catálogo que usa el backend Go (`qobuzAPIBaseURL` + `app_id`
+ * público), pedido DIRECTO a Qobuz en vez de pasar por la extensión.
+ *
+ * `qobuz-web` consulta un espejo (`api.zarz.moe`) y cuando ese espejo falla —
+ * 502/500 en `qbz` y `qbz2`, que se caen y vuelven— `idVerificadoPorISRC` y
+ * `idPorNombre` devuelven `null`, NO queda ningún candidato y el rescate entero
+ * baja al adelanto de 30 s: la demo "suena, pero es un preview". Esta ruta no
+ * tiene espejo de por medio, contesta con el ISRC de cada pista (así la
+ * verificación sigue siendo exacta) y además es la que usa el backend.
+ */
+const QOBUZ_API = "https://www.qobuz.com/api.json/0.2";
+const QOBUZ_APP_ID = "712109809";
+const TIMEOUT_QOBUZ_MS = 8_000;
+
+/**
+ * Enfriamiento si el catálogo empieza a fallar seguido (429, 403, cortes):
+ * sin esto cada reproducción pagaría el tope de timeout antes de caer al
+ * respaldo. Tres fallos seguidos apagan la ruta un par de minutos; las demás
+ * rutas (espejo y adelanto) siguen intentando mientras tanto.
+ */
+const FALLAS_QOBUZ_PARA_ENFRIAR = 3;
+const ENFRIAMIENTO_QOBUZ_MS = 2 * 60 * 1000;
+let qobuzFallas = 0;
+let qobuzEnfriaHasta = 0;
+
+function anotarFallaQobuz() {
+  qobuzFallas++;
+  if (qobuzFallas < FALLAS_QOBUZ_PARA_ENFRIAR) return;
+  qobuzFallas = 0;
+  qobuzEnfriaHasta = Date.now() + ENFRIAMIENTO_QOBUZ_MS;
+}
+
+type PistaQobuz = {
+  id: number | string;
+  title?: string;
+  performer?: { name?: string };
+  album?: { title?: string; image?: { large?: string } };
+  duration?: number;
+  isrc?: string;
+};
+
+/** Búsqueda contra la API pública. Nunca lanza: un fallo es "sin resultados". */
+async function qobuzApi(consulta: string, limite: number): Promise<PistaQobuz[]> {
+  if (Date.now() < qobuzEnfriaHasta) return [];
+  const url = `${QOBUZ_API}/track/search?query=${encodeURIComponent(consulta)}&limit=${limite}&app_id=${QOBUZ_APP_ID}`;
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_QOBUZ_MS);
+  try {
+    const res = await fetch(url, {
+      signal: control.signal,
+      headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+    });
+    if (!res.ok) {
+      anotarFallaQobuz();
+      return [];
+    }
+    const datos = (await res.json()) as { tracks?: { items?: PistaQobuz[] } };
+    qobuzFallas = 0;
+    return Array.isArray(datos?.tracks?.items) ? datos.tracks.items : [];
+  } catch {
+    anotarFallaQobuz();
+    return [];
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/**
+ * Identidad contra el catálogo público, con los MISMOS dos intentos (y el mismo
+ * orden) que `idVerificadoPorISRC`:
+ *
+ *   1. POR ISRC. Qobuz indexa el código como consulta: el resultado que lo
+ *      declara es la grabación exacta, sin depender del título ni del artista.
+ *   2. POR NOMBRE. Si el ISRC no está indexado (o no hay), se busca
+ *      `título artista` y el ranking del backend (`bestOriginalAlbumDuracion`)
+ *      elige, con la MISMA confirmación de `idPorNombre`: un candidato que
+ *      declare un ISRC distinto al confiable no es la misma grabación.
+ */
+async function idPorCatalogoQobuz(
+  p: PeticionAudio,
+  isrc: string | null,
+  isrcConfiable: string | null,
+): Promise<{ id: string; duracionMs: number; isrc: string | null } | null> {
+  if (isrc) {
+    const porCodigo = await qobuzApi(isrc, 8);
+    const exacta = porCodigo.find((i) => normalizarISRC(i.isrc ?? "") === isrc);
+    if (exacta) {
+      return {
+        id: String(exacta.id),
+        duracionMs: Math.max(0, Math.round(Number(exacta.duration ?? 0)) * 1000),
+        isrc,
+      };
+    }
+  }
+
+  const consulta = `${p.titulo} ${p.artista}`.trim();
+  if (!consulta) return null;
+  const filas = await qobuzApi(consulta, 10);
+  if (filas.length === 0) return null;
+
+  const cands: TrackResult[] = filas
+    .filter((i) => String(i.id ?? "") !== "")
+    .map((i) => ({
+      id: String(i.id),
+      title: i.title ?? "",
+      artist: i.performer?.name ?? "",
+      album: i.album?.title ?? "",
+      coverUrl: i.album?.image?.large ?? "",
+      durationMs: Math.max(0, Math.round(Number(i.duration ?? 0)) * 1000),
+      isrc: normalizarISRC(i.isrc ?? ""),
+      provider: "qobuz-web",
+    }));
+  const ordenados = isrcConfiable ? preferirISRC(isrcConfiable, cands) : cands;
+  const best = bestOriginalAlbumDuracion(
+    p.titulo,
+    p.artista,
+    p.album ?? "",
+    Math.max(0, Math.round(p.duracionMs ?? 0)),
+    ordenados,
+  );
+  if (!best) return null;
+  const declarado = normalizarISRC(best.isrc);
+  if (isrcConfiable && declarado && declarado !== normalizarISRC(isrcConfiable)) return null;
+  return { id: best.id, duracionMs: best.durationMs, isrc: declarado || null };
+}
+
+/**
+ * Tope por ruta de identidad: una fuente colgada no puede dejar el rescate
+ * esperando (el techo del runtime son 20 s y el usuario mira un spinner).
+ */
+const TOPE_RUTA_MS = 6_000;
+
+function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((ok, mal) => {
+    const reloj = setTimeout(() => mal(new Error("la ruta de identidad tardó demasiado")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(reloj);
+        ok(v);
+      },
+      (e) => {
+        clearTimeout(reloj);
+        mal(e);
+      },
+    );
+  });
+}
+
 /* ── Resolución ──────────────────────────────────────────────────── */
 
 /**
@@ -481,37 +638,67 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
   type Cand = { id: string; duracionMs: number; isrc: string | null; proveedor: string };
   const porIsrc = isrcConfiable ?? isrcPista;
 
-  /** Identidad de una pista, en orden de precisión. */
+  /**
+   * Identidad de una pista: TRES rutas en PARALELO, empujadas en orden de
+   * precisión (ISRC exacto, luego nombre) para que el mint pruebe primero la
+   * grabación exacta.
+   *
+   * El catálogo PÚBLICO y el espejo de la extensión llegan al mismo sitio por
+   * caminos distintos: si el espejo se cae (o se cuelga), la ruta directa
+   * acredita la identidad y el rescate NO baja al adelanto de 30 s. Cada ruta
+   * tiene su propio tope, así que una colgada no frena a las demás.
+   *
+   * Los resultados se juntan en vez de quedarse con el primero: si el mint del
+   * primer id falla, el segundo sigue siendo un intento legítimo.
+   */
   const juntarCandidatos = async (q: PeticionAudio): Promise<Cand[]> => {
-    const lista: Cand[] = [];
+    if (!q.titulo && !porIsrc) return [];
+
+    let espejoIsrc: Promise<Cand | null>;
     if (porIsrc) {
-      const id = await idVerificadoPorISRC(q, porIsrc);
-      if (id) lista.push({ id, duracionMs, isrc: porIsrc, proveedor: "qobuz-web" });
+      const exacto: string = porIsrc;
+      espejoIsrc = idVerificadoPorISRC(q, exacto).then((id): Cand | null =>
+        id ? { id, duracionMs, isrc: exacto, proveedor: "qobuz-web" } : null,
+      );
+    } else {
+      // Todas las fuentes terminan matcheando por ISRC: si la pista no trae uno
+      // confiable, el respaldo (Deezer) lo publica y el espejo lo verifica.
+      espejoIsrc = idPorISRCDeRespaldo(q).then((r): Cand | null =>
+        r ? { id: r.id, duracionMs, isrc: r.isrc, proveedor: "qobuz-web" } : null,
+      );
     }
-    if (lista.length > 0 || !q.titulo) return lista;
 
-    // Dos caminos en PARALELO y en orden de precisión: identidad por el ISRC que
-    // publica el respaldo (todas las fuentes terminan matcheando por ISRC) y,
-    // como red, el ranking por nombre. Antes eran secuenciales y la red por
-    // nombre sola dejaba afuera a las fuentes sin ISRC.
-    const porRespaldo = porIsrc
-      ? Promise.resolve(null)
-      : idPorISRCDeRespaldo(q).catch(() => null);
-    const porNombre = idPorNombre(q, isrcConfiable).catch(() => null);
+    const rutas: Array<Promise<Cand | null>> = [
+      conTope(espejoIsrc, TOPE_RUTA_MS).catch(() => null),
+      conTope(
+        idPorCatalogoQobuz(q, porIsrc, isrcConfiable).then((r): Cand | null =>
+          r
+            ? {
+                id: r.id,
+                duracionMs: r.duracionMs || duracionMs,
+                isrc: r.isrc ?? isrcConfiable,
+                proveedor: "qobuz-web",
+              }
+            : null,
+        ),
+        TOPE_RUTA_MS,
+      ).catch(() => null),
+    ];
+    if (q.titulo) {
+      rutas.push(
+        conTope(
+          idPorNombre(q, isrcConfiable).then((r): Cand | null =>
+            r
+              ? { id: r.id, duracionMs: r.duracionMs, isrc: r.isrc || isrcConfiable, proveedor: "qobuz-web" }
+              : null,
+          ),
+          TOPE_RUTA_MS,
+        ).catch(() => null),
+      );
+    }
 
-    const [respaldo, nombre] = await Promise.all([porRespaldo, porNombre]);
-    if (respaldo) {
-      lista.push({ id: respaldo.id, duracionMs, isrc: respaldo.isrc, proveedor: "qobuz-web" });
-    }
-    if (nombre) {
-      lista.push({
-        id: nombre.id,
-        duracionMs: nombre.duracionMs,
-        isrc: nombre.isrc || isrcConfiable,
-        proveedor: "qobuz-web",
-      });
-    }
-    return lista;
+    const resultados = await Promise.all(rutas);
+    return resultados.filter((c): c is Cand => c !== null);
   };
 
   let candidatos = await juntarCandidatos(pedido);

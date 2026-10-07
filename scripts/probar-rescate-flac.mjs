@@ -75,6 +75,17 @@ try {
     let pos = 4;
     const tags = {};
     const bloques = [];
+    let duracion = null;
+    // STREAMINFO siempre es el primer bloque (data en el byte 8): de ahí salen
+    // el muestreo y las muestras TOTALES, que dan la duración real del archivo.
+    // Un adelanto de 30 s no puede medir 3:45.
+    if (buf.length >= 8 + 34 && (buf[4] & 0x7f) === 0) {
+      const si = buf.subarray(8, 8 + 34);
+      const cab = si.readBigUInt64BE(10);
+      const muestreo = Number(cab >> 44n) & 0xfffff;
+      const total = cab & 0xfffffffffn;
+      if (muestreo > 0 && total > 0n) duracion = Number(total) / muestreo;
+    }
     while (pos + 4 <= buf.length) {
       const header = buf[pos];
       const ultimo = (header & 0x80) !== 0;
@@ -96,13 +107,13 @@ try {
           const eq = par.indexOf("=");
           if (eq > 0) tags[par.slice(0, eq).toUpperCase()] = par.slice(eq + 1);
         }
-        return { tipo: "vorbis", tags, bloques };
+        return { tipo: "vorbis", tags, bloques, duracion };
       }
-      if (tipo === 3) { pos += largo; continue; }
+      if (tipo === 3) { pos += largo; if (ultimo) break; continue; }
       pos += largo;
       if (ultimo) break;
     }
-    return { tipo: "sin-etiquetas", tags, bloques };
+    return { tipo: "sin-etiquetas", tags, bloques, duracion };
   }
 
   const titulo = process.argv[2] ?? "get lucky";
@@ -143,7 +154,8 @@ try {
     console.log(`  GET → ${res.status} ${res.headers.get("content-type")} (${res.headers.get("content-range")})`);
     const buf = Buffer.from(await res.arrayBuffer());
     const meta = etiquetasFLAC(buf);
-    console.log(`  FLAC bloques=[${(meta.bloques ?? []).join(" ")}] ${meta.tipo}:`, JSON.stringify(meta.tags ?? meta.error));
+    console.log(`  FLAC duracion=${meta.duracion ? meta.duracion.toFixed(1) : "?"}s bloques=[${(meta.bloques ?? []).join(" ")}] ${meta.tipo}:`, JSON.stringify(meta.tags ?? meta.error));
+    if (meta.duracion && meta.duracion < 35) console.log("  ⚠ parece un ADELANTO (30 s), no la canción completa");
   }
 } finally {
   for (const f of [salida, entrada]) {
