@@ -413,7 +413,7 @@ export default function DemoPlayer() {
               style={{ background: "var(--gradient-hero)" }}
             />
           <div
-            role="img"
+            role="group"
             aria-label={t("demoAriaMarco")}
             className={`relative mx-auto overflow-hidden border border-border bg-card shadow-2xl shadow-primary/[0.06] ring-1 ring-primary/10 ${chasis.clase}`}
           >

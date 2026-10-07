@@ -48,50 +48,50 @@ export default function DownloadButtons({ isBlocked, windowsUrl, androidUrl, ios
         className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Monitor className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
-        <div className="text-left">
-          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
-          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Windows</div>
-        </div>
+        <span className="block text-left">
+          <span className="block text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</span>
+          <span className="block text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Windows</span>
+        </span>
       </button>
       <button
         onClick={() => onDownload("android", androidUrl)}
         className="group flex flex-1 items-center gap-3 rounded-2xl bg-foreground px-5 py-3 text-background shadow-lg shadow-foreground/20 transition duration-200 hover:scale-[1.02] active:scale-[0.96] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Smartphone className="h-6 w-6 sm:h-7 sm:w-7" />
-        <div className="text-left">
-          <div className="text-xs uppercase opacity-70 sm:text-xs">Descargar APK</div>
-          <div className="text-sm font-semibold leading-tight sm:text-base">Android</div>
-        </div>
+        <span className="block text-left">
+          <span className="block text-xs uppercase opacity-70 sm:text-xs">Descargar APK</span>
+          <span className="block text-sm font-semibold leading-tight sm:text-base">Android</span>
+        </span>
       </button>
       <button
         onClick={() => onDownload("tv", androidUrl)}
         className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Tv className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
-        <div className="text-left">
-          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
-          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Smart TV</div>
-        </div>
+        <span className="block text-left">
+          <span className="block text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</span>
+          <span className="block text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">Smart TV</span>
+        </span>
       </button>
       <button
         onClick={() => onDownload("ios", iosUrl)}
         className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
-        <div className="text-left">
-          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
-          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">iOS</div>
-        </div>
+        <span className="block text-left">
+          <span className="block text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</span>
+          <span className="block text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">iOS</span>
+        </span>
       </button>
       <button
         onClick={() => onDownload("macos", macosUrl)}
         className="group flex flex-1 items-center gap-3 rounded-2xl border border-border/40 bg-card/40 px-5 py-3 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/5 active:scale-[0.97] active:duration-75 sm:rounded-3xl sm:px-6 sm:py-3.5"
       >
         <Apple className="h-6 w-6 text-muted-foreground group-hover:text-primary sm:h-7 sm:w-7" />
-        <div className="text-left">
-          <div className="text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</div>
-          <div className="text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">macOS</div>
-        </div>
+        <span className="block text-left">
+          <span className="block text-xs uppercase opacity-70 group-hover:text-primary sm:text-xs">Descargar para</span>
+          <span className="block text-sm font-semibold leading-tight text-muted-foreground group-hover:text-foreground sm:text-base">macOS</span>
+        </span>
       </button>
     </>
   );

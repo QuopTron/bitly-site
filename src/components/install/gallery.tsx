@@ -28,20 +28,20 @@ export type TipoMarco = "telefono" | "ventana" | "plano" | "tv";
 /** Celular: bisel redondeado + cámara, para que la captura quede prolija. */
 function MarcoTelefono({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
-    <div className="relative rounded-[2rem] border border-border/70 bg-[#0a0d12] p-[5px] shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
-      <div className="relative overflow-hidden rounded-[1.6rem] bg-black">
+    <span className="relative block rounded-[2rem] border border-border/70 bg-[#0a0d12] p-[5px] shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
+      <span className="relative block overflow-hidden rounded-[1.6rem] bg-black">
         <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
         <span className="pointer-events-none absolute left-1/2 top-[7px] h-[6px] w-[6px] -translate-x-1/2 rounded-full bg-black ring-1 ring-white/20" />
-      </div>
-    </div>
+      </span>
+    </span>
   );
 }
 
 /** Escritorio: barra de navegador con la dirección del sitio. */
 function MarcoVentana({ src, alt, url, w, h }: { src: string; alt: string; url: string; w?: number; h?: number }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
-      <div className="flex items-center gap-2 border-b border-border/50 bg-card/90 px-3 py-2">
+    <span className="block overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
+      <span className="flex items-center gap-2 border-b border-border/50 bg-card/90 px-3 py-2">
         <span className="flex gap-1.5">
           <i className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
           <i className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
@@ -50,30 +50,30 @@ function MarcoVentana({ src, alt, url, w, h }: { src: string; alt: string; url: 
         <span className="mx-auto max-w-[70%] truncate rounded-md bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
           {url}
         </span>
-      </div>
+      </span>
       <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
-    </div>
+    </span>
   );
 }
 
 /** Diálogos y pantallas sueltas: tarjeta limpia sin cromo. */
 function MarcoPlano({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border/70 bg-black/40 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
+    <span className="block overflow-hidden rounded-xl border border-border/70 bg-black/40 shadow-xl shadow-black/40 ring-1 ring-white/[0.04]">
       <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
-    </div>
+    </span>
   );
 }
 
 /** Televisor: bisel + base, para que la captura se lea como pantalla de TV. */
 function MarcoTv({ src, alt, w, h }: { src: string; alt: string; w?: number; h?: number }) {
   return (
-    <div className="rounded-2xl border border-border/70 bg-[#0a0d12] p-2 shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
-      <div className="overflow-hidden rounded-lg bg-black">
+    <span className="block rounded-2xl border border-border/70 bg-[#0a0d12] p-2 shadow-xl shadow-black/50 ring-1 ring-white/[0.06]">
+      <span className="block overflow-hidden rounded-lg bg-black">
         <img src={src} alt={alt} width={w} height={h} loading="lazy" decoding="async" className="block w-full" />
-      </div>
-      <div className="mx-auto mt-1.5 h-1.5 w-20 rounded-full bg-white/10" />
-    </div>
+      </span>
+      <span className="mx-auto mt-1.5 block h-1.5 w-20 rounded-full bg-white/10" />
+    </span>
   );
 }
 

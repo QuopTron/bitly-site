@@ -87,7 +87,9 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
           return (
             <button
               key={id}
+              id={`pestana-${id}`}
               role="tab"
+              aria-controls="pestana-panel"
               aria-selected={seleccionada}
               onClick={() => setActiva(id)}
               className={`flex shrink-0 snap-start items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 active:scale-95 sm:gap-2 sm:px-4 sm:text-xs ${
@@ -108,7 +110,13 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
         style={retraso(140)}
         className="mx-auto max-w-5xl rounded-3xl border border-border/50 bg-gradient-to-b from-card/50 to-card/20 p-4 backdrop-blur sm:p-6"
       >
-        <div key={activa} role="tabpanel" className="animate-in fade-in duration-300">
+        <div
+          id="pestana-panel"
+          key={activa}
+          role="tabpanel"
+          aria-labelledby={`pestana-${activa}`}
+          className="animate-in fade-in duration-300"
+        >
           {activa === "phone" && <GuiaCelular conCapturas />}
           {activa === "pc" && <GuiaPC conCapturas />}
           {activa === "tv" && <GuiaTV conCapturas />}
