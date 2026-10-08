@@ -19,7 +19,7 @@ export default function FaqSection() {
 
   return (
     <section id="faq" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16">
-      <div className="mb-6 text-center sm:mb-8" data-reveal>
+      <div className="mb-6 text-center sm:mb-8" data-reveal suppressHydrationWarning>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4">
           <HelpCircle className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("faqTitle")}
@@ -33,7 +33,7 @@ export default function FaqSection() {
         <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground sm:text-base">{t("faqDesc")}</p>
       </div>
 
-      <div className="mx-auto grid max-w-3xl gap-2.5 sm:gap-3" data-reveal style={retraso(80)}>
+      <div className="mx-auto grid max-w-3xl gap-2.5 sm:gap-3" data-reveal suppressHydrationWarning style={retraso(80)}>
         {FAQ.map((item) => (
           <details
             key={item.qKey}

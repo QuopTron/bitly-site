@@ -16,6 +16,7 @@ import Opiniones from "@/components/opiniones";
 import DemoPlayer from "@/components/demo/demo-player";
 import FaqSection from "@/components/faq-section";
 import { initRates } from "@/lib/currency";
+import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 import { TITULO } from "@/lib/seo";
 
@@ -95,6 +96,9 @@ export const Route = createFileRoute("/")({
 
 export default function Index() {
   const datos = Route.useLoaderData();
+  // Idioma y moneda guardados se aplican acá, dentro del contenido de la ruta
+  // y por lo tanto DESPUÉS de que hidrató (ver `preferencias.ts`).
+  usePreferenciasGuardadas();
   const [info, setInfo] = useState<InfoApp>(datos.info);
   const [stats, setStats] = useState(datos.stats);
   const [showMobile, setShowMobile] = useState(false);

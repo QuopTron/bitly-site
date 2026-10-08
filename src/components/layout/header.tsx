@@ -1,22 +1,24 @@
 import { Sun, Moon, Globe, Menu, X } from "lucide-react";
 import logo96 from "@/assets/bitly-logo-96.webp";
 import logo320 from "@/assets/bitly-logo-320.webp";
-import { useI18n, setLanguage, getLanguage } from "@/lib/i18n";
+import { useI18n, useLanguage } from "@/lib/i18n";
 import { useEffect, useState } from "react";
-import { aplicarTema, temaGuardado, type Tema } from "@/lib/tema";
+import { aplicarTema, type Tema } from "@/lib/tema";
 import CurrencySelector from "./currency-selector";
 
 type Props = Record<string, never>;
 
 export default function Header(_props: Props) {
   const t = useI18n();
-  const [lang, setLang] = useState(getLanguage());
-  // El estado arranca con lo GUARDADO (el script del <head> ya lo aplicó) y se
-  // corrige al montar: así el ícono coincide con el tema real y no depende de
-  // que este componente se hidrate a tiempo.
-  const [theme, setTheme] = useState<Tema>(() =>
-    typeof document === "undefined" ? "dark" : temaGuardado(),
-  );
+  // Suscrito al cambio global: el idioma guardado se aplica recién después de
+  // hidratar (usePreferenciasGuardadas) y este componente se entera por el
+  // listener.
+  const [lang, setLang] = useLanguage();
+  // Arranca SIEMPRE en "dark", igual que el servidor: el script del <head> ya
+  // aplicó el tema guardado al DOM y el efecto de abajo corrige el ícono al
+  // montar. Leer `temaGuardado()` acá hidrataría «Moon» contra el «Sun» del
+  // HTML (#418) en quien tenga el tema claro guardado.
+  const [theme, setTheme] = useState<Tema>("dark");
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -30,9 +32,7 @@ export default function Header(_props: Props) {
   };
 
   const switchLang = () => {
-    const next = lang === "es" ? "en" : "es";
-    setLanguage(next);
-    setLang(next);
+    setLang(lang === "es" ? "en" : "es");
   };
 
   return (

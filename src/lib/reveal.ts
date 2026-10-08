@@ -4,10 +4,17 @@ import type { CSSProperties } from "react";
  * Aparición al entrar en pantalla.
  *
  * Un único `IntersectionObserver` para todo el sitio: los bloques se marcan con
- * `data-reveal` y reciben la clase `dentro` la primera vez que asoman a la
- * ventana. Se deja de observar cada uno en cuanto aparece (el efecto no se
+ * `data-reveal` y reciben el atributo `data-dentro` la primera vez que asoman
+ * a la ventana. Se deja de observar cada uno en cuanto aparece (el efecto no se
  * repite al subir y bajar) y la animación es CSS puro sobre `transform` y
  * `opacity`, que el compositor resuelve sin repintar.
+ *
+ * El marcado es un atributo y no la clase `dentro` de antes: el guion del shell
+ * lo escribe durante el parseo (antes de que llegue el bundle), y aunque los
+ * bloques `data-reveal` llevan `suppressHydrationWarning` (React no valida
+ * sus atributos al hidratar), el estado así no vive en el className — un
+ * re-render que pisara la clase se lo tragaba en silencio y el bloque quedaba
+ * oculto para siempre.
  *
  * El estado "oculto" lo pone `src/styles.css` sólo bajo `html.anim`, una clase
  * que el shell escribe desde el primer byte. Si no hay JS —o el sistema pide
@@ -22,6 +29,15 @@ import type { CSSProperties } from "react";
  */
 
 const SELECTOR = "[data-reveal]";
+
+/** ¿Ya quedó marcado como visible? */
+function marcado(el: Element): boolean {
+  return el.hasAttribute("data-dentro");
+}
+
+function marcar(el: Element): void {
+  el.setAttribute("data-dentro", "");
+}
 
 let observador: IntersectionObserver | null = null;
 let mutaciones: MutationObserver | null = null;
@@ -51,14 +67,14 @@ export function refrescarReveals(): void {
     revision = 0;
     if (!observador) return;
     document.querySelectorAll<HTMLElement>(SELECTOR).forEach((el) => {
-      if (!el.classList.contains("dentro")) observador!.observe(el);
+      if (!marcado(el)) observador!.observe(el);
     });
   });
 }
 
 /** Muestra de una el contenido (sin observador o sin ganas de animar). */
 function mostrarTodo() {
-  document.querySelectorAll<HTMLElement>(SELECTOR).forEach((el) => el.classList.add("dentro"));
+  document.querySelectorAll<HTMLElement>(SELECTOR).forEach(marcar);
   document.documentElement.classList.remove("anim");
 }
 
@@ -82,7 +98,7 @@ export function instalarReveals(): () => void {
     (entradas) => {
       for (const entrada of entradas) {
         if (!entrada.isIntersecting) continue;
-        entrada.target.classList.add("dentro");
+        marcar(entrada.target);
         observador?.unobserve(entrada.target);
       }
     },

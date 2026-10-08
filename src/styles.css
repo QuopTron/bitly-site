@@ -307,14 +307,17 @@
 /* ── Aparición al entrar en pantalla ──
    La clase `anim` la pone el shell en <html> desde el primer byte, así el
    contenido no se ve antes de animarse. Sólo se oculta cuando hay JS (y sin
-   movimiento reducido), con el respaldo de <noscript> para el resto. */
+   movimiento reducido), con el respaldo de <noscript> para el resto.
+   El marcado "ya apareció" es el atributo `data-dentro` (no una clase): el
+   guion del shell lo pone antes del bundle y los bloques `data-reveal` llevan
+   suppressHydrationWarning, así que React no lo valida al hidratar. */
 @media (prefers-reduced-motion: no-preference) {
-  html.anim [data-reveal]:not(.dentro) {
+  html.anim [data-reveal]:not([data-dentro]) {
     opacity: 0;
     transform: translate3d(0, 18px, 0);
   }
 
-  html.anim [data-reveal].dentro {
+  html.anim [data-reveal][data-dentro] {
     animation: bit-sube 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
     animation-delay: var(--reveal-delay, 0ms);
   }

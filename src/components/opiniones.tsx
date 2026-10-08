@@ -365,7 +365,7 @@ export default function Opiniones() {
         className="pointer-events-none absolute inset-x-8 top-6 -z-10 h-32 opacity-[0.18]"
         style={{ background: "radial-gradient(50% 60% at 50% 0%, var(--primary), transparent 70%)" }}
       />
-      <div className="mb-8 text-center sm:mb-10" data-reveal>
+      <div className="mb-8 text-center sm:mb-10" data-reveal suppressHydrationWarning>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <MessageSquare className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("opinionesBadge")}
@@ -402,7 +402,7 @@ export default function Opiniones() {
         {/* ── Formulario ── */}
         <form
           onSubmit={enviar}
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(60)}
           className="h-fit min-w-0 rounded-3xl border border-primary/25 bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 shadow-xl shadow-primary/5 transition-shadow duration-300 focus-within:shadow-primary/10 sm:p-6"
         >
@@ -533,7 +533,7 @@ export default function Opiniones() {
 
         {/* ── Lista ── */}
         <div
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(120)}
           aria-busy={!noDisponible && opiniones === null}
           className="min-w-0 rounded-3xl border border-border/50 bg-gradient-to-b from-card/50 to-card/20 p-4 backdrop-blur sm:p-5"

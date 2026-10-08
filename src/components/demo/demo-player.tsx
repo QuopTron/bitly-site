@@ -347,7 +347,7 @@ export default function DemoPlayer() {
 
   return (
     <section id="demo" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
-      <div className="mb-8 text-center sm:mb-10" data-reveal>
+      <div className="mb-8 text-center sm:mb-10" data-reveal suppressHydrationWarning>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary backdrop-blur sm:px-4 sm:text-xs">
           <Play className="anim-late h-3.5 w-3.5 sm:h-4 sm:w-4" />
           {t("demoBadge")}
@@ -775,7 +775,7 @@ export default function DemoPlayer() {
         </div>
 
         {/* ── Indicador de precio ── */}
-        <aside data-reveal style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
+        <aside data-reveal suppressHydrationWarning style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
           <h3 className="text-sm font-bold">{t("demoLadderTitle")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

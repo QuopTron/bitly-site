@@ -11,7 +11,20 @@ function getInitialLang(): Lang {
   return stored === "es" || stored === "en" ? stored : "es";
 }
 
-currentLang = getInitialLang();
+/**
+ * Aplica el idioma guardado DESPUÉS de hidratar.
+ *
+ * El módulo arranca en "es" a propósito: el servidor siempre pinta en español
+ * y el primer render del cliente tiene que ser idéntico a ese HTML. Leer el
+ * localStorage al cargar el módulo hacía que un visitante con "en" guardado
+ * hidrataría inglés contra español y React regeneraría el árbol (#418).
+ * Se llama desde `usePreferenciasGuardadas`, en el efecto del contenido de la
+ * ruta (índice, 404, error), que corre recién cuando eso hidrató.
+ */
+export function aplicarIdiomaGuardado(): void {
+  const guardado = getInitialLang();
+  if (guardado !== currentLang) setLanguage(guardado);
+}
 
 export function setLanguage(lang: Lang) {
   currentLang = lang;

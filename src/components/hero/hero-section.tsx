@@ -23,7 +23,7 @@ export default function HeroSection(props: Props) {
     <section className="container mx-auto grid items-center gap-6 px-4 py-8 sm:gap-8 sm:px-6 sm:py-12 md:py-16 lg:grid-cols-2 lg:py-20">
       <div className="space-y-5 sm:space-y-6">
         <div
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(0)}
           className="inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs"
         >
@@ -34,7 +34,7 @@ export default function HeroSection(props: Props) {
         <h1 className="text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl md:text-6xl lg:text-8xl">
           {/* El título lleva encima una franja luminosa que se pasea: es una
               capa aparte, así que el texto no se repinta nunca. */}
-          <span className="relative inline-block" data-reveal style={retraso(80)}>
+          <span className="relative inline-block" data-reveal suppressHydrationWarning style={retraso(80)}>
             <span className="bg-clip-text text-transparent" style={{ backgroundImage: "var(--gradient-mint)" }}>
               {props.tagline}
             </span>
@@ -44,7 +44,7 @@ export default function HeroSection(props: Props) {
           </span>
         </h1>
 
-        <p data-reveal style={retraso(160)} className="max-w-lg text-sm text-muted-foreground sm:text-base lg:text-lg">
+        <p data-reveal suppressHydrationWarning style={retraso(160)} className="max-w-lg text-sm text-muted-foreground sm:text-base lg:text-lg">
           {props.description || t("heroDescription")}
         </p>
 
@@ -52,7 +52,7 @@ export default function HeroSection(props: Props) {
             la fila se desborda en pantallas de 640 a 1100 px. */}
         <div
           id="descargar"
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(240)}
           className="flex flex-col gap-3 sm:flex-row sm:flex-wrap [&>*]:min-w-[9rem]"
         >
@@ -66,7 +66,7 @@ export default function HeroSection(props: Props) {
           />
         </div>
 
-        <div data-reveal style={retraso(320)} className="flex flex-wrap items-center gap-2 pt-1 sm:gap-2.5">
+        <div data-reveal suppressHydrationWarning style={retraso(320)} className="flex flex-wrap items-center gap-2 pt-1 sm:gap-2.5">
           <button onClick={props.onOpenMobile} className={btnClass}>
             <Smartphone className="h-3 w-3" /> {t("mobileSubtitle")}
           </button>
@@ -78,7 +78,7 @@ export default function HeroSection(props: Props) {
         <StatsBar total={props.totalDownloads} windows={props.windowsDownloads} android={props.androidDownloads} />
       </div>
 
-      <div className="relative flex justify-center order-first sm:order-last" data-reveal style={retraso(120)}>
+      <div className="relative flex justify-center order-first sm:order-last" data-reveal suppressHydrationWarning style={retraso(120)}>
         {/* El halo va pegado al logo, no a toda la columna: se ve mejor y la
             capa que se anima es mucho más chica. */}
         <div className="relative">

@@ -96,7 +96,11 @@ function guardarVeces(veces: number[]) {
 }
 
 export function useCuota(): Cuota {
-  const [veces, setVeces] = useState(leerVeces);
+  // El primer render es SIEMPRE el del servidor (vacío y sin premium):
+  // localStorage se lee recién en el efecto de abajo. Si no, el cliente pinta
+  // «Premium» o «Te quedan 3» contra el HTML del servidor y React regenera el
+  // árbol entero (error de hidratación #418).
+  const [veces, setVeces] = useState<number[]>([]);
   // Este reloj solo sirve para que el contador se refresque cuando la ventana
   // se corre estando la pestaña abierta (si no, "sin reproducciones" quedaría
   // pegado hasta el próximo render).
@@ -104,12 +108,24 @@ export function useCuota(): Cuota {
 
   // Se guarda el código, no un "sí": hace falta para revalidar contra el
   // registro al recargar, y así un código que pasa a "usado" deja de servir.
-  const [codigo, setCodigo] = useState(leerPremium);
+  const [codigo, setCodigo] = useState<string | null>(null);
   const premium = codigo !== null;
 
   // El canje guardado se revalida al abrir la página: un código que después
-  // pasa a "usado" o "cancelado" tiene que dejar de desbloquear.
-  const [revalidado, setRevalidado] = useState(() => leerPremium() === null);
+  // pasa a "usado" o "cancelado" tiene que dejar de desbloquear. Arranca en
+  // `true` (nada que revalidar) hasta que el efecto cargue un código.
+  const [revalidado, setRevalidado] = useState(true);
+
+  // Lo guardado se aplica después de hidratar: un setState en el montaje no
+  // es un mismatch, es el camino normal de corregir el primer render.
+  useEffect(() => {
+    setVeces(leerVeces());
+    const guardado = leerPremium();
+    if (guardado !== null) {
+      setCodigo(guardado);
+      setRevalidado(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!codigo || revalidado) return;

@@ -235,8 +235,8 @@ try {
       return {
         total: todos.length,
         ocultos: ocultos.length,
-        sinMarca: todos.filter((el) => !el.classList.contains("dentro")).length,
-        cuales: todos.filter((el) => !el.classList.contains("dentro")).map((el) => el.tagName + "." + String(el.className).slice(0, 46)),
+        sinMarca: todos.filter((el) => !el.hasAttribute("data-dentro")).length,
+        cuales: todos.filter((el) => !el.hasAttribute("data-dentro")).map((el) => el.tagName + "." + String(el.className).slice(0, 46)),
       };
     })()`,
   );

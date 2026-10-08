@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
-import { getLanguage } from "@/lib/i18n";
+import { getLanguage, useLanguage } from "@/lib/i18n";
+import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { instalarReveals } from "@/lib/reveal";
 import { contarVista } from "@/lib/vistas";
 import PremiumBubble from "@/components/layout/premium-bubble";
@@ -14,6 +15,10 @@ function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const h = () => setLang(getLanguage());
     window.addEventListener("langchange", h);
+    // Sincroniza por las dudas: si el idioma guardado se aplicó antes de que
+    // este efecto se registrara (efectos de hijos van primero), el evento se
+    // perdió y el <html> se quedaría en "es".
+    h();
     return () => window.removeEventListener("langchange", h);
   }, []);
   return (
@@ -21,7 +26,10 @@ function Shell({ children }: { children: React.ReactNode }) {
     // antes del primer pintado (nada de "aparecer y esconderse para animarse")
     // y sólo si hay JS para volver a mostrarlos. Sin JS, el <noscript> los deja
     // visibles.
-    <html lang={lang} className="anim">
+    // `suppressHydrationWarning`: el script del <head> le agrega `dark`/`light`
+    // al <html> antes de hidratar (tema sin destello) y React, si no, avisa de
+    // un mismatch de atributo que es justamente lo que queremos que pase.
+    <html lang={lang} className="anim" suppressHydrationWarning>
       <head>
         {/* El tema guardado se aplica acá, antes de pintar: es lo único que
             corre fuera de React y evita el destello del tema equivocado. */}
@@ -45,11 +53,16 @@ function Shell({ children }: { children: React.ReactNode }) {
             dueño de todo lo que aparece al hacer scroll: este guion sólo saca
             del ocultamiento al primer plato. Corre durante el parseo del HTML,
             así que no hay frame en el que la portada se vea vacía (FCP, LCP y
-            Speed Index suben y, encima, la portada no "aparece" al hidratar). */}
+            Speed Index suben y, encima, la portada no "aparece" al hidratar).
+            Marca con el atributo `data-dentro` durante el parseo; los bloques
+            `data-reveal` llevan `suppressHydrationWarning`, así que React no
+            valida sus atributos al hidratar y este cambio a propósito no
+            acusa mismatch. El atributo además sobrevive a re-renders que
+            pisen el className (una clase se perdía en silencio). */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              '(function(){try{var m=document.querySelectorAll("[data-reveal]");for(var i=0;i<m.length;i++){if(m[i].getBoundingClientRect().top<=window.innerHeight)m[i].classList.add("dentro")}}catch(e){}})();',
+              '(function(){try{var m=document.querySelectorAll("[data-reveal]");for(var i=0;i<m.length;i++){if(m[i].getBoundingClientRect().top<=window.innerHeight)m[i].setAttribute("data-dentro","")}}catch(e){}})();',
           }}
         />
         <Scripts />
@@ -59,7 +72,9 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function NotFound() {
-  const es = getLanguage() === "es";
+  usePreferenciasGuardadas();
+  const [lang] = useLanguage();
+  const es = lang === "es";
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -75,7 +90,9 @@ function NotFound() {
 const ErrorPage: ErrorRouteComponent = ({ error, reset }) => {
   console.error(error);
   const router = useRouter();
-  const es = getLanguage() === "es";
+  usePreferenciasGuardadas();
+  const [lang] = useLanguage();
+  const es = lang === "es";
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">

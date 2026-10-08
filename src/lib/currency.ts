@@ -97,12 +97,35 @@ function avisar() {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("currencychange"));
 }
 
+let arrancado = false;
+
+// Las tasas del caché se leen ya, sin esperar la red: no cambian NINGÚN render
+// inicial porque la moneda inicial es BOB y `efectiva("BOB")` devuelve BOB sin
+// mirar tasas. Así `initRates` puede correr desde cualquier efecto (hasta fuera
+// del borde de hidratación) sin provocar un fetch con caché caliente.
 if (typeof window !== "undefined") {
-  current = getStored();
-  // Las tasas del caché se aplican ya, sin esperar la red: así quien entró
-  // con USD guardado ve el precio convertido en el primer render y no el de
-  // bolivianos con símbolo de dólar pegado.
   rates = leerCache();
+}
+
+/**
+ * Aplica la moneda guardada DESPUÉS de hidratar.
+ *
+ * El servidor pinta en BOB y el primer render del cliente tiene que ser idéntico
+ * a ese HTML: leer el localStorage del módulo (antes) hacía que un visitante con
+ * USD guardado hidratara «US$ 4» contra «Bs 30» y React regenerara el árbol
+ * (#418). Se llama desde un efecto DENTRO del contenido de la ruta (índice,
+ * 404, error): esos efectos corren recién cuando ese contenido hidrató, nunca
+ * antes. Idempotente.
+ */
+export function arrancarMoneda(): void {
+  if (arrancado || typeof window === "undefined") return;
+  arrancado = true;
+  const guardada = getStored();
+  if (guardada === current) return;
+  current = guardada;
+  // Con moneda guardada hay que repintar a los suscriptores: su primer render
+  // ya salió en BOB y ese texto quedó en el DOM.
+  avisar();
 }
 
 /**

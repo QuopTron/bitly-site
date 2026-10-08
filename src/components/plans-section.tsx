@@ -17,7 +17,7 @@ export default function PlansSection() {
 
   return (
     <section id="planes" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
-      <div className="mb-8 text-center sm:mb-10" data-reveal>
+      <div className="mb-8 text-center sm:mb-10" data-reveal suppressHydrationWarning>
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card/40 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur sm:px-4 sm:text-xs">
           <Gem className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
           {t("plansSubtitle")}
@@ -36,7 +36,7 @@ export default function PlansSection() {
       <div className="mx-auto grid max-w-4xl gap-4 sm:gap-6 md:grid-cols-2">
         {/* Free */}
         <div
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(60)}
           className="rounded-2xl bg-gradient-to-b from-card to-card/80 p-5 ring-1 ring-border/60 transition-all duration-300 hover:-translate-y-1 hover:ring-border/80 sm:p-6"
         >
@@ -69,7 +69,7 @@ export default function PlansSection() {
 
         {/* Premium */}
         <div
-          data-reveal
+          data-reveal suppressHydrationWarning
           style={retraso(150)}
           className="relative rounded-2xl bg-gradient-to-b from-primary/[0.08] to-primary/[0.02] p-5 ring-1 ring-primary/25 shadow-xl shadow-primary/5 transition-all duration-300 hover:-translate-y-1 hover:ring-primary/45 sm:p-6"
         >
@@ -101,7 +101,7 @@ export default function PlansSection() {
 
       {/* How to get it */}
       <div className="mx-auto mt-10 max-w-2xl sm:mt-12">
-        <div data-reveal className="rounded-2xl border border-border bg-gradient-to-b from-card/60 to-card/30 p-5 backdrop-blur sm:p-6">
+        <div data-reveal suppressHydrationWarning className="rounded-2xl border border-border bg-gradient-to-b from-card/60 to-card/30 p-5 backdrop-blur sm:p-6">
           <h3 className="mb-4 text-center text-base font-bold sm:text-lg">{t("plansHowToGet")}</h3>
 
           <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
