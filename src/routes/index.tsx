@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import Particles from "@/components/particles";
@@ -8,8 +8,6 @@ import Header from "@/components/layout/header";
 import SectionNav from "@/components/layout/section-nav";
 import HeroSection from "@/components/hero/hero-section";
 import Footer from "@/components/layout/footer";
-import MobileModal from "@/components/modals/mobile-modal";
-import ReleaseModal from "@/components/modals/release-modal";
 import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
 import Opiniones from "@/components/opiniones";
@@ -19,6 +17,13 @@ import { initRates } from "@/lib/currency";
 import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 import { TITULO } from "@/lib/seo";
+
+// Los modales sólo montan al hacer clic: van en chunks aparte para que sus
+// kilobytes no entren en la carga inicial. El condicional del JSX es parte
+// del truco — si estuvieran montados con open=false, React los resolvería al
+// hidratar y el chunk bajaría igual apenas.
+const MobileModal = lazy(() => import("@/components/modals/mobile-modal"));
+const ReleaseModal = lazy(() => import("@/components/modals/release-modal"));
 
 type InfoApp = {
   name: string; tagline: string; description: string;
@@ -181,19 +186,23 @@ export default function Index() {
       <FaqSection />
       <PlansSection />
       <Footer />
-      <MobileModal open={showMobile} onClose={() => setShowMobile(false)} />
-      <ReleaseModal
-        open={showRelease}
-        onClose={() => setShowRelease(false)}
-        platform={releasePlatform}
-        assets={modalRelease?.assets ?? []}
-        version={modalRelease?.version ?? ""}
-        latestVersion={release?.version ?? ""}
-        onOpenGuide={() => {
-          setShowRelease(false);
-          abrirGuia(plataformaDeDescarga(releasePlatform));
-        }}
-      />
+      <Suspense fallback={null}>
+        {showMobile && <MobileModal open onClose={() => setShowMobile(false)} />}
+        {showRelease && (
+          <ReleaseModal
+            open
+            onClose={() => setShowRelease(false)}
+            platform={releasePlatform}
+            assets={modalRelease?.assets ?? []}
+            version={modalRelease?.version ?? ""}
+            latestVersion={release?.version ?? ""}
+            onOpenGuide={() => {
+              setShowRelease(false);
+              abrirGuia(plataformaDeDescarga(releasePlatform));
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

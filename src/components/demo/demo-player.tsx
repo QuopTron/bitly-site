@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { ChevronRight, Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
@@ -12,7 +12,9 @@ import { retraso } from "@/lib/reveal";
 import { enlaceWhatsApp } from "@/lib/contacto";
 import ExtensionPicker from "@/components/demo/extension-picker";
 import CategoriaChips from "@/components/demo/categoria-chips";
-import DemoCodigoModal from "@/components/modals/demo-codigo-modal";
+
+// Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
+const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
 
 /** Rellena `{n}` / `{price}` sin sacar el texto del diccionario. */
 function Plantilla(texto: string, vars: Record<string, string | number>) {
@@ -870,11 +872,15 @@ export default function DemoPlayer() {
         </div>
       )}
 
-      <DemoCodigoModal
-        open={codigoAbierto}
-        onClose={() => setCodigoAbierto(false)}
-        onActivado={cuota.activarPremium}
-      />
+      {codigoAbierto && (
+        <Suspense fallback={null}>
+          <DemoCodigoModal
+            open
+            onClose={() => setCodigoAbierto(false)}
+            onActivado={cuota.activarPremium}
+          />
+        </Suspense>
+      )}
     </section>
   );
 }
