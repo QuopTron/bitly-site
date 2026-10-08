@@ -1,7 +1,7 @@
 {
   "name": "Bitly — Tu música, sin límites",
   "short_name": "Bitly",
-  "description": "Descarga música FLAC sin pérdida desde Tidal, Qobuz, Deezer y más.",
+  "description": "Buscá música en Spotify, TIDAL, Qobuz, Deezer, YouTube Music y más, y descargala en FLAC sin pérdida. Gratis para Android, Windows, Mac, iOS y Smart TV.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

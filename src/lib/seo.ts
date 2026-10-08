@@ -14,7 +14,7 @@ import { DICT } from "./translations";
 export const SITIO = "https://bitly-site.pages.dev";
 export const TITULO = "Bitly — Tu música, sin límites";
 export const DESCRIPCION =
-  "Descarga música FLAC sin pérdida desde Tidal, Qobuz, Deezer y más. App gratuita para Windows, Android, iOS y macOS.";
+  "Buscá música en Spotify, TIDAL, Qobuz, Deezer, YouTube Music y más, y descargala en FLAC sin pérdida. Gratis para Android, Windows, Mac, iOS y Smart TV.";
 export const OG_IMAGE = `${SITIO}/og-image.png`;
 
 /** Texto de una clave del diccionario en el idioma dado (por defecto, el inicial). */
