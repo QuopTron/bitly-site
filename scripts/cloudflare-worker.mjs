@@ -54,6 +54,14 @@ const worker = `/**
  *     publicaba solo estáticos.
  *   · Cualquier otra cosa cae a la app y, si no contesta, al CDN.
  *
+ * Además arma la Content-Security-Policy de cada HTML con los HASHES de sus
+ * guiones inline calculados en el momento: así script-src no necesita
+ * 'unsafe-inline' (lo único que capaba la calificación de seguridadheaders en
+ * A). Los guiones inline cambian en cada respuesta —el de tema, el de
+ * reveals, el JSON-LD y sobre todo el de hidratación de TanStack, que lleva
+ * los datos del loader—, así que un hash estático en _headers se rompería con
+ * la primera descarga nueva. Acá se calcula por respuesta y listo.
+ *
  * Antes de delegar, SIEMBRA process.env desde env. El bundle trae su propio
  * polyfill de process (unenv) con el env VACÍO: process.env no ve la
  * configuración del proyecto aunque las bindings estén en env. Sin esto, el
@@ -71,6 +79,64 @@ function sembrarEnv(env) {
   }
 }
 
+const CSP_FIJOS =
+  "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" +
+  " img-src 'self' data: blob: https:; media-src 'self' blob: https:;" +
+  " connect-src 'self' https://*.supabase.co https://open.er-api.com https://api.github.com;" +
+  " frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';" +
+  " upgrade-insecure-requests";
+
+async function sha256(texto) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto));
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** CSP de un HTML: 'self' para los bundles + un hash por guion inline. */
+async function cspDeHtml(html) {
+  const hashes = [];
+  const re = /<script\\b([^>]*)>([\\s\\S]*?)<\\/script>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    if (/\\bsrc\\s*=/i.test(m[1])) continue; // con src lo cubre 'self'
+    // El tokenizer HTML normaliza el texto ANTES de ejecutarlo: CRLF -> LF
+    // (preprocesado de entrada) y NUL -> U+FFFD (parse error). Si no se
+    // replica, el hash del estado de TanStack (que lleva \\u0000 en los ids de
+    // ruta internos) no coincide con el que calcula el navegador y Chrome
+    // bloquea la hidratación entera.
+    const texto = m[2]
+      .replace(/\\r\\n?/g, "\\n")
+      .split(String.fromCharCode(0))
+      .join(String.fromCharCode(0xfffd));
+    hashes.push("'sha256-" + (await sha256(texto)) + "'");
+  }
+  const scriptSrc = "script-src 'self'" + (hashes.length ? " " + [...new Set(hashes)].join(" ") : "");
+  return CSP_FIJOS + "; " + scriptSrc;
+}
+
+/**
+ * Pone la CSP calculada en las respuestas HTML. Si el cuerpo viene comprimido
+ * (no debería ocurrir dentro del worker), la respuesta sale con una política
+ * de emergencia con 'unsafe-inline': preferible una CSP floja a ninguna o a
+ * una que bloquee los guiones y deje la página sin hidratar.
+ */
+async function conCsp(resp) {
+  const tipo = resp.headers.get("content-type") ?? "";
+  if (!tipo.includes("text/html")) return resp;
+  if (resp.headers.get("content-encoding") && resp.headers.get("content-encoding") !== "identity") {
+    const cab = new Headers(resp.headers);
+    cab.set("Content-Security-Policy", CSP_FIJOS + "; script-src 'self' 'unsafe-inline'");
+    return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: cab });
+  }
+  const html = await resp.text();
+  const cab = new Headers(resp.headers);
+  cab.set("Content-Security-Policy", await cspDeHtml(html));
+  cab.delete("content-length");
+  return new Response(html, { status: resp.status, statusText: resp.statusText, headers: cab });
+}
+
 export default {
   async fetch(request, env, ctx) {
     sembrarEnv(env);
@@ -79,12 +145,12 @@ export default {
 
     if (!esRpc && request.method === "GET") {
       const estatico = await env.ASSETS.fetch(request);
-      if (estatico.status !== 404) return estatico;
+      if (estatico.status !== 404) return conCsp(estatico);
     }
 
     const respuesta = await app.fetch(request, env, ctx);
-    if (respuesta.status !== 404) return respuesta;
-    return env.ASSETS.fetch(request);
+    if (respuesta.status !== 404) return conCsp(respuesta);
+    return conCsp(await env.ASSETS.fetch(request));
   },
 };
 `;

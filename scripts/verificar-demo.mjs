@@ -168,7 +168,7 @@ try {
   check("están las 4 burbujas", burbujas?.cuantas === 4, String(burbujas?.cuantas));
   check("ninguna se sale del recuadro", burbujas?.desbordan === 0);
   check("no hay scroll horizontal", (burbujas?.scrollX ?? 99) <= 1, `scrollX=${burbujas?.scrollX}`);
-  await foto(ses, "demo-celular.png", "#demo [role='img']");
+  await foto(ses, "demo-celular.png", "#demo [class*='shadow-2xl']");
 
   // ── 2. Búsqueda ──
   await escribir(ses, "#demo input[type='text'], #demo input:not([type])", "get lucky daft punk");
@@ -278,7 +278,7 @@ try {
   const csp = await js(ses, `(window.__csp || []).slice(0, 8)`);
   check("la CSP no bloquea nada de lo que carga la demo", (csp?.length ?? 0) === 0, JSON.stringify(csp));
 
-  await foto(ses, "demo-miniplayer.png", "#demo [role='img']");
+  await foto(ses, "demo-miniplayer.png", "#demo [class*='shadow-2xl']");
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);
   if (fallos > 0) process.exitCode = 1;

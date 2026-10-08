@@ -2,6 +2,10 @@
 # Va en la raíz de public/, así que termina en la raíz de dist/client/.
 
 # ── Todo el sitio ────────────────────────────────────────────────────────────
+# Sin Content-Security-Policy acá: la arma _worker.js por respuesta, con los
+# hashes de los guiones inline calculados en el momento (ver
+# scripts/cloudflare-worker.mjs). Un hash estático en este archivo se rompería
+# con cada cambio de datos y 'unsafe-inline' capaba la calificación en A.
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
@@ -9,7 +13,6 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://*.supabase.co https://open.er-api.com https://api.github.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
 
 # ── Caché ───────────────────────────────────────────────────────────────────
 # Las tipografías y los iconos viven en la raíz sin hash en el nombre: sin un
