@@ -177,7 +177,6 @@ export default function Index() {
           totalDownloads={total} windowsDownloads={stats.windows ?? 0} androidDownloads={stats.android ?? 0}
           onDownload={handleDownload}
           onOpenMobile={() => setShowMobile(true)}
-          onOpenFaq={() => document.getElementById("faq")?.scrollIntoView({ behavior: "smooth", block: "start" })}
         />
       </main>
       <DemoPlayer />

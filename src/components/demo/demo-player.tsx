@@ -344,7 +344,6 @@ export default function DemoPlayer() {
 
   const irADescargas = () => {
     setTopeAbierto(false);
-    document.getElementById("instalar")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -753,14 +752,14 @@ export default function DemoPlayer() {
                 </div>
 
                 {/* Si quiere más, la app completa. */}
-                <button
-                  type="button"
+                <a
+                  href="#instalar"
                   onClick={irADescargas}
                   className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-bold text-primary ring-1 ring-primary/25 transition hover:bg-primary/15 active:scale-[0.98]"
                 >
                   <Download className="h-3.5 w-3.5" />
                   {t("demoMiniCta")}
-                </button>
+                </a>
 
                 <p className="mt-1.5 text-center text-xs text-muted-foreground">
                   {pista.canal === "preview" ? t("demoPreviewTag") : t("demoPreviewNote")}
@@ -842,14 +841,14 @@ export default function DemoPlayer() {
                 <KeyRound className="h-4 w-4" />
                 {t("demoCanjear")}
               </button>
-              <button
-                type="button"
+              <a
+                href="#instalar"
                 onClick={irADescargas}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-card px-4 py-3 text-sm font-bold text-foreground ring-1 ring-border/60 transition hover:bg-card/80 active:scale-[0.98]"
               >
                 <Play className="h-4 w-4" />
                 {t("demoPaywallInstall")}
-              </button>
+              </a>
               <a
                 href={whatsapp}
                 target="_blank"

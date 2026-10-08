@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { ArrowUp, Camera, MessageCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { INSTAGRAM, INSTAGRAM_URL, TIKTOK, TIKTOK_URL, WHATSAPP, enlaceWhatsApp } from "@/lib/contacto";
@@ -14,6 +15,15 @@ import TikTokIcon from "@/components/ui/tiktok-icon";
  * Los enlaces de afuera van con `rel="noopener noreferrer"`, igual que el resto
  * del sitio.
  */
+
+const PIES_SECCIONES = [
+  { id: "demo", clave: "navDemo" },
+  { id: "instalar", clave: "navInstalar" },
+  { id: "opiniones", clave: "navOpiniones" },
+  { id: "faq", clave: "navFaq" },
+  { id: "planes", clave: "navPlanes" },
+] as const;
+
 export default function Footer() {
   const t = useI18n();
   const whatsapp = enlaceWhatsApp(t("footerWaText"));
@@ -75,6 +85,27 @@ export default function Footer() {
           <span className="px-1">@{TIKTOK}</span>
         </div>
       </div>
+
+      <nav
+        aria-label={t("navSecciones")}
+        className="mt-5 flex flex-wrap items-center justify-center gap-x-1 gap-y-2 text-xs font-medium text-muted-foreground"
+      >
+        {PIES_SECCIONES.map(({ id, clave }, i) => (
+          <Fragment key={id}>
+            {i > 0 && (
+              <span aria-hidden className="text-muted-foreground/60">
+                ·
+              </span>
+            )}
+            <a
+              href={`#${id}`}
+              className="rounded px-1.5 py-1 outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              {t(clave)}
+            </a>
+          </Fragment>
+        ))}
+      </nav>
 
       <p className="mt-8 text-xs text-muted-foreground sm:text-xs">{t("footerDisclaimer")}</p>
       <p className="mt-1 text-xs text-muted-foreground sm:text-xs">

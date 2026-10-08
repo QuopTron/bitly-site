@@ -11,7 +11,7 @@ type Props = {
   isBlocked: boolean; windowsUrl: string | null; androidUrl: string | null; iosUrl: string | null; macosUrl: string | null;
   totalDownloads: number; windowsDownloads: number; androidDownloads: number;
   onDownload: (p: "windows" | "android" | "tv" | "ios" | "macos", u: string | null) => void;
-  onOpenMobile: () => void; onOpenFaq: () => void;
+  onOpenMobile: () => void;
 };
 
 const btnClass = "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/30 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur transition-all duration-200 hover:border-primary/40 hover:text-primary hover:bg-primary/5 active:scale-95 sm:px-4 sm:py-2 sm:text-xs";
@@ -70,9 +70,9 @@ export default function HeroSection(props: Props) {
           <button onClick={props.onOpenMobile} className={btnClass}>
             <Smartphone className="h-3 w-3" /> {t("mobileSubtitle")}
           </button>
-          <button onClick={props.onOpenFaq} className={btnClass}>
+          <a href="#faq" className={btnClass}>
             <HelpCircle className="h-3 w-3" /> {t("faqTitle")}
-          </button>
+          </a>
         </div>
 
         <StatsBar total={props.totalDownloads} windows={props.windowsDownloads} android={props.androidDownloads} />

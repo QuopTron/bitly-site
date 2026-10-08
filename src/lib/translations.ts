@@ -172,7 +172,8 @@ export const DICT: Record<string, [string, string]> = {
 
   // ── FAQ ──
   faqTitle:             ["Preguntas Frecuentes",                   "FAQ"],
-  faqDesc:              ["Preguntas comunes sobre Bitly.",         "Common questions about Bitly."],
+  faqDesc:              ["Todo lo que necesitás saber antes de empezar: tu música, sin límites.",
+                                                  "Everything you need to know before you start: your music, without limits."],
   faq1Q:                ["¿Por qué falla la descarga con \"Canción no encontrada\"?",
                                                                    "Why is my download failing with \"Song not found\"?"],
   faq1A:                ["Es posible que la pista no esté disponible en los servicios de streaming. Intenta habilitar más servicios en Ajustes > Descarga > Prioridad de proveedores, o instala extensiones adicionales como Amazon Music desde la Tienda.",
