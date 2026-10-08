@@ -321,11 +321,13 @@ export default function DemoPlayer() {
   const restantes = Math.max(0, cuota.restantes);
   const cuotaTexto = cuota.premium
     ? t("demoPremiumOn")
-    : cuota.sinCuota
-      ? t("demoFreeNone")
-      : restantes === 1
-        ? Plantilla(t("demoFreeOne"), { n: 1 })
-        : Plantilla(t("demoFreeLeft"), { n: restantes });
+    : cuota.libre
+      ? t("demoFreeUnlimited")
+      : cuota.sinCuota
+        ? t("demoFreeNone")
+        : restantes === 1
+          ? Plantilla(t("demoFreeOne"), { n: 1 })
+          : Plantilla(t("demoFreeLeft"), { n: restantes });
 
   const diasTexto = !fase.siguiente
     ? null

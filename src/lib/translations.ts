@@ -618,6 +618,7 @@ demoDescription:      ["Hacé una búsqueda real y escuchá. Son los mismos conm
   demoFreeLeft:         ["Te quedan {n} reproducciones",           "{n} plays left"],
   demoFreeOne:          ["Te queda {n} reproducción",              "{n} play left"],
   demoFreeNone:         ["Sin reproducciones",                     "No plays left"],
+  demoFreeUnlimited:    ["Reproducciones ilimitadas",              "Unlimited plays"],
   demoPlayPause:        ["Reproducir o pausar",                    "Play or pause"],
   demoNext:             ["Siguiente canción",                      "Next song"],
   demoPrev:             ["Canción anterior",                       "Previous song"],

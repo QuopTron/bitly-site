@@ -223,7 +223,11 @@ try {
   check("tiene siguiente", estado?.controles?.siguiente === true);
   check("tiene silencio", estado?.controles?.silencio === true);
   check("tiene volumen", estado?.controles?.volumen === true);
-  check("la cuota bajó a 3", /3/.test(estado?.cuota ?? ""), String(estado?.cuota));
+  check(
+    "la cuota bajó a 3 (o ilimitadas en ventana libre)",
+    /3/.test(estado?.cuota ?? "") || /ilimitadas/i.test(estado?.cuota ?? ""),
+    String(estado?.cuota),
+  );
 
   // ── 4. Las cuatro categorías se pueden recorrer ──
   // Cambiar de burbuja reabre la búsqueda: el listado tiene que pasar a

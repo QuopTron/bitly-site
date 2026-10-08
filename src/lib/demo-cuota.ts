@@ -22,6 +22,12 @@ const CLAVE_PREMIUM = "bitly_demo_premium";
 export const REPRODUCCIONES = 4;
 /** Cuánto dura la ventana: pasado esto, la reproducción más vieja se libera. */
 export const VENTANA_MS = 2 * 60 * 60 * 1000;
+/**
+ * Ventana de promoción: hasta este instante ABSOLUTO la demo reproduce sin
+ * límite y no gasta la cuota; al vencer, vuelve la regla normal con las 4
+ * completas. Es constante a propósito — así no se renueva al recargar.
+ */
+export const LIBRE_HASTA = 1791459585153;
 
 /** Lo que devuelve el servidor al canjear un código. */
 export type EstadoCodigo = "ok" | "no_encontrado" | "usado" | "cancelado" | "liberado" | "desconocido";
@@ -31,6 +37,8 @@ export type Cuota = {
   restantes: number;
   sinCuota: boolean;
   premium: boolean;
+  /** Ventana de promoción activa: sin límite y sin gastar la cuota. */
+  libre: boolean;
   /** Milisegundos hasta que la próxima reproducción se libere (0 si hay lugar). */
   reiniciaEnMs: number;
   /** True si hay un canje guardado que aún no se revalidó en esta sesión. */
@@ -149,7 +157,15 @@ export function useCuota(): Cuota {
   }, [codigo, revalidado]);
 
   const { gastadas, restantes, reiniciaEnMs } = calcularCuota(veces, ahora);
-  const sinCuota = restantes === 0;
+  const libre = ahora < LIBRE_HASTA;
+  const sinCuota = !libre && restantes === 0;
+
+  // Al vencer la ventana libre, el reloj despierta y se vuelve a la cuota normal.
+  useEffect(() => {
+    if (!libre) return;
+    const reloj = setTimeout(() => setAhora(Date.now()), Math.max(500, LIBRE_HASTA - ahora + 300));
+    return () => clearTimeout(reloj);
+  }, [libre, ahora]);
 
   // Con la cuota agotada, un reloj despierta justo cuando se libera la próxima.
   useEffect(() => {
@@ -160,6 +176,14 @@ export function useCuota(): Cuota {
 
   const gastar = useCallback(() => {
     const momento = Date.now();
+    // En la ventana libre no se gasta nada y las marcas viejas se limpian:
+    // al vencer, la cuota vuelve con las 4 completas.
+    if (libre) {
+      guardarVeces([]);
+      setVeces([]);
+      setAhora(momento);
+      return true;
+    }
     // Se limpia lo vencido al gastar para que el arreglo no crezca sin fin.
     const vivas = dentroDeVentana(veces, momento);
     if (vivas.length >= REPRODUCCIONES || premium) return false;
@@ -168,7 +192,7 @@ export function useCuota(): Cuota {
     setVeces(siguiente);
     setAhora(momento);
     return true;
-  }, [veces, premium]);
+  }, [veces, premium, libre]);
 
   const activarPremium = useCallback((nuevo: string) => {
     try {
@@ -200,6 +224,7 @@ export function useCuota(): Cuota {
     restantes,
     sinCuota,
     premium,
+    libre,
     reiniciaEnMs,
     porRevalidar: premium && !revalidado,
     gastar,
