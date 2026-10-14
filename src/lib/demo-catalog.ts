@@ -3,12 +3,15 @@
  *
  *  · `buscar` llama al proxy cifrado (`src/lib/demo-api.ts`): el servidor
  *    ejecuta la extensión elegida y, si esa no puede responder, devuelve el
- *    catálogo de respaldo (Deezer) con `origen: "respaldo"`.
+ *    catálogo de respaldo (Deezer) con `origen: "respaldo"`. Si Deezer tampoco
+ *    tiene la canción, el último respaldo es el backend local de yt-dlp
+ *    (YouTube).
  *  · `audioDe` resuelve el AUDIO de una pista al momento de reproducirla. Las
  *    extensiones devuelven metadata, no audio: el servidor identifica la pista
  *    con el matching del backend (ISRC verificado por `qobuz-web`, o ranking
- *    por nombre) y le pide el FLAC al relay de stash. Si ese canal no responde,
- *    el último recurso es el adelanto público de 30 s. Ver `@/server/rescate`.
+ *    por nombre) y le pide el FLAC al relay de stash; si ese canal no responde,
+ *    pide el audio completo al backend local de yt-dlp. Sin ningún canal, la
+ *    pista queda sin audio (nunca un adelanto de 30 s). Ver `@/server/rescate`.
  */
 
 import { buscarDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
@@ -24,16 +27,17 @@ export type Pista = {
   artista: string;
   album: string;
   caratula: string | null;
-  /** En segundos. 30 cuando el audio es el adelanto del catálogo. */
+  /** En segundos. 0 si la fuente no lo publica. */
   duracion: number;
   isrc: string | null;
-  /** URL del audio; vacía hasta que se pide reproducir. */
-  preview: string | null;
+  /** URL del audio ya resuelto; vacía hasta que se pide reproducir. */
+  audioUrl: string | null;
   /**
    * De dónde salió el audio ya resuelto: "stash-relay" = FLAC completo;
-   * "preview" = adelanto público de 30 s. Null hasta que se pide reproducir.
+   * "youtube" = audio completo vía el backend local de yt-dlp. Null hasta que
+   * se pide reproducir.
    */
-  canal: "stash-relay" | "preview" | null;
+  canal: "stash-relay" | "youtube" | null;
   /** Vino del catálogo de respaldo (la extensión no pudo responder). */
   respaldada: boolean;
 };
@@ -51,8 +55,6 @@ export type ResultadoDemo = {
   limitado?: boolean;
 };
 
-const PREVIEW_SEGUNDOS = 30;
-
 function desdeItem(item: Item, ext: ExtensionId, respaldada: boolean): Pista {
   return {
     id: `${ext}:${item.tipo}:${item.id}`,
@@ -64,7 +66,7 @@ function desdeItem(item: Item, ext: ExtensionId, respaldada: boolean): Pista {
     caratula: item.caratula,
     duracion: item.duracionMs > 0 ? Math.round(item.duracionMs / 1000) : 0,
     isrc: item.isrc,
-    preview: null,
+    audioUrl: null,
     canal: null,
     respaldada,
   };
@@ -105,8 +107,8 @@ export async function buscar(
  * artista, álbum y duración porque el matching de la app desempata con ellos.
  */
 export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
-  if (p.preview) {
-    return { url: p.preview, duracion: p.duracion || PREVIEW_SEGUNDOS, canal: p.canal ?? undefined };
+  if (p.audioUrl) {
+    return { url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined };
   }
   const audio = await rescatarDemo({
     titulo: p.titulo,
@@ -117,10 +119,9 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
     ext: p.ext,
   });
   if (!audio) return null;
-  p.preview = audio.url;
+  p.audioUrl = audio.url;
   p.canal = audio.canal ?? null;
   if (audio.duracion > 0) p.duracion = audio.duracion;
-  else if (!p.duracion) p.duracion = PREVIEW_SEGUNDOS;
   return audio;
 }
 

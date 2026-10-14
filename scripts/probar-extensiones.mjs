@@ -122,10 +122,6 @@ try {
           if (cuerpo) console.log(c.cuerpo.replace(/^/gm, "         "));
         }
       }
-      if (items.length > 0 && banderas.has("--rescate")) {
-        const audio = await runtime.rescatarAudio(items[0]);
-        console.log(`     rescate → ${audio ? audio.url : "sin audio"}`);
-      }
     } catch (e) {
       const ms = Date.now() - inicio;
       console.log(`ERR  ${ext.padEnd(20)} ${String(ms).padStart(5)}ms  ${String(e && e.message ? e.message : e)}`);

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
+    "yt-dlp": "node scripts/backend-yt-dlp.mjs",
     "build": "vite build && node scripts/cloudflare-worker.mjs",
     "start": "node .output/server/index.mjs",
     "capturas": "node scripts/capturas/capturar.mjs",

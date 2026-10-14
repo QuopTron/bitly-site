@@ -11,21 +11,25 @@
  *     aplicación. La respuesta vuelve cifrada con la misma clave.
  *  2. RESPALDO. Si la extensión no responde (fuente caída, sin credenciales,
  *     sin búsqueda — Pandora—, geo-bloqueo —Amazon—), el resultado viene del
- *     catálogo público de respaldo y se marca `origen: "respaldo"`.
+ *     catálogo público de respaldo y se marca `origen: "respaldo"`. Y si el
+ *     respaldo tampoco tiene la canción, la busca el backend local de yt-dlp
+ *     en YouTube (habilitado con `YT_DLP_BACKEND_URL`): folklore de nicho y
+ *     re-subidos siguen siendo encontrables, no "sin resultados".
  *  3. CUPO. Búsquedas por minuto por IP: la demo no puede ser un proxy
  *     abierto contra los catálogos de terceros.
  *
  * 4. AUDIO. `demoRescatar` resuelve la URL que suena: identifica la pista con
  *    el matching del backend (ISRC verificado o ranking por nombre) y le pide
- *    el FLAC al relay de stash; si ese canal no responde, cae al adelanto
- *    público de 30 s. Los bytes tampoco pasan por acá: la interfaz los baja del
- *    CDN por HTTPS, igual que en la app.
+ *    el FLAC al relay de stash; si ese canal no responde, pide el audio completo
+ *    al backend local de yt-dlp (`YT_DLP_BACKEND_URL`); sin backend, la pista
+ *    queda sin audio —nunca un adelanto de 30 s—. Los bytes FLAC bajan del CDN
+ *    por HTTPS; los del canal YouTube pasan por el proxy del backend local.
  */
 
 import { createServerFn } from "@tanstack/react-start";
 import { buscarEnExtension, buscarRespaldo } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
-import { resolverAudio, type PeticionAudio } from "@/server/rescate";
+import { buscarYouTubeBackend, resolverAudio, type PeticionAudio } from "@/server/rescate";
 import { obtenerIPCliente } from "@/server/ip";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item } from "@/server/extensions";
@@ -379,10 +383,19 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   try {
     items = await buscarRespaldo(consulta, peticion.filtro, limite);
     items = ordenarResultados(items, consulta);
-    return cerrar(data, { origen: "respaldo", items, aviso, fuente });
   } catch {
-    return cerrar(data, { origen: "respaldo", items: [], aviso: aviso ?? "respaldo" });
+    items = [];
+    aviso = aviso ?? "respaldo";
   }
+
+  // Último respaldo: el backend local de yt-dlp busca en YouTube. Así una
+  // canción que ningún catálogo indexa (folklore de nicho, re-subidos) sigue
+  // siendo encontrable —y reproducible—, en vez de quedar "sin resultados".
+  if (items.length === 0) {
+    const yt = await buscarYouTubeBackend(consulta, limite);
+    if (yt && yt.length > 0) return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
+  }
+  return cerrar(data, { origen: "respaldo", items, aviso, fuente });
 }
 
 /* ── Audio ───────────────────────────────────────────────────────── */
@@ -390,7 +403,7 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
 type RespuestaAudio = {
   url: string;
   duracion: number;
-  canal: "stash-relay" | "preview";
+  canal: "stash-relay" | "youtube";
   proveedor: string;
   id: string | null;
   isrc: string | null;

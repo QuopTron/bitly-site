@@ -72,10 +72,11 @@ const MARCOS: Record<MarcoId, Chasis> = {
  *
  * La búsqueda sale cifrada contra el servidor de la demo (`demo-proxy`), que
  * ejecuta la extensión elegida —y cambia de fuente si esa falla— y responde con
- * metadata. El audio se resuelve al tocar la pista contra el canal de la app
- * (Qobuz + relay); si ese canal no responde, queda el adelanto público de 30 s.
- * No se expone el pipeline de descarga, así que la landing no queda sirviendo
- * música con derechos.
+ * metadata. El audio se resuelve al tocar la pista: FLAC completo vía el relay
+ * de stash, y si ese canal no responde, audio completo vía el backend local de
+ * yt-dlp; sin ningún canal, la pista queda sin audio (nunca un adelanto de
+ * 30 s). No se expone el pipeline de descarga, así que la landing no queda
+ * sirviendo música con derechos.
  */
 export default function DemoPlayer() {
   const t = useI18n();
@@ -216,7 +217,7 @@ export default function DemoPlayer() {
       if (!el) return;
 
       // Pulsar la pista que ya suena solo reanuda: no gasta reproducción.
-      if (pista?.id === p.id && p.preview) {
+      if (pista?.id === p.id && p.audioUrl) {
         void arrancar(el).then(setSonando);
         return;
       }
@@ -646,7 +647,7 @@ export default function DemoPlayer() {
                 <div className="h-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-200"
-                    style={{ width: `${Math.min(100, (avance / (pista.duracion || 30)) * 100)}%` }}
+                    style={{ width: `${Math.min(100, (avance / (pista.duracion || 1)) * 100)}%` }}
                   />
                 </div>
                 <div className="mt-2.5 flex items-center gap-2.5">
@@ -666,15 +667,10 @@ export default function DemoPlayer() {
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="truncate text-xs font-semibold">{pista.titulo}</span>
-                      {pista.canal === "preview" && (
-                        <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-px text-xs font-bold uppercase tracking-wide text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-400">
-                          {t("demoPreviewTag")}
-                        </span>
-                      )}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {pista.artista ? `${pista.artista} · ` : ""}
-                      {mmss(avance)} / {mmss(pista.duracion || 30)}
+                      {mmss(avance)} / {mmss(pista.duracion)}
                       {pista.isrc ? ` · ISRC ${pista.isrc}` : ""}
                     </span>
                   </span>
@@ -764,7 +760,7 @@ export default function DemoPlayer() {
                 </a>
 
                 <p className="mt-1.5 text-center text-xs text-muted-foreground">
-                  {pista.canal === "preview" ? t("demoPreviewTag") : t("demoPreviewNote")}
+                  {t("demoPreviewNote")}
                 </p>
               </div>
             )}

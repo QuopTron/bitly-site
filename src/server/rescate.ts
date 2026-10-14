@@ -17,7 +17,7 @@
  *           paréntesis hacía fallar su `titlesMatch`) y, sin espejo de por
  *           medio, la API pública `qobuz.com/api.json/0.2` —la del backend—
  *           que además devuelve el ISRC de cada pista. Cuando el espejo se
- *           cae, el camino directo es el que evita bajar al adelanto. Un ISRC
+ *           cae, el camino directo evita depender de él. Un ISRC
  *           que Qobuz no indexa NO arma cuarentena: eso es un "no está", no un
  *           canal caído.
  *        b. Si la fuente no publica ISRC (Spotify, TIDAL, Amazon, YouTube) o el
@@ -33,23 +33,24 @@
  *      `relay_key`, y el mint va firmado con HMAC-SHA256. La URL trae su propio
  *      vencimiento (`etsp`), que se usa como TTL de la caché. Un `503 busy` del
  *      relay se reintenta con espera corta (dentro de un presupuesto de 7 s):
- *      "ocupado" no es "no tengo esa pista" y bajar al adelanto por eso era
- *      parte del "rescató una demo que no sirve".
- *   3. RESPALDO. Si el catálogo o el relay no responden, cae al adelanto público
- *      de 30 s (`extensions/rescate.ts`), igual que la demo hacía antes; ese
- *      adelanto se COMPRUEBA con un GET de dos bytes antes de devolverlo, y si
- *      no suena se prueba el siguiente candidato.
+ *      "ocupado" no es "no tengo esa pista".
+ *   3. YOUTUBE. Si el catálogo o el relay no consiguen el FLAC, se le pide el
+ *      audio COMPLETO al backend local de yt-dlp (`scripts/backend-yt-dlp.mjs`,
+ *      habilitado con la env `YT_DLP_BACKEND_URL`): el backend resuelve la pista
+ *      por búsqueda (`player-client=web_embedded`) y proxya el stream de
+ *      googlevideo —el navegador nunca ve ese dominio, y el backend elude el
+ *      binding de IP—. La URL es del propio backend (`/audio/<token>`), con
+ *      caché corta. Sin backend configurado (o si falla), la pista queda SIN
+ *      audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s.
  *
  * NOTA de alcance: los otros canales del backend (`arcod`, `espejos`) viven de
  * pools de cuentas de terceros que hoy están vacíos/baneados (ver
  * `bitly/docs/canales_rescate_alternativas.md`) y `qobuz-firmado` necesita un
- * `user_auth_token` con suscripción. El único canal vivo y sin credenciales es
- * `stash-relay`, que es el que se implementa acá. Agregar otro canal es sumar
- * una función a `canales` y llamarla antes que el respaldo.
+ * `user_auth_token` con suscripción. Los canales vivos y sin credenciales son
+ * `stash-relay` (FLAC) y el backend local de YouTube, los dos implementados acá.
  */
 
 import { buscarEnExtension, isrcDeRespaldo, llamarExtension } from "@/server/extensions";
-import { rescatarAudio } from "@/server/extensions/rescate";
 import type { Item } from "@/server/extensions";
 import {
   bestOriginalAlbumDuracion,
@@ -79,7 +80,7 @@ export type AudioResuelto = {
   url: string;
   /** Segundos (se usa en la barra del reproductor). */
   duracion: number;
-  canal: "stash-relay" | "preview";
+  canal: "stash-relay" | "youtube";
   /** De dónde salió la identidad: "qobuz-web" o el catálogo del respaldo. */
   proveedor: string;
   /** Id de la pista en el catálogo que resolvió. */
@@ -91,7 +92,7 @@ export type AudioResuelto = {
 
 /* ── Caché de enlaces ────────────────────────────────────────────── */
 
-type Enlace = { url: string; duracion: number; proveedor: string; id: string | null; isrc: string | null; expira: number };
+type Enlace = { url: string; duracion: number; canal: "stash-relay" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
 
 const enlaces = new Map<string, Enlace>();
 const MAX_ENLACES = 400;
@@ -206,15 +207,15 @@ function ttlDeEnlace(enlace: string): number {
 /**
  * El relay responde `503 {"error":"busy"}` cuando está saturado. Eso NO es
  * "no tengo esa pista": es "volvé en un momento". Distinguirlo es la diferencia
- * entre reintentar y bajar a un adelanto de 30 s sin motivo — justo el caso de
- * "rescató una demo que no sirve". Se reintenta con una espera corta.
+ * entre reintentar y descartar la pista sin motivo. Se reintenta con una espera
+ * corta.
  */
 const REINTENTOS_BUSY = 3;
 const ESPERA_BUSY_MS = [400, 800, 1600];
 /**
  * Techo de TODOS los intentos de mint de una pista. Reintentar vale, pero no a
  * cualquier precio: la demo no puede quedarse 20 s esperando al relay mientras
- * el usuario mira un spinner. Al agotarse, cae al adelanto como antes.
+ * el usuario mira un spinner. Al agotarse, se pasa al canal de YouTube.
  */
 const PRESUPUESTO_MINT_MS = 7_000;
 
@@ -306,6 +307,80 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
     config = intento === 0 ? await traerConfigStash(true) : null;
   }
   return null;
+}
+
+/* ── Canal YouTube (backend local de yt-dlp) ─────────────────────── */
+
+/**
+ * Backend local de yt-dlp (`scripts/backend-yt-dlp.mjs`), habilitado con la env
+ * `YT_DLP_BACKEND_URL` (p.ej. `http://127.0.0.1:8787`). Sin esa env el canal no
+ * existe: un despliegue sin el binario no cambia de comportamiento y las pistas
+ * que el FLAC no resuelve quedan simplemente sin audio.
+ */
+const YT_BACKEND_URL = (process.env.YT_DLP_BACKEND_URL ?? "").replace(/\/+$/, "");
+// Techo GENEROSO a propósito: una búsqueda fría de yt-dlp tarda ~15-20 s
+// (boot + extracción + resolución de URL) y abortar antes devuelve "sin audio"
+// aunque el backend iba a resolver. Las repeticiones entran en la caché del
+// backend (10 min) y el segundo intento es instantáneo.
+const TIMEOUT_YT_RESOLVER_MS = 30_000;
+const TTL_YT_ENLACE_MS = 60 * 60 * 1000;
+
+/**
+ * Pide el audio COMPLETO al backend local. El backend busca en YouTube
+ * (`yt-dlp`, cliente `web_embedded`), elige el resultado cuya duración coincide
+ * y devuelve la ruta de su PROXY (`/audio/<token>`): el navegador reproduce del
+ * backend, nunca de googlevideo —que además amarra la URL a la IP que la pidió.
+ */
+async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
+  if (!YT_BACKEND_URL) return null;
+  const consulta = new URLSearchParams({
+    titulo: (p.titulo ?? "").trim(),
+    artista: (p.artista ?? "").trim(),
+    duracion: String(Math.max(0, Math.round((p.duracionMs ?? 0) / 1000))),
+  });
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_YT_RESOLVER_MS);
+  try {
+    const res = await fetch(`${YT_BACKEND_URL}/resolver?${consulta}`, { signal: control.signal });
+    if (!res.ok) return null;
+    const cuerpo = (await res.json()) as { stream?: string; duracion?: number };
+    const stream = String(cuerpo.stream ?? "");
+    if (!stream.startsWith("/audio/")) return null;
+    return {
+      stream: new URL(stream, YT_BACKEND_URL).toString(),
+      duracion: Math.max(0, Math.round(Number(cuerpo.duracion ?? 0))),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/** Búsqueda de catálogo en el backend local (YouTube como último respaldo). */
+const TIMEOUT_YT_BUSQUEDA_MS = 15_000;
+
+/**
+ * Cuando ni la extensión ni el respaldo de Deezer tienen la canción (folklore
+ * de nicho, re-subidos), el backend local la busca en YouTube. Los resultados
+ * no traen ISRC, pero el rescate de audio igual funciona: el MISMO backend
+ * resuelve la pista por título+artista cuando se la piden.
+ */
+export async function buscarYouTubeBackend(consulta: string, limite: number): Promise<Item[] | null> {
+  if (!YT_BACKEND_URL) return null;
+  const qs = new URLSearchParams({ consulta, limite: String(Math.max(1, Math.min(24, limite))) });
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_YT_BUSQUEDA_MS);
+  try {
+    const res = await fetch(`${YT_BACKEND_URL}/buscar?${qs}`, { signal: control.signal });
+    if (!res.ok) return null;
+    const cuerpo = (await res.json()) as { items?: Item[] };
+    return Array.isArray(cuerpo.items) ? cuerpo.items : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
 }
 
 /* ── Catálogo (qobuz-web) ────────────────────────────────────────── */
@@ -455,9 +530,9 @@ async function idPorNombre(p: PeticionAudio, isrcConfiable: string | null): Prom
  * `qobuz-web` consulta un espejo (`api.zarz.moe`) y cuando ese espejo falla —
  * 502/500 en `qbz` y `qbz2`, que se caen y vuelven— `idVerificadoPorISRC` y
  * `idPorNombre` devuelven `null`, NO queda ningún candidato y el rescate entero
- * baja al adelanto de 30 s: la demo "suena, pero es un preview". Esta ruta no
- * tiene espejo de por medio, contesta con el ISRC de cada pista (así la
- * verificación sigue siendo exacta) y además es la que usa el backend.
+ * cae al canal de YouTube: esta ruta no tiene espejo de por medio, contesta con
+ * el ISRC de cada pista (así la verificación sigue siendo exacta) y además es la
+ * que usa el backend.
  */
 const QOBUZ_API = "https://www.qobuz.com/api.json/0.2";
 const QOBUZ_APP_ID = "712109809";
@@ -466,8 +541,8 @@ const TIMEOUT_QOBUZ_MS = 8_000;
 /**
  * Enfriamiento si el catálogo empieza a fallar seguido (429, 403, cortes):
  * sin esto cada reproducción pagaría el tope de timeout antes de caer al
- * respaldo. Tres fallos seguidos apagan la ruta un par de minutos; las demás
- * rutas (espejo y adelanto) siguen intentando mientras tanto.
+ * siguiente canal. Tres fallos seguidos apagan la ruta un par de minutos; las
+ * demás rutas (espejo y catálogo público) siguen intentando mientras tanto.
  */
 const FALLAS_QOBUZ_PARA_ENFRIAR = 3;
 const ENFRIAMIENTO_QOBUZ_MS = 2 * 60 * 1000;
@@ -602,7 +677,14 @@ function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
 /**
  * Resuelve el audio de una pista. Nunca lanza: `null` significa "no hay audio"
  * y la interfaz lo muestra. El orden es el de la app: identidad verificada por
- * ISRC primero, nombre después, adelanto público como último recurso.
+ * ISRC primero, nombre después; si el FLAC no se consigue, audio completo vía
+ * el backend local de YouTube; sin backend, sin audio (nunca un adelanto).
+ *
+ * El canal YouTube se lanza EN PARALELO con la identidad de stash: si el FLAC
+ * se consigue, su promesa se descarta (y el backend queda tibio para la
+ * próxima); si stash falla, el último recurso ya lleva la mayor parte de su
+ * espera encima. Sin esto el clic paga identidad (~6 s) + búsqueda de YouTube
+ * en SERIE, que era justo el salto de ~10 s a ~25 s en canciones sin FLAC.
  */
 export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
   const titulo = (p.titulo ?? "").trim();
@@ -617,12 +699,17 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     return {
       url: cacheado.url,
       duracion: cacheado.duracion,
-      canal: "stash-relay",
+      canal: cacheado.canal,
       proveedor: cacheado.proveedor,
       id: cacheado.id,
       isrc: cacheado.isrc,
     };
   }
+
+  // En paralelo desde ya (sin título el backend rechazaría igual): ver doc.
+  const ytParalelo = titulo
+    ? rescatarYouTube({ ...p, titulo, artista, album, duracionMs })
+    : Promise.resolve(null);
 
   const isrcPedido = normalizarISRC(p.isrc);
   const bienFormado = esISRCValido(isrcPedido);
@@ -643,10 +730,10 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
    * precisión (ISRC exacto, luego nombre) para que el mint pruebe primero la
    * grabación exacta.
    *
-   * El catálogo PÚBLICO y el espejo de la extensión llegan al mismo sitio por
-   * caminos distintos: si el espejo se cae (o se cuelga), la ruta directa
-   * acredita la identidad y el rescate NO baja al adelanto de 30 s. Cada ruta
-   * tiene su propio tope, así que una colgada no frena a las demás.
+    * El catálogo PÚBLICO y el espejo de la extensión llegan al mismo sitio por
+    * caminos distintos: si el espejo se cae (o se cuelga), la ruta directa
+    * acredita la identidad sin depender de él. Cada ruta tiene su propio tope,
+    * así que una colgada no frena a las demás.
    *
    * Los resultados se juntan en vez de quedarse con el primero: si el mint del
    * primer id falla, el segundo sigue siendo un intento legítimo.
@@ -724,6 +811,7 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     const enlace: Enlace = {
       url: mint.url,
       duracion,
+      canal: "stash-relay",
       proveedor: c.proveedor,
       id: c.id,
       isrc: c.isrc,
@@ -742,23 +830,31 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     };
   }
 
-  // Último recurso: el adelanto público de 30 s, que es lo que la demo ya sabía
-  // hacer. Se cachea con una vida corta para no repetir la búsqueda al saltar.
-  const preview = await rescatarAudio({
-    titulo,
-    artista,
-    album,
-    isrc: p.isrc ?? null,
-    duracionMs,
-  });
-  if (!preview) return null;
-  return {
-    url: preview.url,
-    duracion: preview.duracion,
-    canal: "preview",
-    proveedor: "catalogo",
+  // Último recurso: el audio COMPLETO vía el backend local de yt-dlp. El enlace
+  // es del propio backend (su proxy), se cachea una hora —el token del backend
+  // ya vive menos— y si no hay backend configurado o falla, la pista queda SIN
+  // audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s. La
+  // petición arrancó al entrar en la función (ver `ytParalelo`), así que acá
+  // solo se espera el resultado, ya avanzado.
+  const yt = await ytParalelo;
+  if (!yt) return null;
+  const duracionYt = yt.duracion > 0 ? yt.duracion : duracionMs > 0 ? Math.round(duracionMs / 1000) : 0;
+  const enlace: Enlace = {
+    url: yt.stream,
+    duracion: duracionYt,
+    canal: "youtube",
+    proveedor: "youtube",
     id: null,
-    // El ISRC real del adelanto cuando el catálogo lo publica; si no, el pedido.
-    isrc: normalizarISRC(preview.isrc) || (bienFormado ? isrcPedido : null),
+    isrc: bienFormado ? isrcPedido : null,
+    expira: Date.now() + TTL_YT_ENLACE_MS,
+  };
+  guardarEnlace(clave, enlace);
+  return {
+    url: enlace.url,
+    duracion: enlace.duracion,
+    canal: "youtube",
+    proveedor: enlace.proveedor,
+    id: null,
+    isrc: enlace.isrc,
   };
 }

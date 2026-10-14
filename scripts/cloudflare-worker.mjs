@@ -81,7 +81,12 @@ function sembrarEnv(env) {
 
 const CSP_FIJOS =
   "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" +
-  " img-src 'self' data: blob: https:; media-src 'self' blob: https:;" +
+  " img-src 'self' data: blob: https:;" +
+  // http://localhost solo para el backend local de yt-dlp (canal YouTube del
+  // rescate, solo activo si YT_DLP_BACKEND_URL está configurado): el navegador
+  // reproduce el proxy del backend, no googlevideo. En el cliente solo afecta
+  // al localhost del propio visitante.
+  " media-src 'self' blob: https: http://localhost:* http://127.0.0.1:*;" +
   " connect-src 'self' https://*.supabase.co https://open.er-api.com https://api.github.com;" +
   " frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';" +
   " upgrade-insecure-requests";

@@ -43,8 +43,8 @@ export type AudioRescatado = {
   url: string;
   /** Segundos. */
   duracion: number;
-  /** "stash-relay" = FLAC completo; "preview" = adelanto público de 30 s. */
-  canal?: "stash-relay" | "preview";
+  /** "stash-relay" = FLAC completo; "youtube" = audio completo vía backend local. */
+  canal?: "stash-relay" | "youtube";
   proveedor?: string;
   isrc?: string | null;
 };

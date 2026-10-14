@@ -15,9 +15,7 @@ export {
 } from "./runtime";
 export {
   buscarRespaldo,
-  rescatarAudio,
   isrcDeRespaldo,
-  type Audio,
   type PistaParaRescatar,
 } from "./rescate";
 export type { Item, ResultadoBusqueda, TipoResultado } from "./tipos";

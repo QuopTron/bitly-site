@@ -480,14 +480,13 @@ export const DICT: Record<string, [string, string]> = {
                                                                   "Too many searches in a row. Wait a minute."],
   demoAudioNone:        ["Esa pista no tiene audio en la demo.",
                                                                   "This track has no audio in the demo."],
-  demoPreviewNote:      ["Audio del catálogo; si el canal no responde, adelanto de 30 s",
-                                                                  "Catalog audio; a 30-second preview if the channel is down"],
+  demoPreviewNote:      ["Audio completo del rescate; si ningún canal responde, la pista queda muda",
+                                                                  "Full rescued audio; if no channel answers, the track stays silent"],
   demoAriaMarco:        ["Vista previa de la app de Bitly",       "Bitly app preview"],
   demoKindTrack:        ["Canción",                                "Song"],
   demoKindAlbum:        ["Álbum",                                  "Album"],
   demoKindArtist:       ["Artista",                                "Artist"],
   demoKindPlaylist:     ["Lista",                                  "Playlist"],
-  demoPreviewTag:       ["Adelanto de 30 s",                       "30-second preview"],
   demoAbrirItem:        ["Ver la música de {nombre}",              "See music by {nombre}"],
 
   // ── Demo: código Premium ──
