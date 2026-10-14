@@ -18,4 +18,5 @@ export {
   isrcDeRespaldo,
   type PistaParaRescatar,
 } from "./rescate";
+export { normalizarItems } from "./normalizar";
 export type { Item, ResultadoBusqueda, TipoResultado } from "./tipos";

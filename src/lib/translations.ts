@@ -488,6 +488,7 @@ export const DICT: Record<string, [string, string]> = {
   demoKindArtist:       ["Artista",                                "Artist"],
   demoKindPlaylist:     ["Lista",                                  "Playlist"],
   demoAbrirItem:        ["Ver la música de {nombre}",              "See music by {nombre}"],
+  demoVolver:           ["Volver a resultados",                    "Back to results"],
 
   // ── Demo: código Premium ──
   demoPremiumOn:        ["Premium activo · sin límites",             "Premium active · no limits"],

@@ -12,9 +12,11 @@
  *    por nombre) y le pide el FLAC al relay de stash; si ese canal no responde,
  *    pide el audio completo al backend local de yt-dlp. Sin ningún canal, la
  *    pista queda sin audio (nunca un adelanto de 30 s). Ver `@/server/rescate`.
+ *  · `contenidoDe` abre un álbum, artista o lista y devuelve SUS canciones:
+ *    la colección también viaja por el proxy cifrado.
  */
 
-import { buscarDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
+import { abrirDemo, buscarDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
 import { extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
 
@@ -127,3 +129,28 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
 
 /** Sugerencias de arranque: evite que el marco se vea vacío al abrirlo. */
 export const SUGERIDAS = ["Daft Punk", "Rosalía", "Coldplay", "jazz", "blues", "guitarra"];
+
+/**
+ * Contenido de un álbum, artista o lista: SUS canciones —y en un artista,
+ * también sus álbumes, para poder seguir recorriendo—.
+ *
+ * El id de la `Pista` es `ext:tipo:idCrudo` (ver `desdeItem`): para pedirlo a
+ * la fuente hay que sacarle los dos primeros segmentos. Los items heredan la
+ * fuente y el origen del item que los abrió: un álbum del catálogo de respaldo
+ * contiene canciones del respaldo (Deezer), y eso decide después con qué
+ * identidad se rescata el audio. `null` = la fuente no supo recorrer la
+ * colección y hay que buscarla por nombre (el paso previo, que sigue
+ * funcionando como red de seguridad).
+ */
+export async function contenidoDe(p: Pista): Promise<Pista[] | null> {
+  if (p.tipo === "track") return null;
+  const crudo = p.id.split(":").slice(2).join(":");
+  if (!crudo) return null;
+  try {
+    const r = await abrirDemo({ ext: p.ext, tipo: p.tipo, id: crudo });
+    if (!r.items.length) return null;
+    return r.items.map((i) => desdeItem(i, p.ext, p.respaldada));
+  } catch {
+    return null;
+  }
+}

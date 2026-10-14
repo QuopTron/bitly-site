@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
-import { ChevronRight, Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
-import { audioDe, buscar, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
+import { audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
 import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
 import { retraso } from "@/lib/reveal";
@@ -26,6 +26,12 @@ const mmss = (seg: number) => {
   return `${Math.floor(t / 60)}:${(t % 60).toString().padStart(2, "0")}`;
 };
 
+/** Longitud del anillo de progreso del cover circular del miniplayer. */
+const ANILLO = 2 * Math.PI * 19;
+
+/** Inicial de la letra que hace de carátula cuando la fuente no trae imagen. */
+const letraDe = (texto: string) => (texto.trim()[0] ?? "\u266a").toUpperCase();
+
 /** "1 h 20 min" / "7 min": cuánto falta para que la cuota se renueve. */
 const restante = (ms: number) => {
   const min = Math.max(0, Math.ceil(ms / 60_000));
@@ -43,6 +49,17 @@ const CLAVES_TIPO: Record<Pista["tipo"], string> = {
 /** Los tres marcos. El reproductor es el mismo; cambia el chasis. */
 type MarcoId = "movil" | "tv" | "pc";
 type Chasis = { etiqueta: string; icono: typeof Tv; clase: string; barra: string };
+
+/** Listado que se dejó antes de abrir un álbum/artista/lista (para volver). */
+type EstadoLista = {
+  resultados: Pista[] | null;
+  termino: string;
+  filtro: string | null;
+  respaldada: boolean;
+  limitado: boolean;
+  otraFuente: string | null;
+  sinResultados: boolean;
+};
 
 const MARCOS: Record<MarcoId, Chasis> = {
   movil: {
@@ -94,6 +111,8 @@ export default function DemoPlayer() {
   const [limitado, setLimitado] = useState(false);
 
   const [otraFuente, setOtraFuente] = useState<string | null>(null);
+  /** Listado previo a abrir un contenido, para volver con un clic. */
+  const [anterior, setAnterior] = useState<EstadoLista | null>(null);
 
   const [pista, setPista] = useState<Pista | null>(null);
   const [sonando, setSonando] = useState(false);
@@ -140,6 +159,8 @@ export default function DemoPlayer() {
     setSinResultados(false);
     setRespaldada(false);
     setLimitado(false);
+    // Una búsqueda nueva cierra la vista de contenidos: no hay dónde volver.
+    setAnterior(null);
     try {
       const r = await buscar(limpio, extId, filtroId);
       setResultados(r.pistas);
@@ -172,6 +193,7 @@ export default function DemoPlayer() {
       setSinResultados(false);
       setRespaldada(false);
       setOtraFuente(null);
+      setAnterior(null);
       if (termino.trim()) void hacerBusqueda(termino, id, filtroSiguiente);
     },
     [termino, hacerBusqueda],
@@ -281,23 +303,82 @@ export default function DemoPlayer() {
    * Abre un resultado que NO es una canción (álbum, artista, lista).
    *
    * Antes toda fila llamaba a `reproducir`, así que tocar un álbum pedía el
-   * audio de un álbum y terminaba en "esa pista no tiene audio". Ahora las
-   * cuatro categorías se pueden recorrer: tocar un álbum, artista o lista busca
-   * su música por nombre, que es el paso siguiente natural.
+   * audio de un álbum y terminaba en "esa pista no tiene audio"; después se
+   * buscaba su nombre. Ahora la fuente entrega SUS contenidos: las canciones
+   * del álbum o la lista y, de un artista, sus canciones top y sus álbumes
+   * para seguir recorriendo —todo reproducible—. Si la fuente no sabe
+   * recorrer la colección, cae a la búsqueda por nombre de antes.
    */
   const abrirItem = useCallback(
-    (p: Pista) => {
+    async (p: Pista) => {
       if (!p.titulo.trim()) return;
+      const previo: EstadoLista = {
+        resultados,
+        termino,
+        filtro,
+        respaldada,
+        limitado,
+        otraFuente,
+        sinResultados,
+      };
+      // El campo guarda el nombre del item abierto: es el título de la vista
+      // (y la pista con la que se re-busca si la fuente no responde).
       setTermino(p.titulo);
-      setFiltro(filtroCanciones);
       setPista(null);
       setSonando(false);
       setAvisoAudio(null);
       audio.current?.pause();
-      void hacerBusqueda(p.titulo, extension, filtroCanciones);
+      setCargando(true);
+      setSinResultados(false);
+      setRespaldada(false);
+      setLimitado(false);
+      setOtraFuente(null);
+      setResultados(null);
+      try {
+        const pistas = await contenidoDe(p);
+        if (pistas && pistas.length > 0) {
+          // Los contenidos son canciones: la burbuja se acomoda sin re-buscar.
+          setFiltro(filtroCanciones);
+          setResultados(pistas);
+          setRespaldada(p.respaldada);
+          setAnterior(previo);
+          requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
+        } else {
+          // Red de seguridad: la fuente no supo recorrer la colección.
+          setFiltro(filtroCanciones);
+          await hacerBusqueda(p.titulo, extension, filtroCanciones);
+        }
+      } finally {
+        setCargando(false);
+      }
     },
-    [extension, filtroCanciones, hacerBusqueda],
+    [
+      resultados,
+      termino,
+      filtro,
+      respaldada,
+      limitado,
+      otraFuente,
+      sinResultados,
+      extension,
+      filtroCanciones,
+      hacerBusqueda,
+    ],
   );
+
+  /** Vuelve al listado que se dejó antes de abrir un contenido. */
+  const volver = useCallback(() => {
+    if (!anterior) return;
+    setResultados(anterior.resultados);
+    setTermino(anterior.termino);
+    setFiltro(anterior.filtro);
+    setRespaldada(anterior.respaldada);
+    setLimitado(anterior.limitado);
+    setOtraFuente(anterior.otraFuente);
+    setSinResultados(anterior.sinResultados);
+    setAnterior(null);
+    requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
+  }, [anterior]);
 
   const alternar = useCallback(() => {
     const el = audio.current;
@@ -317,6 +398,9 @@ export default function DemoPlayer() {
     el.volume = volumen;
     el.muted = volumen === 0;
   }, [volumen]);
+
+  // Avance de la pista actual como fracción (0–1) para el anillo del cover.
+  const avanceCirculo = pista && pista.duracion > 0 ? Math.min(1, avance / pista.duracion) : 0;
 
   const fase = getFaseActual();
   const restantes = Math.max(0, cuota.restantes);
@@ -554,6 +638,18 @@ export default function DemoPlayer() {
                 </div>
               )}
 
+              {/* Se abrió un contenido: botón para volver al listado previo. */}
+              {anterior && !cargando && (
+                <button
+                  type="button"
+                  onClick={volver}
+                  className="mb-1.5 ml-0.5 inline-flex items-center gap-1 rounded-full bg-card/60 px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border/50 transition hover:text-primary"
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  {t("demoVolver")}
+                </button>
+              )}
+
               {respaldada && resultados && resultados.length > 0 && (
                 <p className="px-1 pb-1.5 text-xs text-muted-foreground">{t("demoFallback")}</p>
               )}
@@ -592,7 +688,7 @@ export default function DemoPlayer() {
                       >
                         <button
                           type="button"
-                          onClick={() => (esCancion ? void reproducir(p) : abrirItem(p))}
+                          onClick={() => (esCancion ? void reproducir(p) : void abrirItem(p))}
                           title={esCancion ? undefined : Plantilla(t("demoAbrirItem"), { nombre: p.titulo })}
                           className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-all duration-200 active:scale-[0.985] ${
                             esActual ? "bg-primary/15 ring-1 ring-primary/25" : "hover:bg-card/60"
@@ -601,8 +697,14 @@ export default function DemoPlayer() {
                           {p.caratula ? (
                             <img src={p.caratula} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
                           ) : (
-                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                              <Music className="h-4 w-4 text-muted-foreground" />
+                            // Sin carátula, la INICIAL hace de cover: un ícono
+                            // genérico no dice qué es, una letra sí.
+                            <span
+                              aria-hidden
+                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-primary-foreground"
+                              style={{ backgroundImage: "var(--gradient-mint)" }}
+                            >
+                              {letraDe(p.titulo)}
                             </span>
                           )}
                           <span className="min-w-0 flex-1">
@@ -618,6 +720,11 @@ export default function DemoPlayer() {
                               {secundaria || "\u00a0"}
                             </span>
                           </span>
+                          {esCancion && p.duracion > 0 && (
+                            <span className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">
+                              {mmss(p.duracion)}
+                            </span>
+                          )}
                           <span
                             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${
                               esActual && sonando ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary"
@@ -651,28 +758,51 @@ export default function DemoPlayer() {
                   />
                 </div>
                 <div className="mt-2.5 flex items-center gap-2.5">
-                  {/* Ecualizador: tres barritas que suben y bajan. Son tres
-                      `scaleY` en el compositor, no valen nada. */}
-                  {sonando && (
-                    <span aria-hidden className="flex h-3.5 shrink-0 items-end gap-[2px]">
-                      {[0, 1, 2].map((i) => (
-                        <span
-                          key={i}
-                          className="anim-eco h-full w-[2px] rounded-full bg-primary"
-                          style={{ animationDelay: `${i * 0.18}s`, animationDuration: `${0.85 + i * 0.14}s` }}
-                        />
-                      ))}
-                    </span>
-                  )}
+                  {/* Cover circular: la carátula de la pista DENTRO de un
+                      anillo que marca los segundos que van; si la fuente no
+                      trae imagen, la LETRA hace de cover. */}
+                  <span className="relative h-11 w-11 shrink-0">
+                    <svg viewBox="0 0 44 44" aria-hidden className="absolute inset-0 h-11 w-11 -rotate-90">
+                      <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted-foreground/30" />
+                      <circle
+                        cx="22"
+                        cy="22"
+                        r="19"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        className="text-primary"
+                        strokeDasharray={ANILLO}
+                        strokeDashoffset={ANILLO * (1 - avanceCirculo)}
+                      />
+                    </svg>
+                    {pista.caratula ? (
+                      <img src={pista.caratula} alt="" className="absolute left-1 top-1 h-9 w-9 rounded-full object-cover" />
+                    ) : (
+                      <span
+                        aria-hidden
+                        className="absolute left-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-primary-foreground"
+                        style={{ backgroundImage: "var(--gradient-mint)" }}
+                      >
+                        {letraDe(pista.titulo)}
+                      </span>
+                    )}
+                    {sonando && (
+                      <span aria-hidden className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" />
+                    )}
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-xs font-semibold">{pista.titulo}</span>
-                    </span>
+                    <span className="block truncate text-xs font-semibold">{pista.titulo}</span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {pista.artista ? `${pista.artista} · ` : ""}
-                      {mmss(avance)} / {mmss(pista.duracion)}
+                      {pista.artista || "\u00a0"}
                       {pista.isrc ? ` · ISRC ${pista.isrc}` : ""}
                     </span>
+                  </span>
+                  {/* Los segundos, siempre a la vista. */}
+                  <span className="shrink-0 text-xs font-semibold tabular-nums">
+                    <span className="text-foreground">{mmss(avance)}</span>
+                    <span className="text-muted-foreground"> / {mmss(pista.duracion)}</span>
                   </span>
                 </div>
 

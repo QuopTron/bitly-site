@@ -12,8 +12,8 @@
  * renueva la sesión y reintenta UNA vez.
  */
 
-import { demoBuscar, demoClave, demoRescatar } from "@/server/demo-proxy";
-import type { Item } from "@/server/extensions";
+import { demoAbrir, demoBuscar, demoClave, demoRescatar } from "@/server/demo-proxy";
+import type { Item, TipoResultado } from "@/server/extensions";
 import {
   cifrar,
   descifrar,
@@ -130,5 +130,35 @@ export async function rescatarDemo(pista: PistaParaAudio): Promise<AudioRescatad
     return (await demoRescatar({ data: carga })) as AudioRescatado | null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Abre un álbum, artista o lista y trae SUS contenidos: las canciones que
+ * tiene adentro y, en un artista, también sus álbumes para seguir recorriendo.
+ *
+ * Los ids de cada fuente sólo existen en esa fuente, así que la petición va a
+ * `opts.ext` (la que trajo el item). Si esa fuente no expone el método o la
+ * colección viene vacía, el servidor contesta `items: []` y el cliente busca
+ * el nombre: el comportamiento de siempre, como red de seguridad.
+ */
+export async function abrirDemo(opts: {
+  ext: ExtensionId;
+  tipo: TipoResultado;
+  id: string;
+}): Promise<RespuestaBusqueda> {
+  const peticion = { ext: opts.ext, tipo: opts.tipo, id: opts.id };
+
+  let intento = 0;
+  for (;;) {
+    try {
+      const { carga, clave } = await sellar(peticion);
+      const respuesta = (await demoAbrir({ data: carga })) as Cifrado;
+      return await abrirRespuesta<RespuestaBusqueda>(clave, respuesta);
+    } catch (e) {
+      intento++;
+      if (intento > 1) throw e;
+      renovarSesion();
+    }
   }
 }

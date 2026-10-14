@@ -24,15 +24,24 @@
  *    al backend local de yt-dlp (`YT_DLP_BACKEND_URL`); sin backend, la pista
  *    queda sin audio —nunca un adelanto de 30 s—. Los bytes FLAC bajan del CDN
  *    por HTTPS; los del canal YouTube pasan por el proxy del backend local.
+ * 5. CONTENIDOS. `demoAbrir` abre un álbum, artista o lista y devuelve SUS
+ *    canciones (y en un artista, también sus álbumes): la colección viaja
+ *    cifrada igual que la búsqueda. Si la fuente no sabe recorrerla, la
+ *    respuesta queda vacía y el cliente cae a buscar por nombre.
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { buscarEnExtension, buscarRespaldo } from "@/server/extensions";
+import {
+  buscarEnExtension,
+  buscarRespaldo,
+  llamarExtension,
+  normalizarItems,
+} from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
 import { buscarYouTubeBackend, resolverAudio, type PeticionAudio } from "@/server/rescate";
 import { obtenerIPCliente } from "@/server/ip";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
-import type { Item } from "@/server/extensions";
+import type { Item, TipoResultado } from "@/server/extensions";
 import {
   cifrar,
   descifrar,
@@ -395,7 +404,107 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     const yt = await buscarYouTubeBackend(consulta, limite);
     if (yt && yt.length > 0) return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
   }
-  return cerrar(data, { origen: "respaldo", items, aviso, fuente });
+  // El catálogo de respaldo ES Deezer: decirlo hace dos cosas a la vez: la
+  // interfaz etiqueta cada pista con `ext: "deezer"` —así su ISRC, que solo
+  // Deezer publica, se usa como identidad autoritativa al rescatar— y al abrir
+  // un álbum o artista de estos resultados la petición va a la fuente que
+  // realmente los trajo.
+  return cerrar(data, { origen: "respaldo", items, aviso, fuente: items.length > 0 ? "deezer" : fuente });
+}
+
+/* ── Apertura de contenidos (álbum, artista, lista) ──────────────── */
+
+type PeticionApertura = {
+  /** Fuente que trajo el item a abrir: sus ids sólo existen ahí. */
+  ext: string;
+  tipo: TipoResultado;
+  id: string;
+};
+
+/** Método que cada extensión expone para recorrer su colección. */
+const METODO_APERTURA: Partial<Record<TipoResultado, string>> = {
+  album: "getAlbum",
+  artist: "getArtist",
+  playlist: "getPlaylist",
+};
+
+/**
+ * Canciones que contiene lo que devolvió la extensión.
+ *
+ * Cada fuente devuelve su colección con un shape propio: `getAlbum` y
+ * `getPlaylist` traen `tracks`; `getArtist` trae `top_tracks` + `albums`
+ * (Spotify y Amazon, además, `releases`; Qobuz y TIDAL sólo `albums`).
+ * Los álbumes que vienen DENTRO de un artista se marcan como `album` a mano:
+ * varias fuentes no les ponen `item_type` y el normalizador los convertiría
+ * en canciones —una fila que al tocarla intentaría sonar un álbum entero.
+ */
+function contenidoItemsDe(crudo: unknown, tipo: TipoResultado): Item[] {
+  if (!crudo) return [];
+  if (Array.isArray(crudo)) return normalizarItems(crudo);
+  if (typeof crudo !== "object") return [];
+  const o = crudo as Record<string, unknown>;
+
+  if (tipo === "artist") {
+    const pistas = normalizarItems(Array.isArray(o.top_tracks) ? o.top_tracks : [], "track");
+    const discosCrudos =
+      Array.isArray(o.albums) && o.albums.length > 0
+        ? o.albums
+        : Array.isArray(o.releases)
+          ? o.releases
+          : [];
+    const discos = normalizarItems(discosCrudos).map((i) => ({ ...i, tipo: "album" as const }));
+    return [...pistas, ...discos];
+  }
+
+  const filas = [o.tracks, o.track_list].find(Array.isArray);
+  return filas ? normalizarItems(filas, "track") : [];
+}
+
+export const demoAbrir = createServerFn({ method: "POST" })
+  .validator((d: Carga) => d)
+  .handler(async ({ data }): Promise<Cifrado> => abrirContenidoImpl(data));
+
+/**
+ * Núcleo de la apertura de contenidos (exportado para los scripts de prueba,
+ * igual que `buscarImpl`).
+ *
+ * Nunca lanza: si la fuente no expone el método o la colección viene vacía,
+ * devuelve `items: []` y el cliente busca el nombre —el paso previo a esta
+ * función, que sigue funcionando como red de seguridad.
+ */
+export async function abrirContenidoImpl(carga: Carga): Promise<Cifrado> {
+  let peticion: PeticionApertura;
+  let data = carga;
+  try {
+    const abierta = await abrir(data);
+    peticion = JSON.parse(abierta.texto) as PeticionApertura;
+    data = { ...data, sesion: abierta.sesion };
+  } catch {
+    return cerrar(data, { origen: "extension", items: [], aviso: "clave" });
+  }
+
+  if (!dentroDeCupo(await quienSolicita())) {
+    return cerrar(data, { origen: "extension", items: [], limitado: true });
+  }
+
+  const metodo = METODO_APERTURA[peticion.tipo];
+  const id = (peticion.id ?? "").trim().slice(0, 120);
+  if (!metodo || !id) return cerrar(data, { origen: "extension", items: [] });
+
+  try {
+    const crudo = await conTimeout(
+      llamarExtension({ sesion: data.sesion, ext: peticion.ext, metodo, args: [id] }),
+      TIMEOUT_FUENTE_MS,
+    );
+    const items = contenidoItemsDe(crudo, peticion.tipo).slice(0, 30);
+    return cerrar(data, { origen: "extension", items, fuente: peticion.ext });
+  } catch (e) {
+    return cerrar(data, {
+      origen: "extension",
+      items: [],
+      aviso: String((e as Error)?.message ?? e).slice(0, 200),
+    });
+  }
 }
 
 /* ── Audio ───────────────────────────────────────────────────────── */
