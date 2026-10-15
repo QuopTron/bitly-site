@@ -34,7 +34,9 @@ export const DICT: Record<string, [string, string]> = {
   // ── Free vs Premium compare ──
   freeCompare1:         ["Buscar canciones, álbumes y artistas",   "Search songs, albums and artists"],
   freeCompare2:         ["Explorar catálogo completo de música",   "Explore full music catalog"],
-  freeCompare3:         ["Descargas gratis durante 8 h desde la primera activación", "Free downloads for 8 h from first activation"],
+  freeCompare3:         ["Descargas gratis: 75 canciones desde la primera activación", "Free downloads: 75 songs from first activation"],
+  freeCompare3Info:     ["75 canciones son unas 4 a 5 horas de música (promedio de 3,5 a 4,5 min por tema). Cuentan igual las que bajes sueltas que dentro de un álbum, playlist o artista.", "75 songs are about 4 to 5 hours of music (average 3.5 to 4.5 min per track). Singles and songs from albums, playlists or artists all count."],
+  freeCompare3InfoLabel:["¿Cuántas horas son 75 canciones?", "How many hours are 75 songs?"],
   freeCompare4:         ["Streaming sin límite, biblioteca y letras sincronizadas", "Unlimited streaming, library and synced lyrics"],
   premiumCompare1:      ["Buscar canciones, álbumes y artistas",   "Search songs, albums and artists"],
   premiumCompare2:      ["Descarga FLAC auténtico 24-bit/192kHz",  "True FLAC 24-bit/192kHz download"],

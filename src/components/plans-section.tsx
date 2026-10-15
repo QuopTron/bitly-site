@@ -1,4 +1,5 @@
-import { Check, X as XIcon, MessageCircle, Gem } from "lucide-react";
+import { useState } from "react";
+import { Check, X as XIcon, MessageCircle, Gem, Info } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { getFaseActual } from "@/lib/pricing";
 import { useCurrency, format } from "@/lib/currency";
@@ -14,6 +15,7 @@ export default function PlansSection() {
   const [currency] = useCurrency();
   const { precio, original, etiqueta, etiquetaEn, enOferta } = getFaseActual();
   const lang = getLanguage();
+  const [infoHoras, setInfoHoras] = useState(false);
 
   return (
     <section id="planes" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
@@ -52,7 +54,27 @@ export default function PlansSection() {
                 <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-muted/50">
                   <Check className="h-3 w-3 text-muted-foreground" />
                 </span>
-                {t(k)}
+                <span className="flex flex-wrap items-center gap-1.5">
+                  {t(k)}
+                  {k === "freeCompare3" && (
+                    <span className="relative inline-flex">
+                      <button
+                        type="button"
+                        aria-label={t("freeCompare3InfoLabel")}
+                        aria-expanded={infoHoras}
+                        onClick={() => setInfoHoras((v) => !v)}
+                        className="flex h-4 w-4 items-center justify-center rounded-full bg-muted/60 text-muted-foreground transition-colors hover:bg-primary/20 hover:text-primary"
+                      >
+                        <Info className="h-3 w-3" />
+                      </button>
+                      {infoHoras && (
+                        <span className="absolute left-0 top-6 z-30 w-64 rounded-xl border border-border bg-card p-3 text-xs leading-relaxed text-foreground shadow-xl">
+                          {t("freeCompare3Info")}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </span>
               </li>
             ))}
             {freeBlocked.map((k) => (
