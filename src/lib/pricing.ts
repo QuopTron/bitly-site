@@ -1,14 +1,11 @@
 /**
- * Fases de precio (en bolivianos), con la escalera que se pidió:
+ * Precio de Premium (en bolivianos): fijo en 30 Bs, sin ofertas ni escalera.
  *
- *   · hasta el 15        → 30 Bs
- *   · del 16 al 28       → 40 Bs
- *   · desde el 29        → 50 Bs (precio final, ya no baja más)
- *
- * A diferencia de la fase anterior (una sola oferta con fecha tope), acá cada
- * escalón tiene su propio `hasta` y el último es `null`: 50 Bs de por vida.
- * El cambio de precio solo depende del calendario, no de un contador en el
- * servidor, así que `getFaseActual` es determinístico y no necesita red.
+ * Antes había una escalera por fecha (30 → 40 → 50 con precio tachado); se
+ * quitó el 15/10/2026 a pedido: un solo precio, de por vida. Las monedas
+ * distintas de BOB siguen saliendo de la conversión con su margen
+ * (`MARKUP` de `@/lib/currency`), así que el precio convertido hereda el
+ * mismo 30 Bs.
  */
 
 export type Fase = {
@@ -23,25 +20,11 @@ export type Fase = {
 
 const FASES: Fase[] = [
   {
-    hasta: "2026-10-16T00:00:00",
-    precio: 30,
-    original: 50,
-    etiqueta: "Hasta el 15",
-    etiquetaEn: "Until the 15th",
-  },
-  {
-    hasta: "2026-10-29T00:00:00",
-    precio: 40,
-    original: 50,
-    etiqueta: "Del 16 al 28",
-    etiquetaEn: "From the 16th to the 28th",
-  },
-  {
     hasta: null,
-    precio: 50,
-    original: 50,
-    etiqueta: "Precio final",
-    etiquetaEn: "Final price",
+    precio: 30,
+    original: 30,
+    etiqueta: "Precio fijo",
+    etiquetaEn: "Fixed price",
   },
 ];
 

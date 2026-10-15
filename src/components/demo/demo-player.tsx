@@ -905,7 +905,7 @@ export default function DemoPlayer() {
 
         {/* ── Indicador de precio ── */}
         <aside data-reveal suppressHydrationWarning style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
-          <h3 className="text-sm font-bold">{t("demoLadderTitle")}</h3>
+          <h3 className="text-sm font-bold">{fase.siguiente ? t("demoLadderTitle") : t("plansPremiumPrice")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("plansPremium")}
