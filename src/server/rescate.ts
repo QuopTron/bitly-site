@@ -35,13 +35,16 @@
  *      relay se reintenta con espera corta (dentro de un presupuesto de 7 s):
  *      "ocupado" no es "no tengo esa pista".
  *   3. YOUTUBE. Si el catálogo o el relay no consiguen el FLAC, se le pide el
- *      audio COMPLETO al backend local de yt-dlp (`scripts/backend-yt-dlp.mjs`,
- *      habilitado con la env `YT_DLP_BACKEND_URL`): el backend resuelve la pista
- *      por búsqueda (`player-client=web_embedded`) y proxya el stream de
- *      googlevideo —el navegador nunca ve ese dominio, y el backend elude el
- *      binding de IP—. La URL es del propio backend (`/audio/<token>`), con
- *      caché corta. Sin backend configurado (o si falla), la pista queda SIN
- *      audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s.
+ *      audio COMPLETO a un backend de yt-dlp, elegido por env:
+ *        · `YATTEE_URL` (+ `YATTEE_AUTH` "user:pass"): yattee-server, el
+ *          backend del servidor de producción: busca (`/api/v1/search`),
+ *          extrae con `player-client=web_embedded` y devuelve un stream
+ *          FIRMADO de su relay (`/proxy/relay`, con Range y vencimiento);
+ *        · `YT_DLP_BACKEND_URL`: el backend local `scripts/backend-yt-dlp.mjs`.
+ *      Ambos proxyan el stream de googlevideo —el navegador nunca ve ese
+ *      dominio, y el backend elude el binding de IP—. Sin backend configurado
+ *      (o si falla), la pista queda SIN audio y la interfaz lo avisa: nunca se
+ *      sirve un adelanto de 30 s.
  *
  * NOTA de alcance: los otros canales del backend (`arcod`, `espejos`) viven de
  * pools de cuentas de terceros que hoy están vacíos/baneados (ver
@@ -309,30 +312,145 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
   return null;
 }
 
-/* ── Canal YouTube (backend local de yt-dlp) ─────────────────────── */
+/* ── Canal YouTube (yattee-server o backend local de yt-dlp) ─────── */
 
 /**
- * Backend local de yt-dlp (`scripts/backend-yt-dlp.mjs`), habilitado con la env
- * `YT_DLP_BACKEND_URL` (p.ej. `http://127.0.0.1:8787`). Sin esa env el canal no
- * existe: un despliegue sin el binario no cambia de comportamiento y las pistas
- * que el FLAC no resuelve quedan simplemente sin audio.
+ * Dos backends equivalentes, elegidos por env. La lectura es PEREZOSO a
+ * propósito: en Cloudflare Pages el worker siembra `process.env` recién en el
+ * primer fetch (`sembrarEnv` de `scripts/cloudflare-worker.mjs` — el polyfill
+ * de process llega vacío), así que un `const` de módulo nunca vería las envs.
+ *
+ *   · `YATTEE_URL` + `YATTEE_AUTH` ("user:pass"): yattee-server, backend del
+ *     servidor de producción (búsqueda `/api/v1/search`, extracción con
+ *     `player-client=web_embedded` y stream firmado de SU relay con Range).
+ *   · `YT_DLP_BACKEND_URL`: backend local de desarrollo
+ *     (`scripts/backend-yt-dlp.mjs`, ruta `/resolver`).
+ *
+ * Sin ninguna de las dos el canal no existe: un despliegue sin backend no cambia
+ * de comportamiento y las pistas que el FLAC no resuelve quedan sin audio.
  */
-const YT_BACKEND_URL = (process.env.YT_DLP_BACKEND_URL ?? "").replace(/\/+$/, "");
+function configYouTube(): { yattee: string; auth: string; local: string } {
+  return {
+    yattee: (process.env.YATTEE_URL ?? "").replace(/\/+$/, ""),
+    auth: process.env.YATTEE_AUTH ?? "",
+    local: (process.env.YT_DLP_BACKEND_URL ?? "").replace(/\/+$/, ""),
+  };
+}
+
 // Techo GENEROSO a propósito: una búsqueda fría de yt-dlp tarda ~15-20 s
 // (boot + extracción + resolución de URL) y abortar antes devuelve "sin audio"
 // aunque el backend iba a resolver. Las repeticiones entran en la caché del
-// backend (10 min) y el segundo intento es instantáneo.
+// backend y el segundo intento es instantáneo.
 const TIMEOUT_YT_RESOLVER_MS = 30_000;
+const TIMEOUT_YT_BUSQUEDA_MS = 15_000;
+/** El relay de yattee firma con 6 h de vida: 1 h de caché queda holgado. */
 const TTL_YT_ENLACE_MS = 60 * 60 * 1000;
+/** Mismo margen de duración del backend local: ±40 s sobre el catálogo. */
+const MARGEN_DURACION_YT_S = 40;
+const DURACION_MINIMA_YT_S = 60;
+/** Canciones, no sesiones en vivo ni mixes: 20 minutos es un techo generoso. */
+const DURACION_MAXIMA_YT_S = 20 * 60;
+
+type ResultadoBusquedaYattee = {
+  videoId?: string;
+  title?: string;
+  author?: string;
+  lengthSeconds?: number;
+  liveNow?: boolean;
+  videoThumbnails?: Array<{ quality?: string; url?: string }>;
+};
+
+type VideoYattee = {
+  videoId?: string;
+  lengthSeconds?: number;
+  adaptiveFormats?: Array<{ itag?: number | string; type?: string; bitrate?: number; url?: string }>;
+};
+
+/** GET JSON contra yattee con auth básica. Nunca lanza: `null` es "falló". */
+async function pedirYattee<T>(
+  cfg: { yattee: string; auth: string },
+  ruta: string,
+  ms: number,
+): Promise<T | null> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), ms);
+  try {
+    const encabezados: Record<string, string> = { Accept: "application/json" };
+    if (cfg.auth) encabezados.Authorization = `Basic ${btoa(cfg.auth)}`;
+    const res = await fetch(`${cfg.yattee}${ruta}`, { signal: control.signal, headers: encabezados });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
 
 /**
- * Pide el audio COMPLETO al backend local. El backend busca en YouTube
+ * Pide el audio COMPLETO a yattee: busca la pista, elige el resultado cuya
+ * duración coincide (±40 s, como el backend local) y devuelve el mejor formato
+ * de AUDIO de su relay firmado (`proxy=true&proxy_mode=relay`): el navegador
+ * reproduce del backend con Range, nunca de googlevideo —que amarra la URL a la
+ * IP que la pidió.
+ */
+async function rescatarEnYattee(
+  p: PeticionAudio,
+  cfg: { yattee: string; auth: string },
+): Promise<{ stream: string; duracion: number } | null> {
+  const consulta = `${p.titulo} ${p.artista}`.replace(/\s+/g, " ").trim();
+  if (!consulta) return null;
+  const inicio = Date.now();
+
+  const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
+    cfg,
+    `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
+    TIMEOUT_YT_BUSQUEDA_MS,
+  );
+  const candidatos = (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
+  if (candidatos.length === 0) return null;
+
+  const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
+  const porDuracion =
+    objetivo > 0
+      ? candidatos.find((c) => {
+          const dur = Number(c.lengthSeconds ?? 0);
+          return dur > 0 && Math.abs(dur - objetivo) <= MARGEN_DURACION_YT_S;
+        })
+      : undefined;
+  const elegida = porDuracion ?? candidatos.find((c) => Number(c.lengthSeconds ?? 0) > 0) ?? candidatos[0];
+
+  const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
+  if (restante < 3_000) return null;
+  const video = await pedirYattee<VideoYattee>(
+    cfg,
+    `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
+    restante,
+  );
+  const formatos = (video?.adaptiveFormats ?? []).filter((f) => f.url && (f.type ?? "").startsWith("audio/"));
+  if (formatos.length === 0) return null;
+  // `audio/m4a` (AAC) lo reproducen todos los navegadores; si no está, el mejor
+  // que haya (opus en webm).
+  const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
+  const mejor = (universales.length ? universales : formatos)
+    .slice()
+    .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+  const duracion = Math.max(0, Math.round(Number(video?.lengthSeconds ?? elegida.lengthSeconds ?? 0)));
+  return { stream: new URL(String(mejor.url), cfg.yattee).toString(), duracion };
+}
+
+/**
+ * Pide el audio COMPLETO al backend elegido. El backend local busca en YouTube
  * (`yt-dlp`, cliente `web_embedded`), elige el resultado cuya duración coincide
- * y devuelve la ruta de su PROXY (`/audio/<token>`): el navegador reproduce del
- * backend, nunca de googlevideo —que además amarra la URL a la IP que la pidió.
+ * y devuelve la ruta de su PROXY (`/audio/<token>`); yattee devuelve el stream
+ * firmado de su relay. En ambos casos el navegador reproduce del backend,
+ * nunca de googlevideo.
  */
 async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
-  if (!YT_BACKEND_URL) return null;
+  const cfg = configYouTube();
+  if (cfg.yattee) return rescatarEnYattee(p, cfg);
+  if (!cfg.local) return null;
+  const YT_BACKEND_URL = cfg.local;
   const consulta = new URLSearchParams({
     titulo: (p.titulo ?? "").trim(),
     artista: (p.artista ?? "").trim(),
@@ -357,18 +475,51 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
   }
 }
 
-/** Búsqueda de catálogo en el backend local (YouTube como último respaldo). */
-const TIMEOUT_YT_BUSQUEDA_MS = 15_000;
-
 /**
  * Cuando ni la extensión ni el respaldo de Deezer tienen la canción (folklore
- * de nicho, re-subidos), el backend local la busca en YouTube. Los resultados
- * no traen ISRC, pero el rescate de audio igual funciona: el MISMO backend
+ * de nicho, re-subidos), el backend la busca en YouTube. Los resultados no
+ * traen ISRC, pero el rescate de audio igual funciona: el MISMO backend
  * resuelve la pista por título+artista cuando se la piden.
  */
 export async function buscarYouTubeBackend(consulta: string, limite: number): Promise<Item[] | null> {
-  if (!YT_BACKEND_URL) return null;
-  const qs = new URLSearchParams({ consulta, limite: String(Math.max(1, Math.min(24, limite))) });
+  const cfg = configYouTube();
+  const tope = Math.max(1, Math.min(24, limite));
+
+  if (cfg.yattee) {
+    const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
+      cfg,
+      `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
+      TIMEOUT_YT_BUSQUEDA_MS,
+    );
+    if (!Array.isArray(resultados)) return null;
+    return resultados
+      .filter((r) => {
+        const dur = Number(r.lengthSeconds ?? 0);
+        return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
+      })
+      .slice(0, tope)
+      .map((r) => {
+        const id = String(r.videoId ?? "");
+        const miniaturas = r.videoThumbnails ?? [];
+        return {
+          id,
+          tipo: "track" as const,
+          titulo: r.title ?? "",
+          artista: r.author ?? "",
+          album: "",
+          caratula:
+            miniaturas.find((t) => t.quality === "high")?.url ??
+            miniaturas[miniaturas.length - 1]?.url ??
+            `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+          duracionMs: Math.max(0, Math.round(Number(r.lengthSeconds ?? 0) * 1000)),
+          isrc: null,
+        };
+      });
+  }
+
+  if (!cfg.local) return null;
+  const YT_BACKEND_URL = cfg.local;
+  const qs = new URLSearchParams({ consulta, limite: String(tope) });
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), TIMEOUT_YT_BUSQUEDA_MS);
   try {
