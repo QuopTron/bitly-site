@@ -15,7 +15,7 @@
  * marca "usado" sigue siendo la app.
  *
  * El token de GitHub se lee de una variable de entorno SOLO en el servidor
- * (mismo patrón que `integrations/supabase/client.ts` usa con SUPABASE_*), por
+ * (mismo patrón que `src/server/github-store.ts` usa con BITLY_DATA_TOKEN), por
  * eso esto va dentro de `createServerFn`: nunca viaja al cliente.
  */
 

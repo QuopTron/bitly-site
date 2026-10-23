@@ -79,11 +79,11 @@ function sembrarEnv(env) {
 }
 ```
 
-Sin esto las `SUPABASE_*` y el `BITLY_CODES_TOKEN` no llegan al SSR: la búsqueda
-funciona (no las usa) pero el canje de códigos responde "no pudimos verificar"
-y el SSR de Supabase queda sin credenciales. Nota: `process` **sólo existe** con
-`nodejs_compat`, y `process.env` sólo se puebla desde `env` con una
-`compatibility_date` reciente — con `2024-09-23` venía vacío.
+Sin esto las `BITLY_DATA_TOKEN` y el `BITLY_CODES_TOKEN` no llegan al SSR: la
+búsqueda funciona (no las usa) pero el canje de códigos responde "no pudimos
+verificar" y el sitio no puede leer ni escribir `bitly-data`. Nota: `process`
+**sólo existe** con `nodejs_compat`, y `process.env` sólo se puebla desde `env`
+con una `compatibility_date` reciente — con `2024-09-23` venía vacío.
 
 Verificado en local con el runtime real:
 
@@ -104,7 +104,8 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | Variable | Para qué |
 | --- | --- |
 | `BITLY_CODES_TOKEN` | **Obligatoria** para el canje de códigos Premium: token de GitHub con lectura al repo privado `QuopTron/bitly_codes_premium`. Sin ella el canje responde "no pudimos verificar". |
-| `VITE_SUPABASE_*`, `SUPABASE_*` | Las que ya usa el sitio. |
+| `BITLY_DATA_TOKEN` | **Obligatoria** para la base de datos del sitio: token de GitHub con `contents: write` sobre `QuopTron/bitly-data` (opiniones, vistas y contadores de descargas). Si falta, se usa `BITLY_CODES_TOKEN` como respaldo. |
+| `BITLY_DATA_REPO`, `BITLY_CHATS_REPO` | Opcionales: cambian el repo de datos o el de chats (`QuopTron/bitly-data` y `QuopTron/bitly-chats` por defecto). |
 
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
 `BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).

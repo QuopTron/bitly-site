@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
@@ -80,10 +81,10 @@ function MarcoTv({ src, alt, w, h }: { src: string; alt: string; w?: number; h?:
 /* ───────────────────────── Galería ───────────────────────── */
 
 const ANCHOS: Record<TipoMarco, string> = {
-  telefono: "w-[188px] sm:w-[200px]",
-  ventana: "w-[290px] sm:w-[360px] lg:w-[400px]",
-  plano: "w-[290px] sm:w-[340px] lg:w-[380px]",
-  tv: "w-[290px] sm:w-[420px] lg:w-[540px]",
+  telefono: "w-[146px] sm:w-[166px]",
+  ventana: "w-[250px] sm:w-[310px]",
+  plano: "w-[240px] sm:w-[290px]",
+  tv: "w-[260px] sm:w-[340px]",
 };
 
 function Marco({ tipo, captura, url }: { tipo: TipoMarco; captura: Captura; url?: string }) {
@@ -129,7 +130,7 @@ function Lente({
     };
   }, [onClose, onMove]);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-3 bg-black/85 p-4 backdrop-blur-sm sm:p-8"
       onClick={onClose}
@@ -185,13 +186,14 @@ function Lente({
           {indice + 1} / {capturas.length}
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 /**
- * Cinta de capturas: carrusel con deslizamiento en el celular y filas
- * centradas con ajuste automático desde tablet en adelante.
+ * Galería de capturas: una tira con deslizamiento táctil y flechas en
+ * escritorio. La leyenda muestra sólo la captura enfocada para no comer alto.
  */
 export default function Gallery({
   capturas,
@@ -203,26 +205,69 @@ export default function Gallery({
   url?: string;
 }) {
   const t = useI18n();
+  const caja = useRef<HTMLDivElement | null>(null);
   const [ampliada, setAmpliada] = useState<number | null>(null);
+  const [indice, setIndice] = useState(0);
+  const actual = capturas[indice] ?? capturas[0];
 
   const mover = useCallback(
     (delta: number) => setAmpliada((i) => (i === null ? i : (i + delta + capturas.length) % capturas.length)),
     [capturas.length],
   );
 
+  const irA = (delta: number) => {
+    const el = caja.current;
+    const primera = el?.children[0] as HTMLElement | undefined;
+    const segunda = el?.children[1] as HTMLElement | undefined;
+    if (!el || !primera || !segunda) return;
+    const paso = segunda.offsetLeft - primera.offsetLeft;
+    if (paso <= 0) return;
+    const maximo = el.scrollWidth - el.clientWidth;
+    if (delta > 0 && el.scrollLeft >= maximo - 2) {
+      el.scrollTo({ left: 0, behavior: "smooth" });
+    } else if (delta < 0 && el.scrollLeft <= 2) {
+      el.scrollTo({ left: maximo, behavior: "smooth" });
+    } else {
+      el.scrollBy({ left: delta * paso, behavior: "smooth" });
+    }
+  };
+
+  const alDeslizar = () => {
+    const el = caja.current;
+    if (!el) return;
+    const borde = el.getBoundingClientRect().left;
+    const referencia = el.scrollLeft + 16;
+    let mejor = 0;
+    let distancia = Number.POSITIVE_INFINITY;
+    [...el.children].forEach((hijo, i) => {
+      const x = (hijo as HTMLElement).getBoundingClientRect().left - borde + el.scrollLeft;
+      const d = Math.abs(x - referencia);
+      if (d < distancia) {
+        distancia = d;
+        mejor = i;
+      }
+    });
+    setIndice(mejor);
+  };
+
   return (
     <>
-      <div className="relative">
+      <div data-tipo={tipo} className="galeria-capturas relative">
         <div
-          className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] sm:gap-4 [&::-webkit-scrollbar]:hidden md:flex-wrap md:justify-center md:overflow-visible md:snap-none"
+          ref={caja}
+          onScroll={alDeslizar}
+          className="nav-scroll flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1 pt-1 [scrollbar-width:none] sm:gap-4 [&::-webkit-scrollbar]:hidden"
         >
           {capturas.map((captura, i) => (
-            <figure key={captura.src} className={`shrink-0 snap-center ${ANCHOS[tipo]}`}>
+            <figure
+              key={captura.src}
+              className={`shrink-0 snap-center ${ANCHOS[tipo]} transition-transform duration-300 odd:-rotate-1 even:rotate-1 hover:rotate-0`}
+            >
               <button
                 type="button"
                 onClick={() => setAmpliada(i)}
                 className="group relative block w-full rounded-xl text-left transition-transform duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-                aria-label={`${captura.titulo} — ${t("installGalleryHint")}`}
+                aria-label={`${captura.titulo} - ${t("installGalleryHint")}`}
               >
                 <Marco tipo={tipo} captura={captura} url={url} />
                 <span className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
@@ -232,26 +277,50 @@ export default function Gallery({
                   </span>
                 </span>
               </button>
-
-              <figcaption className="mt-2.5 flex gap-2">
-                <span className="mt-[1px] flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-                  {i + 1}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-[12px] font-semibold leading-snug text-foreground">{captura.titulo}</span>
-                  {captura.pie && (
-                    <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{captura.pie}</span>
-                  )}
-                </span>
-              </figcaption>
             </figure>
           ))}
         </div>
 
         {capturas.length > 1 && (
-          <p className="mt-2 text-center text-xs text-muted-foreground md:hidden">{t("installSwipe")}</p>
+          <>
+            <button
+              type="button"
+              onClick={() => irA(-1)}
+              aria-label={t("installPrev")}
+              className="absolute left-0 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-background/80 text-foreground shadow-lg shadow-black/30 backdrop-blur transition hover:border-primary/40 hover:bg-background sm:flex"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => irA(1)}
+              aria-label={t("installNext")}
+              className="absolute right-0 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-background/80 text-foreground shadow-lg shadow-black/30 backdrop-blur transition hover:border-primary/40 hover:bg-background sm:flex"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </>
         )}
       </div>
+
+      <div className="galeria-pie mt-2 flex items-start gap-2">
+        <span className="mancha mt-[1px] flex h-5 w-5 flex-shrink-0 items-center justify-center bg-primary/15 text-[0.65rem] font-bold text-primary">
+          {indice + 1}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-semibold leading-snug text-foreground">{actual.titulo}</span>
+          {actual.pie && (
+            <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{actual.pie}</span>
+          )}
+        </span>
+        <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-muted-foreground/70">
+          {indice + 1}/{capturas.length}
+        </span>
+      </div>
+
+      {capturas.length > 1 && (
+        <p className="mt-1 text-center text-[10px] text-muted-foreground sm:hidden">{t("installSwipe")}</p>
+      )}
 
       {ampliada !== null && (
         <Lente

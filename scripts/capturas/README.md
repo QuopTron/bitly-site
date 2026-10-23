@@ -87,7 +87,20 @@ Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory='dis
 class S(socketserver.ThreadingTCPServer): allow_reuse_address = True
 S(('127.0.0.1', 4322), Handler).serve_forever()"
 
-# en otra terminal: el backend real sólo acepta el origen del sitio publicado,
-# así que se simulan sus respuestas para poder medir la sección en local
-STUB_SIN_BACKEND=1 SITIO_URL=http://127.0.0.1:4322/ node scripts/capturas/capturar.mjs revision
+# en otra terminal
+SITIO_URL=http://127.0.0.1:4322/ node scripts/capturas/capturar.mjs revision
 ```
+
+El backend (GitHub vía el Worker) sólo responde si el `BITLY_CODES_TOKEN` llega al runtime.
+Un servidor estático no lo tiene, así que para medir con datos reales usá `pnpm dev`, que lee
+`process.env` del `.env` en Node:
+
+```bash
+pnpm dev   # http://localhost:3000, server functions incluidas
+
+# en otra terminal
+node scripts/capturas/capturar.mjs revision
+```
+
+Antes había un `STUB_SIN_BACKEND=1` que simulaba las respuestas: existía porque el backend
+viejo sólo aceptaba el origen publicado. Con GitHub ya no hace falta.

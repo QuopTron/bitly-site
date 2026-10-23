@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * Verifica el flujo REAL de opiniones y vistas contra Supabase.
+ * Verifica el flujo REAL de opiniones y vistas contra GitHub.
  *
  * Los `probar-*.mjs` prueban las reglas y el servidor sin base; este hace lo que
  * ninguno puede: abre el sitio en Chrome, publica una opinión de verdad y
- * comprueba que la fila quede en Supabase, que el promedio y el reparto suban, y
- * que el contador de vistas avance. Al terminar borra la fila de prueba, así
- * que se puede correr las veces que haga falta sin ensuciar la tabla.
+ * comprueba que el archivo quede en el repo, que el promedio y el reparto suban,
+ * y que el contador de vistas avance. Al terminar borra la fila de prueba, así
+ * que se puede correr las veces que haga falta sin ensuciar el archivo.
  *
- * Necesita la migración `supabase-migrations-opiniones.sql` aplicada y la clave
- * secreta para poder limpiar (el público no puede borrar, a propósito).
+ * La base es el repo privado `QuopTron/bitly-data` (Contents API). Hace falta un
+ * token con permiso `contents: write` para poder limpiar.
  *
- *   . ./.env                       # SUPABASE_URL y SUPABASE_SECRET_KEY
+ *   . ./.env                       # BITLY_CODES_TOKEN (o BITLY_DATA_TOKEN)
  *   DEMO_URL=http://localhost:3100 node scripts/verificar-opiniones-reales.mjs
  *   pnpm dev                       # en otra terminal, si no usás DEMO_URL
  */
@@ -25,9 +25,10 @@ const BASE = process.env.DEMO_URL ?? "http://localhost:3000";
 const PUERTO = Number(process.env.CDP_PORT ?? 9348);
 const PERFIL = path.join(raiz, ".capturas-perfil-opiniones");
 
-const URL_BASE = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-const CLAVE_PUBLICA = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const CLAVE_SECRETA = process.env.SUPABASE_SECRET_KEY;
+const API = "https://api.github.com";
+const REPO = process.env.BITLY_DATA_REPO ?? "QuopTron/bitly-data";
+const TOKEN = process.env.BITLY_DATA_TOKEN ?? process.env.BITLY_CODES_TOKEN;
+const RAMA = "main";
 
 const NOMBRE_PRUEBA = "Prueba Automática";
 const TEXTO_PRUEBA = "Opinión de prueba automática: esta fila se borra sola al terminar.";
@@ -55,51 +56,90 @@ async function esperar(ses, expr, { tiempo = 25000, nombre = expr, cada = 150 } 
   throw new Error(`Timeout esperando: ${nombre}`);
 }
 
-/** Lee el resumen directo de Supabase (lectura pública, sin el sitio de por medio). */
+async function gh(ruta, init = {}) {
+  const r = await fetch(`${API}${ruta}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "bitly-qa",
+      ...(init.headers ?? {}),
+    },
+  });
+  return r;
+}
+
+/** Lee un JSON del repo por la Contents API (raw, sin base64). */
+async function leerArchivo(ruta, defecto) {
+  const r = await gh(`/repos/${REPO}/contents/${ruta}?ref=${RAMA}`, {
+    headers: { Accept: "application/vnd.github.raw+json" },
+  });
+  if (!r.ok) return defecto;
+  try {
+    return JSON.parse(await r.text());
+  } catch {
+    return defecto;
+  }
+}
+
+/** Escribe un JSON en el repo (create o update), como hace el sitio. */
+async function escribirArchivo(ruta, valor, mensaje) {
+  const contenido = Buffer.from(JSON.stringify(valor, null, 2) + "\n", "utf8").toString("base64");
+  const shaDe = async () => {
+    const r = await gh(`/repos/${REPO}/contents/${ruta}?ref=${RAMA}`);
+    return r.ok ? (await r.json())?.sha : undefined;
+  };
+  const mandar = async (sha) =>
+    gh(`/repos/${REPO}/contents/${ruta}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: mensaje, content: contenido, branch: RAMA, ...(sha ? { sha } : {}) }),
+    });
+
+  let sha = await shaDe();
+  let r = await mandar(sha);
+  if (r.status === 409 || (r.status === 422 && !sha)) {
+    sha = await shaDe();
+    r = await mandar(sha);
+  }
+  return r.ok;
+}
+
+/** El mismo resumen que arma `src/server/datos.ts`, calculado del JSON crudo. */
 async function resumen() {
-  const r = await fetch(`${URL_BASE}/rest/v1/rpc/resumen_sitio`, {
-    method: "POST",
-    headers: {
-      apikey: CLAVE_PUBLICA,
-      Authorization: `Bearer ${CLAVE_PUBLICA}`,
-      "Content-Type": "application/json",
-    },
-    body: "{}",
-  });
-  const filas = await r.json();
-  return Array.isArray(filas) ? filas[0] : null;
+  const [registro, opiniones] = await Promise.all([
+    leerArchivo("data/vistas.json", { visitas: 0 }),
+    leerArchivo("data/opiniones.json", []),
+  ]);
+  const lista = Array.isArray(opiniones) ? opiniones : [];
+  const estrellas = lista.map((o) => Number(o.estrellas) || 0).filter((n) => n > 0);
+  const reparto = [1, 2, 3, 4, 5].map((n) => estrellas.filter((e) => e === n).length);
+  return {
+    vistas: Number(registro.visitas) || 0,
+    opiniones: lista.length,
+    promedio: estrellas.length ? (estrellas.reduce((a, b) => a + b, 0) / estrellas.length).toFixed(1) : "0.0",
+    reparto,
+  };
 }
 
-/** Borra la fila de prueba. La clave secreta salta RLS; el público no puede. */
+/** Borra la fila de prueba del archivo. */
 async function limpiar() {
-  if (!CLAVE_SECRETA) return "sin-clave-secreta";
-  const r = await fetch(`${URL_BASE}/rest/v1/comentarios?nombre=eq.${encodeURIComponent(NOMBRE_PRUEBA)}`, {
-    method: "DELETE",
-    headers: {
-      apikey: CLAVE_SECRETA,
-      Authorization: `Bearer ${CLAVE_SECRETA}`,
-      Prefer: "return=representation",
-    },
-  });
-  if (!r.ok) return `error ${r.status}`;
-  const borradas = await r.json();
-  return `borradas ${Array.isArray(borradas) ? borradas.length : "?"}`;
+  const lista = await leerArchivo("data/opiniones.json", []);
+  const antes = Array.isArray(lista) ? lista.length : 0;
+  const resto = (Array.isArray(lista) ? lista : []).filter((o) => o.nombre !== NOMBRE_PRUEBA);
+  if (resto.length === antes) return "sin fila de prueba";
+  const okBorrado = await escribirArchivo("data/opiniones.json", resto, "qa: limpiar opinión de prueba");
+  return okBorrado ? `borradas ${antes - resto.length}` : "error de escritura";
 }
 
-if (!URL_BASE || !CLAVE_PUBLICA) {
-  console.error("Faltan SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY (¿olvidaste `. ./.env`?).");
+if (!TOKEN) {
+  console.error("Falta BITLY_CODES_TOKEN (¿olvidaste `. ./.env`?).");
   process.exit(1);
 }
 
 const antes = await resumen();
-if (!antes) {
-  console.error(
-    "`resumen_sitio` no responde: la migración no está aplicada.\n" +
-      "Corré `supabase-migrations-opiniones.sql` en Supabase → SQL Editor.",
-  );
-  process.exit(1);
-}
-console.log(`Antes: ${JSON.stringify(antes)}`);
+console.log(`Antes: ${JSON.stringify(antes)}  (${REPO})`);
 
 const { browser, cerrar } = await abrirChrome({ puerto: PUERTO, perfil: PERFIL });
 const ses = await nuevaSesion(browser, { w: 1100, h: 1000, dpr: 1 });
@@ -168,8 +208,6 @@ try {
   );
 
   // ── 3. Lo que se ve en pantalla ──
-  // Las cifras suben contando: hay que dejarlas asentar antes de mirarlas, o
-  // se lee un valor intermedio (p. ej. 1 cuando ya son 2) y parece un error.
   const esperado = { vistas: conVista.vistas, opiniones: (antes.opiniones ?? 0) + 1 };
   await esperar(
     ses,
@@ -214,10 +252,13 @@ try {
   );
 
   // ── 4. Lo que quedó guardado de verdad ──
+  // La lectura pasa por la caché de 30 s del Worker: hay que darle tiempo a
+  // que expire, o se compara contra el JSON viejo.
+  await dormir(32000);
   const fin = await resumen();
   console.log("después (base):", JSON.stringify(fin));
   check(
-    "la opinión se guardó en Supabase",
+    "la opinión se guardó en el repo",
     (fin?.opiniones ?? 0) === (antes.opiniones ?? 0) + 1,
     `${antes.opiniones} → ${fin?.opiniones}`,
   );
@@ -229,8 +270,6 @@ try {
   );
 
   // ── 4b. Recargar la misma sesión no vuelve a contar la visita ──
-  // El contador guarda una marca por sesión: si esto se rompiera, recargar la
-  // página inflaría el número sin parar.
   await ses.ev("Page.navigate", { url: `${BASE}/#opiniones` });
   await esperar(ses, `document.querySelector("#opiniones form")`, { nombre: "la sección volvió a montar" });
   await dormir(2000);
@@ -241,22 +280,17 @@ try {
     `${fin?.vistas} → ${trasRecarga?.vistas}`,
   );
 
-  // ── 5. El público sigue sin poder escribir directo ──
-  const hackeo = await fetch(`${URL_BASE}/rest/v1/comentarios`, {
-    method: "POST",
-    headers: {
-      apikey: CLAVE_PUBLICA,
-      Authorization: `Bearer ${CLAVE_PUBLICA}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ nombre: "hack", estrellas: 5, texto: "basura" }),
+  // ── 5. Sin el token no se puede escribir directo ──
+  // Antes lo probaba la clave pública de Supabase. Ahora lo que protege el
+  // archivo es que no hay endpoint abierto: la Contents API exige un token.
+  const sinToken = await fetch(`${API}/repos/${REPO}/contents/qa-no-debe-existir.json`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "User-Agent": "bitly-qa" },
+    body: JSON.stringify({ message: "qa", content: "eA==", branch: RAMA }),
   });
-  check("insertar con la clave pública sigue bloqueado", !hackeo.ok, `status=${hackeo.status}`);
+  check("escribir sin token sigue bloqueado", !sinToken.ok, `status=${sinToken.status}`);
 
   // ── 6. La visita se cuenta AL ENTRAR, sin la sección de opiniones ──
-  // Una pestaña nueva = sesión nueva. Se entra a una ruta que no existe (404):
-  // ahí no hay sección de opiniones, así que si el contador sube es porque se
-  // dispara al arrancar el sitio (`src/routes/__root.tsx`) y no desde la sección.
   const antes404 = await resumen();
   const ses2 = await nuevaSesion(browser, { w: 900, h: 700, dpr: 1 });
   try {

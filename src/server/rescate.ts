@@ -59,6 +59,7 @@ import {
   bestOriginalAlbumDuracion,
   esISRCValido,
   esProveedorAutoritativoISRC,
+  fieldScore,
   normalizarISRC,
   preferirISRC,
   sinCreditosParenteticos,
@@ -99,6 +100,11 @@ type Enlace = { url: string; duracion: number; canal: "stash-relay" | "youtube";
 
 const enlaces = new Map<string, Enlace>();
 const MAX_ENLACES = 400;
+/** Single-flight: dos clics seguidos sobre la misma pista comparten la misma
+ *  resolución (idea tomada de monochrome: pendingRequests por clave). No se
+ *  cachean los FALLOS: un corte del relay o de YouTube es transitorio y el
+ *  siguiente clic debe poder reintentar de inmediato. */
+const enVuelo = new Map<string, Promise<AudioResuelto | null>>();
 
 function claveDe(p: PeticionAudio): string {
   return [p.titulo, p.artista, p.album ?? "", p.duracionMs ?? 0, p.isrc ?? "", p.ext ?? ""]
@@ -106,7 +112,15 @@ function claveDe(p: PeticionAudio): string {
     .toLowerCase();
 }
 
-function guardarEnlace(clave: string, e: Enlace) {
+/** Claves equivalentes: la exacta y, si hay ISRC, una canónica por código. */
+function clavesDe(p: PeticionAudio): string[] {
+  const claves = [claveDe(p)];
+  const isrc = normalizarISRC(p.isrc);
+  if (isrc) claves.push(`isrc:${isrc}`);
+  return claves;
+}
+
+function guardarEnlace(claves: string[], e: Enlace) {
   if (enlaces.size >= MAX_ENLACES) {
     // Poda simple: se van los vencidos y, si no alcanza, el más viejo.
     const ahora = Date.now();
@@ -125,8 +139,18 @@ function guardarEnlace(clave: string, e: Enlace) {
       if (vieja) enlaces.delete(vieja);
     }
   }
-  enlaces.set(clave, e);
+  for (const clave of claves) enlaces.set(clave, e);
 }
+
+function enlaceCacheado(claves: string[]): Enlace | null {
+  const ahora = Date.now();
+  for (const clave of claves) {
+    const e = enlaces.get(clave);
+    if (e && e.expira > ahora) return e;
+  }
+  return null;
+}
+
 
 /* ── Canal stash-relay (provider/flacrescue/stash_relay.go) ──────── */
 
@@ -137,8 +161,8 @@ const TTL_CONFIG_MS = 6 * 60 * 60 * 1000;
 const TTL_ENLACE_MAX_MS = 45 * 60 * 1000;
 const TTL_ENLACE_MIN_MS = 60 * 1000;
 const MARGEN_ENLACE_MS = 5 * 60 * 1000;
-const TIMEOUT_MINT_MS = 8_000;
-const TIMEOUT_CONFIG_MS = 6_000;
+const TIMEOUT_MINT_MS = 5_000;
+const TIMEOUT_CONFIG_MS = 5_000;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -169,8 +193,9 @@ async function firmarStash(claveTexto: string, trackId: string, formatId: string
   return bytesAHex(await crypto.subtle.sign("HMAC", clave, mensaje));
 }
 
-async function traerConfigStash(forzar = false): Promise<RelayStash | null> {
-  if (!forzar && configCache && configCache.expira > Date.now()) return configCache.valor;
+let configEnVuelo: Promise<RelayStash | null> | null = null;
+
+async function descargarConfigStash(): Promise<RelayStash | null> {
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), TIMEOUT_CONFIG_MS);
   try {
@@ -194,6 +219,20 @@ async function traerConfigStash(forzar = false): Promise<RelayStash | null> {
   } finally {
     clearTimeout(reloj);
   }
+}
+
+async function traerConfigStash(forzar = false): Promise<RelayStash | null> {
+  if (!forzar && configCache && configCache.expira > Date.now()) return configCache.valor;
+  // Varias pistas a la vez comparten una sola descarga de la config.
+  if (!forzar && configEnVuelo) return configEnVuelo;
+  const tarea = descargarConfigStash();
+  if (!forzar) {
+    configEnVuelo = tarea;
+    void tarea.finally(() => {
+      if (configEnVuelo === tarea) configEnVuelo = null;
+    });
+  }
+  return tarea;
 }
 
 /** Deriva el TTL del enlace de su propio `etsp` (segundos unix). */
@@ -220,7 +259,7 @@ const ESPERA_BUSY_MS = [400, 800, 1600];
  * cualquier precio: la demo no puede quedarse 20 s esperando al relay mientras
  * el usuario mira un spinner. Al agotarse, se pasa al canal de YouTube.
  */
-const PRESUPUESTO_MINT_MS = 7_000;
+const PRESUPUESTO_MINT_MS = 5_500;
 
 function dormir(ms: number): Promise<void> {
   return new Promise((ok) => setTimeout(ok, ms));
@@ -235,15 +274,23 @@ function esperaDeBusy(res: Response, intento: number): number {
 
 type Mint = { url: string; bitDepth: number; sampleRate: number; ttl: number };
 
-async function mintearEn(base: string, clave: string, trackId: string, limite: number): Promise<Mint | null> {
+async function mintearEn(
+  base: string,
+  clave: string,
+  trackId: string,
+  limite: number,
+  senal?: AbortSignal,
+): Promise<Mint | null> {
   const url = `${base}/v1/qobuz/file?track_id=${encodeURIComponent(trackId)}&format_id=${FORMATO_FLAC}`;
 
   for (let intento = 0; intento <= REINTENTOS_BUSY; intento++) {
-    if (Date.now() >= limite) return null;
+    if (senal?.aborted || Date.now() >= limite) return null;
     const ts = Math.floor(Date.now() / 1000);
     const firma = await firmarStash(clave, trackId, FORMATO_FLAC, ts);
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), Math.min(TIMEOUT_MINT_MS, Math.max(1000, limite - Date.now())));
+    const alCancelar = () => control.abort();
+    senal?.addEventListener("abort", alCancelar, { once: true });
     try {
       const res = await fetch(url, {
         signal: control.signal,
@@ -259,7 +306,8 @@ async function mintearEn(base: string, clave: string, trackId: string, limite: n
           "X-Stash-Purpose": "stream",
         },
       });
-      if (res.status === 429 || res.status === 503) {
+      // 502/504 también son transitorios (misma política que monochrome).
+      if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
         const espera = esperaDeBusy(res, intento);
         if (intento < REINTENTOS_BUSY && Date.now() + espera < limite) {
           await dormir(espera);
@@ -291,19 +339,36 @@ async function mintearEn(base: string, clave: string, trackId: string, limite: n
       return null;
     } finally {
       clearTimeout(reloj);
+      senal?.removeEventListener("abort", alCancelar);
     }
   }
   return null;
 }
 
-/** Pide el FLAC de [trackId] probando las bases del relay en orden de prioridad. */
+/**
+ * Pide el FLAC de [trackId] probando las bases del relay con *hedged requests*:
+ * la primera arranca ya y las siguientes a los 300 ms, así una base lenta no
+ * bloquea a una sana. La primera que responde gana y las demás se abortan.
+ */
 async function mintaStash(trackId: string): Promise<Mint | null> {
   const limite = Date.now() + PRESUPUESTO_MINT_MS;
   let config = await traerConfigStash();
   for (let intento = 0; intento < 2 && config; intento++) {
-    for (const base of config.bases) {
-      const mint = await mintearEn(base, config.clave, trackId, limite);
-      if (mint) return mint;
+    const control = new AbortController();
+    const corredores = config.bases.map((base, i) =>
+      dormir(i * 300).then(async () => {
+        if (control.signal.aborted) throw new Error("cancelado");
+        const mint = await mintearEn(base, config!.clave, trackId, limite, control.signal);
+        if (!mint) throw new Error("sin mint");
+        return mint;
+      }),
+    );
+    try {
+      const mint = await Promise.any(corredores);
+      control.abort();
+      return mint;
+    } catch {
+      control.abort();
     }
     if (Date.now() >= limite) return null;
     // La config puede traer una clave rotada: se recarga UNA vez.
@@ -372,19 +437,26 @@ async function pedirYattee<T>(
   ruta: string,
   ms: number,
 ): Promise<T | null> {
-  const control = new AbortController();
-  const reloj = setTimeout(() => control.abort(), ms);
-  try {
-    const encabezados: Record<string, string> = { Accept: "application/json" };
-    if (cfg.auth) encabezados.Authorization = `Basic ${btoa(cfg.auth)}`;
-    const res = await fetch(`${cfg.yattee}${ruta}`, { signal: control.signal, headers: encabezados });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(reloj);
+  const encabezados: Record<string, string> = { Accept: "application/json" };
+  if (cfg.auth) encabezados.Authorization = `Basic ${btoa(cfg.auth)}`;
+
+  // Un 502/504 del relay (o un corte de red) es transitorio: se reintenta una
+  // vez antes de declarar que la pista no está. Los 4xx no se reintentan.
+  for (let intento = 0; intento < 2; intento++) {
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), ms);
+    try {
+      const res = await fetch(`${cfg.yattee}${ruta}`, { signal: control.signal, headers: encabezados });
+      if (res.ok) return (await res.json()) as T;
+      if (res.status < 500 || intento === 1) return null;
+    } catch {
+      if (intento === 1) return null;
+    } finally {
+      clearTimeout(reloj);
+    }
+    await new Promise((r) => setTimeout(r, 300));
   }
+  return null;
 }
 
 /**
@@ -394,49 +466,98 @@ async function pedirYattee<T>(
  * reproduce del backend con Range, nunca de googlevideo —que amarra la URL a la
  * IP que la pidió.
  */
+function puntuarCandidatoYattee(
+  c: ResultadoBusquedaYattee,
+  p: PeticionAudio,
+  objetivo: number,
+): number {
+  // El título manda: YouTube devuelve covers, en vivo y "1 hour loop" para la
+  // misma búsqueda. El artista/canal es una señal más débil (muchos canales se
+  // llaman "Canserbero - Topic" o suben la canción con otro nombre).
+  let punto = fieldScore(p.titulo, c.title ?? "") * 100;
+  if (p.artista) punto += fieldScore(p.artista, c.author ?? "") * 35;
+  const dur = Number(c.lengthSeconds ?? 0);
+  if (objetivo > 0 && dur > 0) {
+    const dif = Math.abs(dur - objetivo);
+    if (dif <= 10) punto += 90;
+    else if (dif <= MARGEN_DURACION_YT_S) punto += 45;
+    else if (dif <= 90) punto += 10;
+    else punto -= Math.min(60, Math.round(dif / 3));
+  }
+  return punto;
+}
+
+async function buscarCandidatosYattee(
+  p: PeticionAudio,
+  cfg: { yattee: string; auth: string },
+): Promise<ResultadoBusquedaYattee[]> {
+  const consulta = `${p.titulo} ${p.artista}`.replace(/\s+/g, " ").trim();
+  if (!consulta) return [];
+
+  const pedir = async (q: string) => {
+    const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
+      cfg,
+      `/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
+      TIMEOUT_YT_BUSQUEDA_MS,
+    );
+    return (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
+  };
+
+  const candidatos = await pedir(consulta);
+  const mejorTitulo = candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
+  // Si el canal/artista ensució la búsqueda (re-subidos), el título solo suele
+  // encontrar la grabación. Se suman sin duplicar por videoId.
+  if (p.titulo && (candidatos.length === 0 || mejorTitulo < 2)) {
+    const alternos = await pedir(p.titulo);
+    const vistos = new Set(candidatos.map((c) => c.videoId));
+    for (const c of alternos) {
+      if (!vistos.has(c.videoId)) {
+        candidatos.push(c);
+        vistos.add(c.videoId);
+      }
+    }
+  }
+  return candidatos;
+}
+
 async function rescatarEnYattee(
   p: PeticionAudio,
   cfg: { yattee: string; auth: string },
 ): Promise<{ stream: string; duracion: number } | null> {
-  const consulta = `${p.titulo} ${p.artista}`.replace(/\s+/g, " ").trim();
-  if (!consulta) return null;
   const inicio = Date.now();
-
-  const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
-    cfg,
-    `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
-    TIMEOUT_YT_BUSQUEDA_MS,
-  );
-  const candidatos = (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
+  const candidatos = await buscarCandidatosYattee(p, cfg);
   if (candidatos.length === 0) return null;
 
   const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
-  const porDuracion =
-    objetivo > 0
-      ? candidatos.find((c) => {
-          const dur = Number(c.lengthSeconds ?? 0);
-          return dur > 0 && Math.abs(dur - objetivo) <= MARGEN_DURACION_YT_S;
-        })
-      : undefined;
-  const elegida = porDuracion ?? candidatos.find((c) => Number(c.lengthSeconds ?? 0) > 0) ?? candidatos[0];
+  const ordenados = candidatos
+    .map((c) => ({ c, punto: puntuarCandidatoYattee(c, p, objetivo) }))
+    .sort((a, b) => b.punto - a.punto);
 
-  const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
-  if (restante < 3_000) return null;
-  const video = await pedirYattee<VideoYattee>(
-    cfg,
-    `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
-    restante,
-  );
-  const formatos = (video?.adaptiveFormats ?? []).filter((f) => f.url && (f.type ?? "").startsWith("audio/"));
-  if (formatos.length === 0) return null;
-  // `audio/m4a` (AAC) lo reproducen todos los navegadores; si no está, el mejor
-  // que haya (opus en webm).
-  const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
-  const mejor = (universales.length ? universales : formatos)
-    .slice()
-    .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-  const duracion = Math.max(0, Math.round(Number(video?.lengthSeconds ?? elegida.lengthSeconds ?? 0)));
-  return { stream: new URL(String(mejor.url), cfg.yattee).toString(), duracion };
+  // Si el primer video no tiene formatos de audio (en vivo, age-gated o el
+  // extractor falló), se prueba el siguiente: devolver null al primer intento
+  // hacía que la misma canción fallara de forma intermitente.
+  for (const { c: elegida } of ordenados.slice(0, 4)) {
+    const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
+    if (restante < 3_000) break;
+    const video = await pedirYattee<VideoYattee>(
+      cfg,
+      `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
+      restante,
+    );
+    const formatos = (video?.adaptiveFormats ?? []).filter(
+      (f) => f.url && (f.type ?? "").startsWith("audio/"),
+    );
+    if (formatos.length === 0) continue;
+    // `audio/m4a` (AAC) lo reproducen todos los navegadores; si no está, el
+    // mejor que haya (opus en webm).
+    const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
+    const mejor = (universales.length ? universales : formatos)
+      .slice()
+      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+    const duracion = Math.max(0, Math.round(Number(video?.lengthSeconds ?? elegida.lengthSeconds ?? 0)));
+    return { stream: new URL(String(mejor.url), cfg.yattee).toString(), duracion };
+  }
+  return null;
 }
 
 /**
@@ -451,28 +572,39 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
   if (cfg.yattee) return rescatarEnYattee(p, cfg);
   if (!cfg.local) return null;
   const YT_BACKEND_URL = cfg.local;
-  const consulta = new URLSearchParams({
-    titulo: (p.titulo ?? "").trim(),
-    artista: (p.artista ?? "").trim(),
-    duracion: String(Math.max(0, Math.round((p.duracionMs ?? 0) / 1000))),
-  });
-  const control = new AbortController();
-  const reloj = setTimeout(() => control.abort(), TIMEOUT_YT_RESOLVER_MS);
-  try {
-    const res = await fetch(`${YT_BACKEND_URL}/resolver?${consulta}`, { signal: control.signal });
-    if (!res.ok) return null;
-    const cuerpo = (await res.json()) as { stream?: string; duracion?: number };
-    const stream = String(cuerpo.stream ?? "");
-    if (!stream.startsWith("/audio/")) return null;
-    return {
-      stream: new URL(stream, YT_BACKEND_URL).toString(),
-      duracion: Math.max(0, Math.round(Number(cuerpo.duracion ?? 0))),
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(reloj);
+  const titulo = (p.titulo ?? "").trim();
+  const artista = (p.artista ?? "").trim();
+  const duracion = String(Math.max(0, Math.round((p.duracionMs ?? 0) / 1000)));
+  const inicio = Date.now();
+
+  // Segundo intento sin artista: en re-subidos el "artista" del catálogo es el
+  // canal ("Canserbero - Topic") y ensucia la búsqueda de yt-dlp.
+  const intentos = artista ? [{ titulo, artista }, { titulo, artista: "" }] : [{ titulo, artista: "" }];
+  for (const intento of intentos) {
+    const consulta = new URLSearchParams({ ...intento, duracion });
+    const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
+    if (restante < 3_000) return null;
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), restante);
+    try {
+      const res = await fetch(`${YT_BACKEND_URL}/resolver?${consulta}`, { signal: control.signal });
+      if (res.ok) {
+        const cuerpo = (await res.json()) as { stream?: string; duracion?: number };
+        const stream = String(cuerpo.stream ?? "");
+        if (stream.startsWith("/audio/")) {
+          return {
+            stream: new URL(stream, YT_BACKEND_URL).toString(),
+            duracion: Math.max(0, Math.round(Number(cuerpo.duracion ?? 0))),
+          };
+        }
+      }
+    } catch {
+      // Se prueba la variante siguiente.
+    } finally {
+      clearTimeout(reloj);
+    }
   }
+  return null;
 }
 
 /**
@@ -805,7 +937,7 @@ async function idPorCatalogoQobuz(
  * Tope por ruta de identidad: una fuente colgada no puede dejar el rescate
  * esperando (el techo del runtime son 20 s y el usuario mira un spinner).
  */
-const TOPE_RUTA_MS = 6_000;
+const TOPE_RUTA_MS = 3_500;
 
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {
@@ -837,25 +969,15 @@ function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
  * espera encima. Sin esto el clic paga identidad (~6 s) + búsqueda de YouTube
  * en SERIE, que era justo el salto de ~10 s a ~25 s en canciones sin FLAC.
  */
-export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
+async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise<AudioResuelto | null> {
   const titulo = (p.titulo ?? "").trim();
   const artista = (p.artista ?? "").trim();
   const album = (p.album ?? "").trim();
   const duracionMs = Math.max(0, Math.round(p.duracionMs ?? 0));
   if (!titulo && !p.isrc) return null;
 
-  const clave = claveDe(p);
-  const cacheado = enlaces.get(clave);
-  if (cacheado && cacheado.expira > Date.now()) {
-    return {
-      url: cacheado.url,
-      duracion: cacheado.duracion,
-      canal: cacheado.canal,
-      proveedor: cacheado.proveedor,
-      id: cacheado.id,
-      isrc: cacheado.isrc,
-    };
-  }
+  // La config del relay se descarga mientras corre la identidad de la pista.
+  if (!configCache || configCache.expira <= Date.now()) void traerConfigStash();
 
   // En paralelo desde ya (sin título el backend rechazaría igual): ver doc.
   const ytParalelo = titulo
@@ -968,7 +1090,7 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
       isrc: c.isrc,
       expira: Date.now() + Math.max(mint.ttl, TTL_ENLACE_MIN_MS),
     };
-    guardarEnlace(clave, enlace);
+    guardarEnlace(claves, enlace);
     return {
       url: enlace.url,
       duracion: enlace.duracion,
@@ -999,7 +1121,7 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     isrc: bienFormado ? isrcPedido : null,
     expira: Date.now() + TTL_YT_ENLACE_MS,
   };
-  guardarEnlace(clave, enlace);
+  guardarEnlace(claves, enlace);
   return {
     url: enlace.url,
     duracion: enlace.duracion,
@@ -1008,4 +1130,33 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
     id: null,
     isrc: enlace.isrc,
   };
+}
+
+/**
+ * Punto de entrada con caché positiva/negativa y *single-flight*: clics
+ * simultáneos sobre la misma pista comparten una única resolución.
+ */
+export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
+  const claves = clavesDe(p);
+
+  const cacheado = enlaceCacheado(claves);
+  if (cacheado) {
+    return {
+      url: cacheado.url,
+      duracion: cacheado.duracion,
+      canal: cacheado.canal,
+      proveedor: cacheado.proveedor,
+      id: cacheado.id,
+      isrc: cacheado.isrc,
+    };
+  }
+  const vueloKey = claves[0];
+  const enCurso = enVuelo.get(vueloKey);
+  if (enCurso) return enCurso;
+
+  const tarea = resolverAudioInterno(p, claves).finally(() => {
+    if (enVuelo.get(vueloKey) === tarea) enVuelo.delete(vueloKey);
+  });
+  enVuelo.set(vueloKey, tarea);
+  return tarea;
 }

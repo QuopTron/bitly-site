@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import BrushStroke from "@/components/ui/brush-stroke";
 
 type Props = {
   open: boolean;
@@ -8,6 +10,7 @@ type Props = {
   title: string;
   subtitle?: string;
   icon?: React.ReactNode;
+  ancho?: "normal" | "amplio";
   children: React.ReactNode;
 };
 
@@ -59,7 +62,7 @@ function soltarFondo() {
  *  - La página de atrás no se arrastra mientras está abierto, y se compensa el
  *    ancho de la barra de scroll para que nada salte al bloquearla.
  */
-export default function ModalWrapper({ open, onClose, title, subtitle, icon, children }: Props) {
+export default function ModalWrapper({ open, onClose, title, subtitle, icon, ancho = "normal", children }: Props) {
   const t = useI18n();
   const panel = useRef<HTMLDivElement>(null);
   const tituloId = useId();
@@ -89,11 +92,11 @@ export default function ModalWrapper({ open, onClose, title, subtitle, icon, chi
     return soltarFondo;
   }, [open]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-overlay p-2 backdrop-blur-sm sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
@@ -102,25 +105,41 @@ export default function ModalWrapper({ open, onClose, title, subtitle, icon, chi
         aria-modal="true"
         aria-labelledby={tituloId}
         tabIndex={-1}
-        className="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-gradient-to-b from-card to-card/90 p-5 shadow-2xl shadow-primary/[0.04] ring-1 ring-border/50 outline-none animate-in zoom-in-95 duration-200 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] sm:p-6"
+        className={`animate-in zoom-in-95 relative flex max-h-[92dvh] w-full flex-col overflow-hidden border border-foreground/25 bg-card sombra-tag outline-none duration-200 [border-radius:26px_6px_26px_6px] sm:max-h-[88dvh] ${
+          ancho === "amplio" ? "max-w-2xl" : "max-w-xl"
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="pointer-events-none absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-primary/[0.07] to-transparent"
+        />
         <button
           type="button"
           onClick={onClose}
           aria-label={t("installClose")}
-          className="sticky top-0 z-20 float-right mb-2 flex h-7 w-7 items-center justify-center rounded-full bg-card/80 text-muted-foreground shadow-lg transition-all duration-200 hover:bg-card hover:text-foreground hover:shadow-primary/10 active:scale-90 sm:h-8 sm:w-8"
+          className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-background/85 text-muted-foreground backdrop-blur transition-all duration-200 hover:border-foreground hover:text-foreground active:scale-90"
         >
           <X className="h-3.5 w-3.5" />
         </button>
-        <div className="mb-4 text-center sm:mb-5">
-          {icon && <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 shadow-lg shadow-primary/10 ring-1 ring-primary/20 sm:h-12 sm:w-12">{icon}</div>}
-          <h2 id={tituloId} className="text-lg font-bold text-foreground sm:text-xl">{title}</h2>
-          {subtitle && <p className="mt-1 text-xs text-muted-foreground sm:text-sm">{subtitle}</p>}
+
+        <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 [scrollbar-width:none] sm:p-6 [&::-webkit-scrollbar]:hidden">
+          <div className="mb-4 pr-8 sm:mb-5">
+            {icon && (
+              <div className="mancha mb-3 flex h-11 w-11 -rotate-3 items-center justify-center border border-primary/30 bg-primary/10 sm:h-12 sm:w-12">
+                {icon}
+              </div>
+            )}
+            <h2 id={tituloId} className="texto-tag text-2xl leading-tight text-foreground sm:text-3xl">
+              {title}
+            </h2>
+            <BrushStroke className="mt-1 h-3 w-24 text-primary/70" />
+            {subtitle && <p className="mt-2 max-w-prose text-xs leading-relaxed text-muted-foreground sm:text-sm">{subtitle}</p>}
+          </div>
+          {children}
         </div>
-        {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -16,7 +16,8 @@
  *    la colección también viaja por el proxy cifrado.
  */
 
-import { abrirDemo, buscarDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
+import { abrirDemo, buscarDemo, letrasDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
+import type { Letras } from "@/server/letras";
 import { extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
 
@@ -125,6 +126,16 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
   p.canal = audio.canal ?? null;
   if (audio.duracion > 0) p.duracion = audio.duracion;
   return audio;
+}
+
+/** Letras para el karaoke; `null` si no hay o la consulta falla. */
+export function letrasDe(p: Pista): Promise<Letras | null> {
+  return letrasDemo({
+    titulo: p.titulo,
+    artista: p.artista,
+    album: p.album,
+    duracion: p.duracion,
+  });
 }
 
 /** Sugerencias de arranque: evite que el marco se vea vacío al abrirlo. */

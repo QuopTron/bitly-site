@@ -44,6 +44,14 @@
 /site.webmanifest
   Cache-Control: public, max-age=3600
 
+# El service worker es el único archivo que el navegador re-valida siempre:
+# si quedara cacheado con un max-age alto, una versión vieja seguiría sirviendo
+# el shell después de un deploy. `Service-Worker-Allowed` deja el scope en `/`
+# aunque el archivo no estuviera en la raíz.
+/sw.js
+  Cache-Control: no-cache, must-revalidate
+  Service-Worker-Allowed: /
+
 # ── Archivos .well-known ─────────────────────────────────────────────────────
 # `apple-app-site-association` no tiene extensión, así que el hosting no sabe
 # que es JSON. Apple y Google esperan application/json.

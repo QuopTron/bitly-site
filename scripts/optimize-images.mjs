@@ -26,11 +26,12 @@ const FUENTE = path.join(raiz, "src", "assets", "bitly-logo.png");
 const PUBLIC = path.join(raiz, "public");
 const ASSETS = path.join(raiz, "src", "assets");
 
-const FONDO = { r: 0, g: 31, b: 42, alpha: 1 }; // --background del tema oscuro
+const FONDO = { r: 10, g: 10, b: 10, alpha: 1 }; // --background del tema oscuro
 
 /** PNG cuadrado de `tamaño` con el logo centrado y fondo de marca. */
 async function cuadrado(tamaño) {
   const logo = await sharp(FUENTE)
+    .grayscale()
     .resize(tamaño, tamaño, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toBuffer();
@@ -42,11 +43,12 @@ async function cuadrado(tamaño) {
     .toBuffer();
 }
 
-/** Tarjeta 1200x630: fondo de marca + halo + logo. */
+/** Tarjeta 1200x630: fondo negro + halo de plata + logo. */
 async function ogImage() {
   const ancho = 1200;
   const alto = 630;
   const logo = await sharp(FUENTE)
+    .grayscale()
     .resize(360, 360, { fit: "contain" })
     .png()
     .toBuffer();
@@ -55,13 +57,13 @@ async function ogImage() {
     <svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${alto}">
       <defs>
         <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#001f2a"/>
-          <stop offset="55%" stop-color="#06323c"/>
-          <stop offset="100%" stop-color="#0b4a4a"/>
+          <stop offset="0%" stop-color="#0a0a0a"/>
+          <stop offset="55%" stop-color="#171717"/>
+          <stop offset="100%" stop-color="#262626"/>
         </linearGradient>
         <radialGradient id="h" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0%" stop-color="#4ee8ab" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="#4ee8ab" stop-opacity="0"/>
+          <stop offset="0%" stop-color="#d4d4d4" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#d4d4d4" stop-opacity="0"/>
         </radialGradient>
       </defs>
       <rect width="${ancho}" height="${alto}" fill="url(#g)"/>
@@ -71,11 +73,11 @@ async function ogImage() {
   const texto = Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${alto}">
       <text x="640" y="330" font-family="Inter, Segoe UI, system-ui, sans-serif"
-            font-size="96" font-weight="800" fill="#eafff6" text-anchor="middle">Bitly</text>
+            font-size="96" font-weight="800" fill="#fafafa" text-anchor="middle">Bitly</text>
       <text x="640" y="410" font-family="Inter, Segoe UI, system-ui, sans-serif"
-            font-size="42" font-weight="500" fill="#9fe7cd" text-anchor="middle">Tu música, sin límites</text>
+            font-size="42" font-weight="500" fill="#d4d4d4" text-anchor="middle">Tu música, sin límites</text>
       <text x="640" y="472" font-family="Inter, Segoe UI, system-ui, sans-serif"
-            font-size="30" font-weight="400" fill="#8fb7b5" text-anchor="middle">Descarga música FLAC sin pérdida</text>
+            font-size="30" font-weight="400" fill="#a3a3a3" text-anchor="middle">Descarga música FLAC sin pérdida</text>
     </svg>`);
 
   return sharp(fondo)
@@ -134,6 +136,7 @@ async function main() {
   //    640 siempre y "properly size images" marcaba 17 KB de más.
   for (const ancho of [640, 320, 96]) {
     const buf = await sharp(FUENTE)
+      .grayscale()
       .resize(ancho, ancho, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 82, effort: 6 })
       .toBuffer();

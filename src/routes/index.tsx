@@ -1,99 +1,53 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { supabase } from "@/integrations/supabase/client";
-import Particles from "@/components/particles";
 import GlowBackground from "@/components/layout/glow-background";
-import ScrollProgress from "@/components/layout/scroll-progress";
 import Header from "@/components/layout/header";
-import SectionNav from "@/components/layout/section-nav";
 import HeroSection from "@/components/hero/hero-section";
-import Footer from "@/components/layout/footer";
 import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
-import Opiniones from "@/components/opiniones";
 import DemoPlayer from "@/components/demo/demo-player";
-import FaqSection from "@/components/faq-section";
+import ComentariosInicio from "@/components/inicio/comentarios-inicio";
+import FaqModal from "@/components/modals/faq-modal";
+import ComentariosModal from "@/components/modals/comentarios-modal";
+import CodigoModal from "@/components/modals/codigo-modal";
+import AdminModal from "@/components/modals/admin-modal";
+import { useAnalitica } from "@/lib/analytics";
+import { useInstalacionPwa } from "@/lib/pwa";
 import { initRates } from "@/lib/currency";
 import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 import { TITULO } from "@/lib/seo";
+import { EVENTO_NAVEGAR, VISTAS, esVista, type VistaId } from "@/lib/navegacion";
+import { INFO_POR_DEFECTO, leerDatosSitio, registrarDescarga, type InfoApp, type StatsSitio } from "@/server/datos";
 
-// Los modales sólo montan al hacer clic: van en chunks aparte para que sus
-// kilobytes no entren en la carga inicial. El condicional del JSX es parte
-// del truco — si estuvieran montados con open=false, React los resolvería al
-// hidratar y el chunk bajaría igual apenas.
-const MobileModal = lazy(() => import("@/components/modals/mobile-modal"));
 const ReleaseModal = lazy(() => import("@/components/modals/release-modal"));
 
-type InfoApp = {
-  name: string; tagline: string; description: string;
-  windows_url: string | null; android_url: string | null; version: string;
-};
-
-type Datos = { info: InfoApp; stats: { windows: number; android: number }; release: ReleaseIndex | null };
-
-const INFO_POR_DEFECTO: InfoApp = {
-  name: "Bitly", tagline: "Tu música, sin límites", description: "",
-  windows_url: null, android_url: null, version: "1.0.0",
-};
-
-/**
- * Datos del hero, leídos en el SERVIDOR (y por lo tanto también en el
- * prerender).
- *
- * Antes el componente arrancaba en `loading` y sólo pintaba después de dos
- * llamadas a Supabase: el HTML que veía Google era un spinner, sin título, sin
- * texto y sin enlaces. Con el loader, el HTML sale completo desde el primer
- * byte y las cifras de descargas no se muestran en 0 y luego saltan (eso era
- * parte del CLS).
- *
- * Cada consulta tiene su propio `try`: si una cae, las demás siguen, y una build
- * sin red publica igual con los valores por defecto. (Ojo: el builder de
- * PostgREST es sólo "thenable", no tiene `.catch`, por eso no se encadenan.)
- */
-async function leerInfo(): Promise<InfoApp | null> {
-  try {
-    const { data } = await supabase.from("app_info").select("*").limit(1).maybeSingle();
-    return (data as InfoApp | null) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function leerStats(): Promise<{ windows: number; android: number }> {
-  const s = { windows: 0, android: 0 };
-  try {
-    const { data } = await supabase.from("download_stats").select("platform,count");
-    for (const fila of data ?? []) {
-      const n = Number(fila.count);
-      if (fila.platform === "windows") s.windows = n;
-      if (fila.platform === "android") s.android = n;
-    }
-  } catch {
-    /* sin red quedan en 0 y el cliente los rellena al montar */
-  }
-  return s;
-}
+type Datos = { info: InfoApp; stats: StatsSitio; vistas: number; release: ReleaseIndex | null };
 
 async function cargarDatos(): Promise<Datos> {
+  let info: InfoApp = INFO_POR_DEFECTO;
+  let stats: StatsSitio = { windows: 0, android: 0, ios: 0, macos: 0, tv: 0, pwa: 0 };
+  let vistas = 0;
   try {
-    const [info, stats, release] = await Promise.all([
-      leerInfo(),
-      leerStats(),
-      cargarReleases().catch(() => null),
-    ]);
-    return { info: info ?? INFO_POR_DEFECTO, stats, release: release as ReleaseIndex | null };
+    const d = await leerDatosSitio();
+    info = d.info;
+    stats = d.stats;
+    vistas = d.vistas;
   } catch (e) {
     console.error("[Bitly] SSR sin datos:", e);
-    return { info: INFO_POR_DEFECTO, stats: { windows: 0, android: 0 }, release: null };
   }
+  let release: ReleaseIndex | null = null;
+  try {
+    release = (await cargarReleases()) as ReleaseIndex | null;
+  } catch {
+    /* sin releases el hero muestra la versión de `info` */
+  }
+  return { info, stats, vistas, release };
 }
 
 export const Route = createFileRoute("/")({
   loader: cargarDatos,
   head: () => ({
-    // El título, la descripción, el canonical y los OG los declara la raíz:
-    // repetirlos acá sólo generaba metas duplicadas en el HTML.
     meta: [{ title: TITULO }],
   }),
   component: Index,
@@ -101,16 +55,92 @@ export const Route = createFileRoute("/")({
 
 export default function Index() {
   const datos = Route.useLoaderData();
-  // Idioma y moneda guardados se aplican acá, dentro del contenido de la ruta
-  // y por lo tanto DESPUÉS de que hidrató (ver `preferencias.ts`).
   usePreferenciasGuardadas();
   const [info, setInfo] = useState<InfoApp>(datos.info);
   const [stats, setStats] = useState(datos.stats);
-  const [showMobile, setShowMobile] = useState(false);
+  const [vistas, setVistas] = useState(datos.vistas);
   const [showRelease, setShowRelease] = useState(false);
+  const [showComentarios, setShowComentarios] = useState(false);
+  const [valoracion, setValoracion] = useState({ promedio: 0, opiniones: 0 });
+  const [showFaq, setShowFaq] = useState(false);
+  const [showCodigo, setShowCodigo] = useState(false);
+  const [adminCodigo, setAdminCodigo] = useState("");
+  const descargasConfirmadas = useRef(new Set<string>());
+  const [vista, setVista] = useState<VistaId>("inicio");
   const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
   const [blocked, setBlocked] = useState(false);
   const [release, setRelease] = useState<ReleaseIndex | null>(datos.release);
+
+  useAnalitica(vista);
+  const { disponible: pwaDisponible, instalar: instalarPwa } = useInstalacionPwa();
+
+  const abrirComentarios = useCallback(() => setShowComentarios(true), []);
+  const actualizarResumen = useCallback((r: { promedio: number; opiniones: number; vistas: number }) => {
+    setVistas(r.vistas);
+    setValoracion({ promedio: r.promedio, opiniones: r.opiniones });
+  }, []);
+
+  useEffect(() => {
+    const aplicarHash = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash === "contacto") abrirComentarios();
+      else if (hash === "faq") setShowFaq(true);
+      else if (esVista(hash)) setVista(hash);
+    };
+    aplicarHash();
+    window.addEventListener("hashchange", aplicarHash);
+    return () => window.removeEventListener("hashchange", aplicarHash);
+  }, [abrirComentarios]);
+
+  const cambiarVista = useCallback((id: VistaId) => {
+    setVista(id);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${id}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    const alNavegar = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (id === "contacto") {
+        abrirComentarios();
+        return;
+      }
+      if (id === "faq") {
+        setShowFaq(true);
+        return;
+      }
+      if (esVista(id)) cambiarVista(id);
+    };
+    window.addEventListener(EVENTO_NAVEGAR, alNavegar);
+    return () => window.removeEventListener(EVENTO_NAVEGAR, alNavegar);
+  }, [cambiarVista, abrirComentarios]);
+
+  useEffect(() => {
+    const alClic = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const objetivo = e.target as HTMLElement | null;
+      const enlace = objetivo?.closest<HTMLAnchorElement>('a[href^="#"]');
+      if (!enlace || enlace.target === "_blank") return;
+      const id = (enlace.getAttribute("href") ?? "").slice(1);
+      if (id === "contacto") {
+        e.preventDefault();
+        abrirComentarios();
+        return;
+      }
+      if (id === "faq") {
+        e.preventDefault();
+        setShowFaq(true);
+        return;
+      }
+      if (esVista(id)) {
+        e.preventDefault();
+        cambiarVista(id);
+      }
+    };
+    document.addEventListener("click", alClic);
+    return () => document.removeEventListener("click", alClic);
+  }, [cambiarVista, abrirComentarios]);
 
   useEffect(() => {
     const check = () => {
@@ -125,19 +155,15 @@ export default function Index() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: d } = await supabase.from("app_info").select("*").limit(1).maybeSingle();
-        if (d) setInfo(d as InfoApp);
-        const s = await supabase.from("download_stats").select("platform,count");
-        if (s.data) {
-          const m: Record<string, number> = {};
-          s.data.forEach((r) => (m[r.platform] = Number(r.count)));
-          setStats((prev) => ({ ...prev, windows: m.windows ?? prev.windows, android: m.android ?? prev.android }));
-        }
-      } catch (e) { console.error("[Bitly] Failed to load app info:", e); }
+        const d = await leerDatosSitio();
+        setInfo(d.info);
+        setStats((prev) => ({ ...prev, ...d.stats }));
+        setVistas(d.vistas);
+      } catch (e) {
+        console.error("[Bitly] Failed to load app info:", e);
+      }
     })();
     initRates();
-    // El loader ya trajo la release prerenderizada; esto sólo la refresca si el
-    // visitante se queda (la caché de `cargarReleases` vive en localStorage).
     let vivo = true;
     cargarReleases()
       .then((r) => { if (vivo) setRelease(r); })
@@ -145,12 +171,36 @@ export default function Index() {
     return () => { vivo = false; };
   }, []);
 
-  const handleDownload = async (platform: "windows" | "android" | "tv" | "ios" | "macos", url: string | null) => {
-    const statsPlatform = platform === "tv" ? "android" : platform;
-    setStats((s) => ({ ...s, [statsPlatform]: (s[statsPlatform as keyof typeof s] ?? 0) + 1 }));
-    try { await supabase.rpc("increment_download", { _platform: statsPlatform }); } catch (e) { console.error("[Bitly] Failed to increment download:", e); }
+  /** Abre la lista de archivos. No cuenta nada todavía: eso pasa al bajar uno. */
+  const handleDownload = (platform: "windows" | "android" | "tv" | "ios" | "macos", _url: string | null) => {
     setReleasePlatform(platform);
     setShowRelease(true);
+  };
+
+  /** Cuenta sólo si el archivo existe de verdad; no alcanza con tocar el botón. */
+  const confirmarDescarga = async (
+    platform: "windows" | "android" | "tv" | "ios" | "macos" | "pwa",
+    url?: string,
+  ) => {
+    if (descargasConfirmadas.current.has(platform)) return;
+    descargasConfirmadas.current.add(platform);
+    const statsPlatform = platform === "tv" ? "android" : platform;
+    try {
+      const total = await registrarDescarga({ data: { plataforma: statsPlatform, url } });
+      if (total === null) {
+        descargasConfirmadas.current.delete(platform);
+        return;
+      }
+      setStats((s) => ({ ...s, [statsPlatform]: total }));
+    } catch (e) {
+      descargasConfirmadas.current.delete(platform);
+      console.error("[Bitly] Failed to increment download:", e);
+    }
+  };
+
+  /** Instala la PWA y, si el visitante acepta, la cuenta como descarga. */
+  const instalarAplicacion = async () => {
+    if (await instalarPwa()) await confirmarDescarga("pwa");
   };
 
   const total = (stats.windows ?? 0) + (stats.android ?? 0);
@@ -159,34 +209,87 @@ export default function Index() {
   const windowsUrl = platforms?.windows.url ?? info.windows_url;
   const iosUrl = platforms?.ios.url ?? null;
   const macosUrl = platforms?.macos.url ?? null;
-  // Smart TV instala el mismo APK que Android.
   const modalKey: PlatformKey = releasePlatform === "tv" ? "android" : releasePlatform;
   const modalRelease = platforms?.[modalKey];
+  const indiceActivo = VISTAS.findIndex((v) => v.id === vista);
+
+  const contenido = (id: VistaId) => {
+    if (id === "inicio") {
+      return (
+        <>
+          <HeroSection
+            tagline={info.tagline}
+            description={info.description}
+            version={release?.version || info.version}
+            isBlocked={blocked}
+            windowsUrl={windowsUrl}
+            androidUrl={androidUrl}
+            iosUrl={iosUrl}
+            macosUrl={macosUrl}
+            totalDownloads={total}
+            totalViews={vistas}
+            promedio={valoracion.promedio}
+            opiniones={valoracion.opiniones}
+            comentarios={<ComentariosInicio onResumen={actualizarResumen} />}
+            onDownload={handleDownload}
+          />
+        </>
+      );
+    }
+    if (id === "demo") return <DemoPlayer />;
+    if (id === "instalar") return <InstallSection onDownload={(p) => handleDownload(p, null)} />;
+    return <PlansSection />;
+  };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <ScrollProgress />
-      <Particles />
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
       <GlowBackground />
-      <Header />
-      <SectionNav />
-      <main className="flex-1 flex flex-col justify-center">
-        <HeroSection
-          tagline={info.tagline} description={info.description} version={release?.version || info.version}
-          isBlocked={blocked} windowsUrl={windowsUrl} androidUrl={androidUrl} iosUrl={iosUrl} macosUrl={macosUrl}
-          totalDownloads={total} windowsDownloads={stats.windows ?? 0} androidDownloads={stats.android ?? 0}
-          onDownload={handleDownload}
-          onOpenMobile={() => setShowMobile(true)}
-        />
+      <Header
+        vista={vista}
+        onNavegar={cambiarVista}
+        onComentarios={abrirComentarios}
+        onFaq={() => setShowFaq(true)}
+        onAdmin={() => setShowCodigo(true)}
+        pwaDisponible={pwaDisponible}
+        onInstalarPwa={() => void instalarAplicacion()}
+      />
+
+      <main className="relative min-h-0 flex-1 overflow-clip">
+        {VISTAS.map(({ id }, i) => {
+          const activo = vista === id;
+          const desplazamiento = i - indiceActivo;
+          return (
+            <div
+              key={id}
+              data-vista={id}
+              aria-hidden={!activo}
+              inert={!activo}
+              className={`absolute inset-0 bg-background ${
+                id === "demo" ? "overflow-hidden" : "overflow-y-auto overscroll-contain"
+              } ${activo ? "" : "pointer-events-none"} transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] will-change-transform`}
+              style={{ transform: `translate3d(${desplazamiento * 100}%, 0, 0)` }}
+            >
+              <div className={id === "demo" || id === "inicio" ? "h-full" : "pantalla-contenido min-h-full"}>
+                {contenido(id)}
+              </div>
+            </div>
+          );
+        })}
       </main>
-      <DemoPlayer />
-      <InstallSection onDownload={(p) => handleDownload(p, null)} />
-      <Opiniones />
-      <FaqSection />
-      <PlansSection />
-      <Footer />
+
+      <FaqModal open={showFaq} onClose={() => setShowFaq(false)} />
+      <ComentariosModal open={showComentarios} onClose={() => setShowComentarios(false)} />
+      <CodigoModal
+        open={showCodigo}
+        onClose={() => setShowCodigo(false)}
+        onOk={(codigo) => {
+          setAdminCodigo(codigo);
+          setShowCodigo(false);
+        }}
+      />
+      <AdminModal open={!!adminCodigo} onClose={() => setAdminCodigo("")} codigo={adminCodigo} />
+
       <Suspense fallback={null}>
-        {showMobile && <MobileModal open onClose={() => setShowMobile(false)} />}
         {showRelease && (
           <ReleaseModal
             open
@@ -195,6 +298,7 @@ export default function Index() {
             assets={modalRelease?.assets ?? []}
             version={modalRelease?.version ?? ""}
             latestVersion={release?.version ?? ""}
+            onDownload={(url) => void confirmarDescarga(releasePlatform, url)}
             onOpenGuide={() => {
               setShowRelease(false);
               abrirGuia(plataformaDeDescarga(releasePlatform));

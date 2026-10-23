@@ -82,7 +82,7 @@ export default function ExtensionPicker({
         aria-expanded={abierto}
         aria-label={`${t("demoSourcePicker")}: ${activa.nombre}`}
         title={`${t("demoSourcePicker")}: ${activa.nombre}`}
-        className="flex h-8 w-8 items-center justify-center rounded-full ring-1 ring-border/70 transition hover:ring-primary/40"
+        className="flex h-8 w-8 items-center justify-center border border-border transition hover:border-foreground"
         style={{ backgroundColor: `${color}1F` }}
       >
         <IconoFuente id={activa.id} className="h-4 w-4" />
@@ -92,7 +92,7 @@ export default function ExtensionPicker({
         <div
           role="listbox"
           aria-label={t("demoSourcePicker")}
-          className="absolute left-0 top-full z-30 mt-2 max-h-60 w-48 overflow-y-auto rounded-2xl border border-border bg-card/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur"
+          className="absolute left-0 top-full z-30 mt-2 max-h-60 w-48 overflow-y-auto border border-foreground/40 bg-card p-1.5 sombra-tag"
         >
           {EXTENSIONES.map((e) => {
             const sel = e.id === valor;
@@ -106,7 +106,7 @@ export default function ExtensionPicker({
                   onCambiado(e.id);
                   setAbierto(false);
                 }}
-                className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs font-semibold transition ${
+                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs font-semibold transition ${
                   sel ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-muted/50"
                 }`}
               >

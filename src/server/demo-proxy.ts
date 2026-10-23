@@ -39,6 +39,7 @@ import {
 } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
 import { buscarYouTubeBackend, resolverAudio, type PeticionAudio } from "@/server/rescate";
+import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
@@ -545,3 +546,11 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
 export const demoRescatar = createServerFn({ method: "POST" })
   .validator((d: Carga) => d)
   .handler(async ({ data }): Promise<RespuestaAudio> => rescatarImpl(data));
+
+/**
+ * Letras para el karaoke. Es metadata, no audio: no hace falta cifrarla y la
+ * llamada a LRCLIB la hace el servidor (la CSP del navegador no la permite).
+ */
+export const demoLetras = createServerFn({ method: "POST" })
+  .validator((d: PeticionLetras) => d)
+  .handler(async ({ data }): Promise<Letras | null> => letrasImpl(data));

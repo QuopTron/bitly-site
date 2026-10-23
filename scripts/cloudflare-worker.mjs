@@ -87,8 +87,11 @@ const CSP_FIJOS =
   // reproduce el proxy del backend, no googlevideo. En el cliente solo afecta
   // al localhost del propio visitante.
   " media-src 'self' blob: https: http://localhost:* http://127.0.0.1:*;" +
-  " connect-src 'self' https://*.supabase.co https://open.er-api.com https://api.github.com;" +
+  " connect-src 'self' https://open.er-api.com https://api.github.com;" +
   " frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';" +
+  // El service worker de la PWA va en 'self'; sin declararlo explícito cae en
+  // script-src, que también es 'self', pero así queda aclarado.
+  " worker-src 'self';" +
   " upgrade-insecure-requests";
 
 async function sha256(texto) {

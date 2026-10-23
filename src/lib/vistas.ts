@@ -15,7 +15,7 @@
  * número, pero cerrar la pestaña y volver a entrar sí cuenta como visita nueva.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { registrarVista } from "@/server/datos";
 
 export const CLAVE_VISTA = "bitly_vista_contada";
 
@@ -49,11 +49,8 @@ export function contarVista(): Promise<number | null> {
       } catch {
         /* modo privado sin storage: se cuenta igual */
       }
-      const { data, error } = await supabase.rpc("increment_vista");
-      if (error) return null;
-      // `Number` y no `typeof`: bigint llega como texto en algunas versiones.
-      const total = Number(data);
-      if (!Number.isFinite(total)) return null;
+      const total = await registrarVista();
+      if (total === null || !Number.isFinite(total)) return null;
       vistasContadas = total;
       return total;
     } catch {

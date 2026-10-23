@@ -5,7 +5,7 @@ import { getLanguage, useLanguage } from "@/lib/i18n";
 import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { instalarReveals } from "@/lib/reveal";
 import { contarVista } from "@/lib/vistas";
-import PremiumBubble from "@/components/layout/premium-bubble";
+import { bloquearDescarga, registrarServiceWorker, useEsStandalone } from "@/lib/pwa";
 import { SCRIPT_TEMA_INICIAL } from "@/lib/tema";
 import { DESCRIPCION, OG_IMAGE, SITIO, TITULO, jsonLd } from "@/lib/seo";
 import "../styles.css";
@@ -36,7 +36,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: SCRIPT_TEMA_INICIAL }} />
         {/* Los datos estructurados van en el <head> del shell: así existen
             aunque la ruta todavía no pinte nada. Sale del mismo diccionario que
-            la sección #faq, así que siempre coinciden con lo visible. */}
+            el modal de preguntas, así que siempre coinciden con lo visible. */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: jsonLd() }}
@@ -117,10 +117,16 @@ function RootComponent() {
   useEffect(() => {
     void contarVista();
   }, []);
+  // PWA: se registra el SW una vez (sólo en producción) y, si la página está
+  // corriendo como app instalada, se apaga la descarga del audio.
+  useEffect(() => {
+    registrarServiceWorker();
+  }, []);
+  const standalone = useEsStandalone();
+  useEffect(() => (standalone ? bloquearDescarga() : undefined), [standalone]);
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <PremiumBubble />
     </QueryClientProvider>
   );
 }
@@ -133,11 +139,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "description", content: DESCRIPCION },
       { name: "robots", content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" },
       { name: "author", content: "Bitly" },
-      { name: "theme-color", content: "#f3fbf7", media: "(prefers-color-scheme: light)" },
+      { name: "theme-color", content: "#ffffff", media: "(prefers-color-scheme: light)" },
       // Va el oscuro el ÚLTIMO: TanStack deduplica las `meta` por nombre y se
       // queda con la última, y el tema de marca es el oscuro (el que se ve al
       // entrar sin preferencia guardada).
-      { name: "theme-color", content: "#001f2a", media: "(prefers-color-scheme: dark)" },
+      { name: "theme-color", content: "#0a0a0a", media: "(prefers-color-scheme: dark)" },
       { name: "color-scheme", content: "dark light" },
       { property: "og:type", content: "website" },
       { property: "og:site_name", content: "Bitly" },

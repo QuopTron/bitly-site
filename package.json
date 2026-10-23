@@ -1,12 +1,14 @@
 {
-  "name": "proyecto",
+  "name": "bitly-site",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
     "yt-dlp": "node scripts/backend-yt-dlp.mjs",
     "build": "vite build && node scripts/cloudflare-worker.mjs",
+    "preview": "pnpm build && npx --yes wrangler pages dev dist/client --port 8788",
+    "preview:serve": "npx --yes wrangler pages dev dist/client --port 8788",
     "start": "node .output/server/index.mjs",
     "capturas": "node scripts/capturas/capturar.mjs",
     "capturas:reales": "node scripts/capturas/reemplazar.mjs",
@@ -18,7 +20,6 @@
     "probar:demo": "node scripts/verificar-demo.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.115.0",
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "^1.170.33",
     "@tanstack/react-start": "^1.168.50",

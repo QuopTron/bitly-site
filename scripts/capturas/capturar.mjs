@@ -54,7 +54,6 @@ async function diagnostico(ses) {
         texto: (document.body ? document.body.innerText : '').replace(/\\s+/g, ' ').slice(0, 160),
         spinner: !!document.querySelector('.animate-spin'),
         seccion: !!document.querySelector('#instalar'),
-        stub: String(window.fetch).includes('app_info'),
         pedidos: (window.__pedidos || []).slice(-5),
         errores: (window.__errores || []).slice(0, 4),
       })`,
@@ -87,6 +86,39 @@ async function capturar(ses, archivo, clip) {
 }
 
 const redondear = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Recorta una captura completa con sharp. El recorte en el propio Chrome
+ * (`clip`) duplica el contenido cuando el fondo usa `backdrop-filter`; capturar
+ * entero y recortar después evita ese fantasma.
+ */
+async function recortar(archivo, caja, dpr) {
+  const { default: sharp } = await import("sharp");
+  const destino = path.join(SALIDA, archivo);
+  let entrada;
+  for (let intento = 0; intento < 6; intento++) {
+    try {
+      entrada = fs.readFileSync(destino);
+      break;
+    } catch {
+      await dormir(100);
+    }
+  }
+  if (!entrada) throw new Error(`No se pudo leer ${archivo} para recortar`);
+  const imagen = sharp(entrada);
+  const { width: anchoTotal, height: altoTotal } = await imagen.metadata();
+  const left = Math.max(0, Math.round(caja.x * dpr));
+  const top = Math.max(0, Math.round(caja.y * dpr));
+  const width = Math.min(anchoTotal - left, Math.round(caja.width * dpr));
+  const height = Math.min(altoTotal - top, Math.round(caja.height * dpr));
+  const buffer = await sharp(entrada)
+    .extract({ left, top, width, height })
+    .webp({ quality: CALIDAD })
+    .toBuffer();
+  fs.writeFileSync(destino, buffer);
+  const kb = Math.round(buffer.length / 1024);
+  console.log(`  ? ${archivo.padEnd(28)} ${width}×${height}  ${kb} KB (recorte)`);
+}
 
 /**
  * Revisa que la captura no haya salido en blanco/negro: analiza los píxeles
@@ -165,13 +197,18 @@ const MOCK = (n) => pathToFileURL(path.join(AQUI, "mock", n)).href;
 
 async function abrirModalDeDescarga(ses, boton, esperado) {
   await esperarPor(ses, "document.querySelector('#descargar')", { nombre: "botones de descarga" });
-  await js(
-    ses,
-    `(() => { const b = [...document.querySelectorAll('#descargar button')]
-        .find(x => (x.textContent || '').includes(${JSON.stringify(boton)}));
-      if (!b) return false; b.click(); return true; })()`,
-  );
-  await esperarPor(ses, "document.querySelector('.fixed.inset-0.z-50')", { nombre: "modal abierto" });
+  await dormir(1200); // hidratación de React antes del primer clic
+  for (let intento = 0; intento < 8; intento++) {
+    await js(
+      ses,
+      `(() => { const b = [...document.querySelectorAll('#descargar button')]
+          .find(x => (x.textContent || '').includes(${JSON.stringify(boton)}));
+        if (!b) return false; b.click(); return true; })()`,
+    );
+    await dormir(300);
+    if (await js(ses, "!!document.querySelector('[role=dialog][aria-modal=true]')")) break;
+  }
+  await esperarPor(ses, "document.querySelector('[role=dialog][aria-modal=true]')", { nombre: "modal abierto" });
   await esperarPor(ses, `document.body.innerText.includes(${JSON.stringify(esperado)})`, {
     nombre: `lista de archivos (${esperado})`,
     tiempo: 20000,
@@ -186,7 +223,7 @@ const TAREAS = {
       viewport: VISTA_CELU,
       async correr(ses) {
         await ir(ses, SITIO);
-        await dormir(1200); // partículas + degradados
+        await dormir(2200); // partículas + degradados + releases
         // Si los botones de descarga quedan fuera de la pantalla, acompaña con el scroll
         // (igual que haría el usuario) y medí dónde quedaron.
         const notas = await js(
@@ -215,7 +252,16 @@ const TAREAS = {
       async correr(ses) {
         await ir(ses, SITIO);
         await abrirModalDeDescarga(ses, "Android", ".apk");
-        return { clip: await rectDe(ses, ".fixed.inset-0.z-50 > div", { pad: 18, viewport: VISTA_CELU_ALTO }) };
+        const caja = await rectDe(ses, '[role="dialog"][aria-modal="true"]', { pad: 0, viewport: VISTA_CELU_ALTO });
+        // Sin franja superior: ahí se colaba un trazo del fondo del sitio.
+        return {
+          recorte: {
+            x: 0,
+            y: caja.y,
+            width: VISTA_CELU_ALTO.w,
+            height: VISTA_CELU_ALTO.h - caja.y,
+          },
+        };
       },
     },
     {
@@ -252,7 +298,7 @@ const TAREAS = {
       viewport: VISTA_PC,
       async correr(ses) {
         await ir(ses, SITIO);
-        await dormir(1400);
+        await dormir(2200);
         return { clip: await rectDe(ses, "main section", { pad: 0, viewport: VISTA_PC, minimo: { w: 800, h: 300 } }) };
       },
     },
@@ -262,7 +308,7 @@ const TAREAS = {
       async correr(ses) {
         await ir(ses, SITIO);
         await abrirModalDeDescarga(ses, "Windows", ".exe");
-        return { clip: await rectDe(ses, ".fixed.inset-0.z-50 > div", { pad: 24, viewport: VISTA_PC }) };
+        return { recorte: await rectDe(ses, '[role="dialog"][aria-modal="true"]', { pad: 24, viewport: VISTA_PC }) };
       },
     },
     {
@@ -356,35 +402,6 @@ const TAREAS = {
 const ANCHOS_REVISION = (process.env.REVISION_ANCHOS ?? "320,390,430,768,1024,1440,1920").split(",").map(Number);
 
 /**
- * Respuestas simuladas para poder medir la sección en local: el backend real
- * (Supabase) sólo acepta el origen del sitio publicado, así que si no responde
- * la app se queda en el spinner y no hay nada que revisar.
- */
-/**
- * Opcional (`STUB_SIN_BACKEND=1`): simula las respuestas del backend. Antes de
- * usarlo, preferí arrancar el servidor con `VITE_SUPABASE_URL` apuntando a un
- * puerto cerrado: así la llamada falla al instante y la app se dibuja sola,
- * sin tocar el código ni desincronizar la hidratación.
- */
-const SIN_BACKEND = `
-  const original = window.fetch;
-  // Con retardo: si responde en el mismo tick que la hidratación, el HTML del
-  // servidor (el spinner) no coincide con el primer render y la página recarga.
-  const json = (cuerpo) => new Promise((listo) => setTimeout(() => listo(new Response(JSON.stringify(cuerpo), {
-    status: 200, headers: { 'Content-Type': 'application/json' },
-  })), 500));
-  window.__pedidos = [];
-  window.fetch = function (entrada, opciones) {
-    const url = typeof entrada === 'string' ? entrada : (entrada && entrada.url) || '';
-    window.__pedidos.push(url.split('?')[0].slice(-40));
-    if (url.includes('app_info')) return json([{ name: 'Bitly', tagline: 'Tu música, sin límites', description: '', windows_url: null, android_url: null, version: '1.0.0' }]);
-    if (url.includes('download_stats')) return json([]);
-    if (url.includes('increment_download')) return json(null);
-    return original.apply(this, arguments);
-  };
-`;
-
-/**
  * El servidor de desarrollo recarga la página solo (HMR), así que una medición
  * puede caer justo en el recambio. Reintenta hasta obtener un estado estable.
  */
@@ -406,9 +423,6 @@ async function medir(ses, expresion, valida = () => true, intentos = 8) {
 }
 
 async function revisarSeccion(ses) {
-  if (process.env.STUB_SIN_BACKEND === "1") {
-    await ses.ev("Page.addScriptToEvaluateOnNewDocument", { source: SIN_BACKEND });
-  }
   // El perfil de Chrome es persistente entre corridas: fija el idioma y la moneda
   // por defecto para que las medidas no dependan de la corrida anterior.
   await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
@@ -731,9 +745,16 @@ async function main() {
       console.log(`▸ Grupo: ${g}${g === "revision" ? " (sólo medición, no guarda capturas)" : ""}`);
       for (const tarea of TAREAS[g]) {
         const ses = await nuevaSesion(browser, tarea.viewport);
+        const fuente =
+          "try { localStorage.setItem('bitly_pistas_cabecera', '1'); localStorage.setItem('bitly_lang', 'es'); localStorage.setItem('bitly_currency', 'BOB'); } catch {}" +
+          (tarea.viewport?.movil && !tarea.sinCaptura
+            ? "try { Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36' }); Object.defineProperty(navigator, 'userAgentData', { get: () => undefined }); } catch {}"
+            : "");
+        await ses.ev("Page.addScriptToEvaluateOnNewDocument", { source: fuente });
         try {
-          const { clip, notas } = await tarea.correr(ses);
+          const { clip, recorte, notas } = await tarea.correr(ses);
           if (!tarea.sinCaptura) await capturar(ses, tarea.archivo, clip);
+          if (recorte) await recortar(tarea.archivo, recorte, tarea.viewport.dpr);
           if (notas) console.log(`    · ${notas}`);
         } finally {
           await ses.cerrar();

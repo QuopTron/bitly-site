@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
-import { ArrowLeft, ChevronRight, Download, Gem, KeyRound, Loader2, Monitor, Music, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Smartphone, Tv, Volume2, VolumeX, X } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import { ArrowLeft, ChevronRight, Gem, KeyRound, Loader2, Lock, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
@@ -9,9 +11,13 @@ import { audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-
 import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
 import { retraso } from "@/lib/reveal";
-import { enlaceWhatsApp } from "@/lib/contacto";
+import { navegarA } from "@/lib/navegacion";
+
+import { useEsStandalone } from "@/lib/pwa";
 import ExtensionPicker from "@/components/demo/extension-picker";
 import CategoriaChips from "@/components/demo/categoria-chips";
+import ModoAppOverlay from "@/components/demo/modo-app-overlay";
+import Karaoke from "@/components/demo/karaoke";
 
 // Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
 const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
@@ -27,7 +33,7 @@ const mmss = (seg: number) => {
 };
 
 /** Longitud del anillo de progreso del cover circular del miniplayer. */
-const ANILLO = 2 * Math.PI * 19;
+const ANILLO = 2 * Math.PI * 15.7;
 
 /** Inicial de la letra que hace de carátula cuando la fuente no trae imagen. */
 const letraDe = (texto: string) => (texto.trim()[0] ?? "\u266a").toUpperCase();
@@ -46,9 +52,7 @@ const CLAVES_TIPO: Record<Pista["tipo"], string> = {
   playlist: "demoKindPlaylist",
 };
 
-/** Los tres marcos. El reproductor es el mismo; cambia el chasis. */
-type MarcoId = "movil" | "tv" | "pc";
-type Chasis = { etiqueta: string; icono: typeof Tv; clase: string; barra: string };
+
 
 /** Listado que se dejó antes de abrir un álbum/artista/lista (para volver). */
 type EstadoLista = {
@@ -59,27 +63,6 @@ type EstadoLista = {
   limitado: boolean;
   otraFuente: string | null;
   sinResultados: boolean;
-};
-
-const MARCOS: Record<MarcoId, Chasis> = {
-  movil: {
-    etiqueta: "demoFrameMovil",
-    icono: Smartphone,
-    clase: "w-full max-w-[20rem] rounded-[2.35rem] p-2 ring-2 ring-border/70",
-    barra: "px-4 pt-6 pb-3",
-  },
-  tv: {
-    etiqueta: "demoFrameTV",
-    icono: Tv,
-    clase: "w-full max-w-[34rem] rounded-2xl p-1.5",
-    barra: "px-4 pt-1.5 pb-2",
-  },
-  pc: {
-    etiqueta: "demoFramePC",
-    icono: Monitor,
-    clase: "w-full max-w-[42rem] rounded-xl p-1.5",
-    barra: "px-3 pt-1 pb-1.5",
-  },
 };
 
 /**
@@ -97,10 +80,12 @@ const MARCOS: Record<MarcoId, Chasis> = {
  */
 export default function DemoPlayer() {
   const t = useI18n();
+  // Instalada como PWA el audio no se puede guardar: la demo se oculta y se
+  // invita a abrirla en el navegador, en vez de mostrar un reproductor a medias.
+  const esApp = useEsStandalone();
   const [moneda] = useCurrency();
   const cuota = useCuota();
 
-  const [marco, setMarco] = useState<MarcoId>("movil");
   const [extension, setExtension] = useState<ExtensionId>("deezer");
   const [filtro, setFiltro] = useState<string | null>("track");
   const [termino, setTermino] = useState("");
@@ -130,7 +115,6 @@ export default function DemoPlayer() {
   const pendiente = useRef(0);
 
   const info = extensionDe(extension);
-  const chasis = MARCOS[marco];
 
   // Un solo <audio> para toda la demo: cambiar de pista es cambiar `src`.
   useEffect(() => {
@@ -143,12 +127,27 @@ export default function DemoPlayer() {
       setSonando(false);
       setAvance(0);
     };
+    // Un enlace firmado puede vencer o el relay devolver 403: si se queda en la
+    // pista, el siguiente clic reutilizaría la misma URL rota. Se invalida para
+    // que `reproducir` vuelva a resolver (y así "insistir" sí rescata).
+    const alError = () => {
+      setSonando(false);
+      setPista((prev) => {
+        if (prev) {
+          prev.audioUrl = null;
+          prev.canal = null;
+        }
+        return prev;
+      });
+    };
     el.addEventListener("timeupdate", alTiempo);
     el.addEventListener("ended", alTerminar);
+    el.addEventListener("error", alError);
     return () => {
       el.pause();
       el.removeEventListener("timeupdate", alTiempo);
       el.removeEventListener("ended", alTerminar);
+      el.removeEventListener("error", alError);
     };
   }, []);
 
@@ -240,7 +239,14 @@ export default function DemoPlayer() {
 
       // Pulsar la pista que ya suena solo reanuda: no gasta reproducción.
       if (pista?.id === p.id && p.audioUrl) {
-        void arrancar(el).then(setSonando);
+        void arrancar(el).then((ok) => {
+          setSonando(ok);
+          if (!ok) {
+            p.audioUrl = null;
+            p.canal = null;
+            setAvisoAudio(t("demoAudioNone"));
+          }
+        });
         return;
       }
 
@@ -264,7 +270,17 @@ export default function DemoPlayer() {
       // miniplayer aparecen junto con el audio, no un instante después.
       setPista(p);
       setAvance(0);
-      void arrancar(el).then(setSonando);
+      void arrancar(el).then((ok) => {
+        setSonando(ok);
+        if (!ok) {
+          // El enlace se resolvió pero el navegador no pudo abrirlo (403,
+          // formato, relay caído). Se descarta para que el próximo clic
+          // vuelva a pedir audio en vez de repetir la URL rota.
+          p.audioUrl = null;
+          p.canal = null;
+          setAvisoAudio(t("demoAudioNone"));
+        }
+      });
     },
     [arrancar, cuota, pista, t],
   );
@@ -391,6 +407,47 @@ export default function DemoPlayer() {
     }
   }, [arrancar, sonando, pista]);
 
+  /** Salta a un segundo concreto; lo usan la barra de seek y el karaoke. */
+  const buscarSegundo = useCallback(
+    (seg: number) => {
+      const el = audio.current;
+      if (!el || !pista) return;
+      const total = pista.duracion > 0 ? pista.duracion : el.duration || 0;
+      const destino = Math.max(0, Math.min(total || seg, seg));
+      try {
+        el.currentTime = destino;
+      } catch {
+        return;
+      }
+      setAvance(destino);
+    },
+    [pista],
+  );
+
+  const pulsarBarra = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!pista) return;
+      const total = pista.duracion > 0 ? pista.duracion : audio.current?.duration || 0;
+      if (!total) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      buscarSegundo(((e.clientX - rect.left) / Math.max(1, rect.width)) * total);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [buscarSegundo, pista],
+  );
+
+  const moverBarra = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+      if (!pista) return;
+      const total = pista.duracion > 0 ? pista.duracion : audio.current?.duration || 0;
+      if (!total) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      buscarSegundo(((e.clientX - rect.left) / Math.max(1, rect.width)) * total);
+    },
+    [buscarSegundo, pista],
+  );
+
   // El volumen vive en el estado y se aplica en UN solo lugar.
   useEffect(() => {
     const el = audio.current;
@@ -424,102 +481,45 @@ export default function DemoPlayer() {
     ? Plantilla(t("demoLadderNext"), { price: format(fase.siguiente.precio, moneda) })
     : Plantilla(t("demoLadderFinal"), { price: format(fase.precio, moneda) });
 
-  // El número vive en `@/lib/contacto` (antes estaba copiado también acá).
-  const whatsapp = enlaceWhatsApp(
-    `Hola! Probé la demo de Bitly y quiero el Premium (${format(fase.precio, moneda)}). ¿Me contás cómo lo activo?`,
-  );
-
   const irADescargas = () => {
     setTopeAbierto(false);
+    navegarA("instalar");
+  };
+
+  const irAPlanes = () => {
+    setTopeAbierto(false);
+    navegarA("planes");
   };
 
   return (
-    <section id="demo" className="container mx-auto scroll-mt-6 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
-      <div className="mb-8 text-center sm:mb-10" data-reveal suppressHydrationWarning>
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary backdrop-blur sm:px-4 sm:text-xs">
-          <Play className="anim-late h-3.5 w-3.5 sm:h-4 sm:w-4" />
-          {t("demoBadge")}
-        </div>
-        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
-          <span className="bg-clip-text text-transparent" style={{ backgroundImage: "var(--gradient-mint)" }}>
-            {t("demoTitle")}
-          </span>
-        </h2>
-        <span aria-hidden className="bit-regla mx-auto mt-3 block h-px w-24 opacity-60" />
-        <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">{t("demoDescription")}</p>
-      </div>
-
-      {/* `min-w-0` en las columnas: por defecto un ítem de grid no baja de su
-          ancho mínimo de contenido, así que en un celular de 320 px la columna
-          del marco empujaba la página 20 px a lo ancho. */}
-      <div className="mx-auto grid max-w-5xl items-start gap-5 lg:grid-cols-[1fr_15rem]">
+    <section id="demo" className="mx-auto flex h-full w-full max-w-7xl flex-col px-3 pb-3 pt-1 sm:px-6 sm:pb-5">
+      <header className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="min-w-0">
-          {/* ── Conmutador de marco ── */}
-          <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-            <div
-              role="group"
-              aria-label={t("demoFrameLabel")}
-              className="flex items-center gap-1 rounded-full border border-border bg-card/60 p-1"
-            >
-              {(Object.keys(MARCOS) as MarcoId[]).map((id) => {
-                const Icono = MARCOS[id].icono;
-                const activo = marco === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setMarco(id)}
-                    aria-pressed={activo}
-                    title={t(MARCOS[id].etiqueta)}
-                    className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300 ease-out active:scale-95 ${
-                      activo
-                        ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25 ring-1 ring-primary/40"
-                        : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
-                    }`}
-                  >
-                    <Icono className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">{t(MARCOS[id].etiqueta)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <span className="etiqueta">
+            <Play className="h-3.5 w-3.5" aria-hidden />
+            {t("demoBadge")}
+          </span>
+          <h2 className="texto-tag mt-1 text-2xl leading-none sm:text-3xl">{t("demoTitle")}</h2>
+        </div>
+        <p className="max-w-md text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("demoDescription")}</p>
+      </header>
 
-          {/* ── El chasis ── */}
-          {/* El halo late detrás del aparato (y no dentro: así el recorte del
-              chasis lo sigue tapando). En celular queda quieto, que es donde
-              una capa con blur moviéndose se paga cara. */}
-          {/* `min(20rem,100%)`: el ancho de "teléfono" de 20rem no entra en el
-              recuadro de un celular de 320 px (la página tiene 288 px útiles). */}
-          <div className="relative mx-auto w-full max-w-[min(20rem,100%)] sm:max-w-none">
-            {/* El halo sangra hacia arriba y abajo, pero a los costados sólo 1
-                píxel: con `-inset-6` se salía del viewport en un celular de 360
-                px y aparecía scroll horizontal. */}
-            <div
-              aria-hidden
-              className="anim-halo pointer-events-none absolute inset-x-0 -inset-y-6 rounded-[3rem] opacity-20 blur-2xl"
-              style={{ background: "var(--gradient-hero)" }}
-            />
+      {esApp && (
+        <span className="etiqueta mb-2 gap-1.5 self-start text-primary">
+          <Lock className="h-3 w-3" aria-hidden />
+          {t("pwaBloqueoNota")}
+        </span>
+      )}
+
+      <div className="grid min-h-0 flex-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="flex min-h-0 min-w-0 flex-col">
           <div
             role="group"
             aria-label={t("demoAriaMarco")}
-            className={`relative mx-auto overflow-hidden border border-border bg-card shadow-2xl shadow-primary/[0.06] ring-1 ring-primary/10 ${chasis.clase}`}
+            data-bloqueo-descarga=""
+            className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.8rem] border border-border bg-card shadow-2xl shadow-primary/10"
           >
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-
-            {/* Isla dinámica: solo en el marco de celular. */}
-            {marco === "movil" && (
-              <div className="pointer-events-none absolute left-1/2 top-1.5 z-20 h-3.5 w-16 -translate-x-1/2 rounded-full bg-black/75 ring-1 ring-white/5" />
-            )}
-
-            {/* Barra del sistema */}
-            <div className={`flex items-center justify-between text-xs font-semibold text-muted-foreground ${chasis.barra}`}>
-              <span>9:41</span>
-              <span className="flex items-center gap-1">
-                <Music className="h-3 w-3 text-primary" />
-                Bitly
-              </span>
-            </div>
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-primary" />
 
             {/* Buscador: selector de fuente + campo, como la barra de la app */}
             <form
@@ -527,7 +527,7 @@ export default function DemoPlayer() {
                 e.preventDefault();
                 void hacerBusqueda(termino, extension, filtro);
               }}
-              className="px-3 sm:px-4"
+              className="shrink-0 px-3 sm:px-4"
             >
               <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/60 px-2.5 py-2 focus-within:border-primary/50">
                 <ExtensionPicker valor={extension} onCambiado={cambiarExtension} />
@@ -566,11 +566,11 @@ export default function DemoPlayer() {
             </form>
 
             {/* Cuota + botón de canje */}
-            <div className="flex items-center justify-between gap-2 px-3 pt-2.5 sm:px-4">
+            <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-2.5 sm:px-4">
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${
                   cuota.premium
-                    ? "bg-gradient-to-r from-[#15803D] to-[#0E7A46] text-white ring-transparent"
+                    ? "bg-gradient-to-r from-primary to-accent text-primary-foreground ring-transparent"
                     : cuota.sinCuota
                       ? "bg-destructive/10 text-destructive ring-destructive/25"
                       : "bg-primary/15 text-primary ring-primary/25"
@@ -601,8 +601,7 @@ export default function DemoPlayer() {
             {/* Resultados */}
             <div
               ref={listaRef}
-              className="mt-2 overflow-y-auto px-2 pb-2 sm:h-72 sm:px-3"
-              style={{ height: marco === "movil" ? "14rem" : "22rem" }}
+              className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 sm:px-3"
             >
               {resultados === null && !cargando && (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-2 text-center">
@@ -702,7 +701,7 @@ export default function DemoPlayer() {
                             <span
                               aria-hidden
                               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-primary-foreground"
-                              style={{ backgroundImage: "var(--gradient-mint)" }}
+                              style={{ backgroundImage: "var(--gradiente-marca)" }}
                             >
                               {letraDe(p.titulo)}
                             </span>
@@ -750,27 +749,30 @@ export default function DemoPlayer() {
 
             {/* Miniplayer */}
             {pista && (
-              <div className="border-t border-border/60 bg-background/70 px-3 py-2.5 sm:px-4 sm:py-3">
-                <div className="h-1 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-200"
-                    style={{ width: `${Math.min(100, (avance / (pista.duracion || 1)) * 100)}%` }}
+              <div className="relative shrink-0 overflow-hidden border-t border-white/10">
+                {/* Vidrio esmerilado: la carátula se estira detrás y tiñe el panel. */}
+                {pista.caratula && (
+                  <img
+                    src={pista.caratula}
+                    alt=""
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-25 blur-2xl"
                   />
-                </div>
-                <div className="mt-2.5 flex items-center gap-2.5">
-                  {/* Cover circular: la carátula de la pista DENTRO de un
-                      anillo que marca los segundos que van; si la fuente no
-                      trae imagen, la LETRA hace de cover. */}
-                  <span className="relative h-11 w-11 shrink-0">
-                    <svg viewBox="0 0 44 44" aria-hidden className="absolute inset-0 h-11 w-11 -rotate-90">
-                      <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted-foreground/30" />
+                )}
+                <div className="relative bg-background/55 px-3 py-1.5 backdrop-blur-2xl sm:px-4">
+                <div className="flex items-center gap-2">
+                  {/* Cover circular de vidrio: la carátula DENTRO de un anillo
+                      que marca los segundos; sin imagen, la inicial hace de cover. */}
+                  <span className="relative h-9 w-9 shrink-0 drop-shadow-[0_0_10px_rgba(0,0,0,0.25)]">
+                    <svg viewBox="0 0 36 36" aria-hidden className="absolute inset-0 h-9 w-9 -rotate-90">
+                      <circle cx="18" cy="18" r="15.7" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20" />
                       <circle
-                        cx="22"
-                        cy="22"
-                        r="19"
+                        cx="18"
+                        cy="18"
+                        r="15.7"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="3"
+                        strokeWidth="2"
                         strokeLinecap="round"
                         className="text-primary"
                         strokeDasharray={ANILLO}
@@ -778,134 +780,157 @@ export default function DemoPlayer() {
                       />
                     </svg>
                     {pista.caratula ? (
-                      <img src={pista.caratula} alt="" className="absolute left-1 top-1 h-9 w-9 rounded-full object-cover" />
+                      <img src={pista.caratula} alt="" className="absolute left-[3px] top-[3px] h-[30px] w-[30px] rounded-full border border-white/40 object-cover shadow-lg" />
                     ) : (
                       <span
                         aria-hidden
-                        className="absolute left-1 top-1 flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-primary-foreground"
-                        style={{ backgroundImage: "var(--gradient-mint)" }}
+                        className="absolute left-[3px] top-[3px] flex h-[30px] w-[30px] items-center justify-center rounded-full border border-white/30 text-[11px] font-bold text-primary-foreground shadow-lg"
+                        style={{ backgroundImage: "var(--gradiente-marca)" }}
                       >
                         {letraDe(pista.titulo)}
                       </span>
                     )}
                     {sonando && (
-                      <span aria-hidden className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background" />
+                      <span aria-hidden className="absolute -bottom-px -right-px h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
                     )}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-semibold">{pista.titulo}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
+                    <span className="block truncate text-[11px] font-bold leading-tight">{pista.titulo}</span>
+                    <span className="block truncate text-[10px] leading-tight text-muted-foreground">
                       {pista.artista || "\u00a0"}
-                      {pista.isrc ? ` · ISRC ${pista.isrc}` : ""}
+                      {pista.canal === "stash-relay" ? " · FLAC" : pista.canal === "youtube" ? " · YouTube" : ""}
                     </span>
                   </span>
-                  {/* Los segundos, siempre a la vista. */}
-                  <span className="shrink-0 text-xs font-semibold tabular-nums">
+                  <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm">
                     <span className="text-foreground">{mmss(avance)}</span>
                     <span className="text-muted-foreground"> / {mmss(pista.duracion)}</span>
                   </span>
                 </div>
 
-                {/* Aleatoria · anterior · play/pausa · siguiente · silencio */}
-                <div className="mt-2 flex items-center justify-between">
+                {/* Aleatoria · anterior · play/pausa · siguiente · volumen */}
+                <div className="mt-1 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => setAleatorio((a) => !a)}
                     aria-label={t("demoShuffle")}
                     aria-pressed={aleatorio}
                     title={t("demoShuffle")}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full ring-1 transition ${
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 transition ${
                       aleatorio
                         ? "bg-primary/20 text-primary ring-primary/40"
-                        : "text-muted-foreground ring-border/60 hover:text-foreground"
+                        : "text-muted-foreground ring-white/10 hover:text-foreground"
                     }`}
                   >
-                    <Shuffle className="h-3.5 w-3.5" />
+                    <Shuffle className="h-2.5 w-2.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => moverse(-1)}
                     aria-label={t("demoPrev")}
                     title={t("demoPrev")}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-card text-muted-foreground ring-1 ring-border/60 transition hover:text-foreground"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/5 text-muted-foreground ring-1 ring-white/10 transition hover:text-foreground"
                   >
-                    <SkipBack className="h-4 w-4" />
+                    <SkipBack className="h-3 w-3" />
                   </button>
                   <button
                     type="button"
                     onClick={alternar}
                     aria-label={t("demoPlayPause")}
                     aria-pressed={sonando}
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition duration-200 hover:scale-105 active:scale-90"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition duration-200 hover:scale-105 active:scale-90"
                   >
-                    {sonando ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                    {sonando ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                   </button>
                   <button
                     type="button"
                     onClick={() => moverse(1)}
                     aria-label={t("demoNext")}
                     title={t("demoNext")}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-card text-muted-foreground ring-1 ring-border/60 transition hover:text-foreground"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/5 text-muted-foreground ring-1 ring-white/10 transition hover:text-foreground"
                   >
-                    <SkipForward className="h-4 w-4" />
+                    <SkipForward className="h-3 w-3" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setVolumen((v) => (v > 0 ? 0 : 1))}
-                    aria-label={t("demoMute")}
-                    title={t("demoMute")}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground ring-1 ring-border/60 transition hover:text-foreground"
-                  >
-                    {volumen === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-                  </button>
+                  <div className="ml-0.5 flex min-w-0 flex-1 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setVolumen((v) => (v > 0 ? 0 : 1))}
+                      aria-label={t("demoMute")}
+                      title={t("demoMute")}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground ring-1 ring-white/10 transition hover:text-foreground"
+                    >
+                      {volumen === 0 ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={volumen}
+                      onChange={(e) => setVolumen(Number(e.target.value))}
+                      aria-label={t("demoVolume")}
+                      title={t("demoVolume")}
+                      className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-primary"
+                    />
+                    <span className="hidden w-7 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground sm:block">
+                      {Math.round(volumen * 100)}%
+                    </span>
+                  </div>
                 </div>
 
-                {/* Volumen */}
-                <div className="mt-2 flex items-center gap-2">
-                  <Volume2 className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={volumen}
-                    onChange={(e) => setVolumen(Number(e.target.value))}
-                    aria-label={t("demoVolume")}
-                    title={t("demoVolume")}
-                    className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
-                  />
-                  <span className="w-7 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {Math.round(volumen * 100)}%
+                {/* Letra centrada, una línea a la vez, entre el volumen y el seek. */}
+                <div className="mt-1">
+                  <Karaoke pista={pista} avance={avance} onBuscar={buscarSegundo} />
+                </div>
+
+                {/* Seek interactivo: clic o arrastre para adelantar/retroceder. */}
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="w-8 shrink-0 text-[10px] font-semibold tabular-nums text-foreground">
+                    {mmss(avance)}
+                  </span>
+                  <div
+                    role="slider"
+                    tabIndex={0}
+                    aria-label={t("demoSeek")}
+                    aria-valuemin={0}
+                    aria-valuemax={Math.round(pista.duracion)}
+                    aria-valuenow={Math.round(avance)}
+                    onPointerDown={pulsarBarra}
+                    onPointerMove={moverBarra}
+                    onKeyDown={(e) => {
+                      if (!pista) return;
+                      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                        e.preventDefault();
+                        buscarSegundo(avance + (e.key === "ArrowRight" ? 5 : -5));
+                      }
+                    }}
+                    className="group relative h-1 min-w-0 flex-1 cursor-pointer touch-none rounded-full bg-muted"
+                  >
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
+                      style={{ width: `${Math.min(100, (avance / (pista.duracion || 1)) * 100)}%` }}
+                    />
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100"
+                      style={{ left: `calc(${Math.min(100, (avance / (pista.duracion || 1)) * 100)}% - 5px)` }}
+                    />
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-[10px] font-semibold tabular-nums text-muted-foreground">
+                    {mmss(pista.duracion)}
                   </span>
                 </div>
-
-                {/* Si quiere más, la app completa. */}
-                <a
-                  href="#instalar"
-                  onClick={irADescargas}
-                  className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-bold text-primary ring-1 ring-primary/25 transition hover:bg-primary/15 active:scale-[0.98]"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  {t("demoMiniCta")}
-                </a>
-
-                <p className="mt-1.5 text-center text-xs text-muted-foreground">
-                  {t("demoPreviewNote")}
-                </p>
+                </div>
               </div>
             )}
 
-            {/* Indicador de inicio: cierra el marco de celular. */}
-            {marco === "movil" && (
-              <div className="mx-auto mb-1.5 mt-1 h-1 w-24 rounded-full bg-foreground/15" />
-            )}
-          </div>
+            {/* Modo app instalada: el reproductor queda tapado. */}
+            {esApp && <ModoAppOverlay />}
           </div>
         </div>
 
-        {/* ── Indicador de precio ── */}
-        <aside data-reveal suppressHydrationWarning style={retraso(120)} className="min-w-0 rounded-2xl border border-border bg-gradient-to-b from-card/70 to-card/30 p-5 backdrop-blur">
-          <h3 className="text-sm font-bold">{fase.siguiente ? t("demoLadderTitle") : t("plansPremiumPrice")}</h3>
+        {/* �� Indicador de precio �� */}
+        <aside data-reveal suppressHydrationWarning style={retraso(120)} className="tarjeta hidden min-w-0 flex-col p-5 lg:flex">
+          <h3 className="texto-tag text-2xl leading-none">{fase.siguiente ? t("demoLadderTitle") : t("plansPremiumPrice")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("plansPremium")}
@@ -930,8 +955,8 @@ export default function DemoPlayer() {
           </div>
           <button
             type="button"
-            onClick={() => document.getElementById("planes")?.scrollIntoView({ behavior: "smooth" })}
-            className="mt-4 w-full rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground transition hover:opacity-90 active:scale-[0.98]"
+            onClick={irAPlanes}
+            className="boton-spray mt-4 w-full px-4 py-2.5 text-xs"
           >
             {t("demoPaywallPlans")}
           </button>
@@ -939,7 +964,7 @@ export default function DemoPlayer() {
       </div>
 
       {/* ── Tope: sin reproducciones y sin Premium ── */}
-      {topeAbierto && (
+      {topeAbierto && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-3 backdrop-blur-sm sm:p-4">
           <div className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-gradient-to-b from-card to-card/90 p-5 shadow-2xl ring-1 ring-border/50 sm:p-6">
             <div className="absolute inset-x-0 top-0 h-[2px] rounded-t-2xl bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
@@ -977,14 +1002,13 @@ export default function DemoPlayer() {
                 <Play className="h-4 w-4" />
                 {t("demoPaywallInstall")}
               </a>
-              <a
-                href={whatsapp}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#15803D] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-[#15803D]/25 transition hover:bg-[#0E7A46] hover:opacity-90 active:scale-[0.98]"
+              <button
+                type="button"
+                onClick={irAPlanes}
+                className="boton-spray w-full px-4 py-3 text-sm"
               >
-                {t("plansWhatsAppLabel")}
-              </a>
+                {t("demoPaywallPlans")}
+              </button>
               {cuota.premium && (
                 <button
                   type="button"
@@ -996,7 +1020,8 @@ export default function DemoPlayer() {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {codigoAbierto && (

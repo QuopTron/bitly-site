@@ -129,10 +129,23 @@ await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
     "window.__csp=[];" +
     "addEventListener('securitypolicyviolation',e=>window.__csp.push((e.violatedDirective||'?')+' <- '+(e.blockedURI||'?')));",
 });
+// El tutorial de la cabecera abre solo la primera vez y su capa tapa los
+// controles de la demo: en la prueba se marca como visto antes de navegar.
+await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
+  source: "try{localStorage.setItem('bitly_pistas_cabecera','1')}catch{}",
+});
 
 try {
   console.log(`${BASE} · marco de celular\n`);
   await ses.ev("Page.navigate", { url: `${BASE}/#demo` });
+  // La sección existe desde el SSR aunque la vista activa siga en "inicio":
+  // primero se espera a que el hash active la pestaña de la demo (si no, los
+  // clics caen sobre un panel desplazado fuera de pantalla).
+  await esperar(
+    ses,
+    `document.querySelector('[data-vista="demo"]')?.getAttribute('aria-hidden') === 'false'`,
+    { nombre: "vista demo activa" },
+  );
   // Se espera al FORMULARIO, no a la sección: el marco puede existir un
   // instante antes de que React monte el buscador.
   await esperar(ses, `document.querySelector("#demo form")`, { nombre: "buscador montado" });
@@ -228,6 +241,33 @@ try {
     /3/.test(estado?.cuota ?? "") || /ilimitadas/i.test(estado?.cuota ?? ""),
     String(estado?.cuota),
   );
+
+  // La letra se pide al servidor (LRCLIB) y puede tardar; no se exige que la
+  // línea actual ya esté pintada, pero sí que el verso exista (no el ♪ solo).
+  let letra = "";
+  for (let i = 0; i < 40; i++) {
+    letra = await js(
+      ses,
+      `(document.querySelector("#demo [data-karaoke]")?.innerText ?? "").replace(/\\s+/g, " ").trim()`,
+    );
+    if (letra && letra !== "♪" && !letra.startsWith("♪ ·")) break;
+    await dormir(250);
+  }
+  check("el miniplayer muestra la letra sincronizada", /legend|phoenix/i.test(letra), letra.slice(0, 90));
+
+  // Tocar un verso salta a su segundo; al avanzar, el verso actual queda
+  // marcado y la ventana se desplaza (karaoke, no una letra estática).
+  const verso = await js(
+    ses,
+    `(() => { const b = [...document.querySelectorAll("#demo [data-karaoke] button")];
+      if (b.length < 2) return null; const t = b[1].innerText.trim(); b[1].click(); return t; })()`,
+  );
+  await dormir(900);
+  const activo = await js(
+    ses,
+    `(document.querySelector("#demo [data-karaoke] button[data-activa='1']")?.innerText ?? "").trim()`,
+  );
+  check("la letra avanza y pinta el verso actual", Boolean(verso) && activo === verso, activo);
 
   // ── 4. Las cuatro categorías se pueden recorrer ──
   // Cambiar de burbuja reabre la búsqueda: el listado tiene que pasar a

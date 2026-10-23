@@ -1,24 +1,18 @@
 /**
  * Opiniones con estrellas.
  *
- * Sólo la ESCRITURA pasa por acá. Leer es público (la tabla tiene política de
- * SELECT para lo aprobado), pero insertar no: la migración no crea política de
- * INSERT a propósito, así que nadie puede mandar filas directo contra la API de
- * Supabase con la clave publicable —que es pública por diseño—. El único camino
- * es este módulo.
+ * Sólo la ESCRITURA pasa por acá. Leer es público (cualquiera puede bajarse
+ * `data/opiniones.json` del repo privado vía el sitio), pero escribir no: el
+ * archivo no tiene endpoint abierto y el único camino es esta función de
+ * servidor, que valida con `src/lib/opiniones-reglas.ts` y además limita los
+ * envíos por IP. Sin eso, un script llenaría el archivo en segundos y cada
+ * envío costaría un commit.
  *
- * Escribe con `SUPABASE_SECRET_KEY` (clave secreta, sólo servidor, nunca
- * prefijada con VITE_) y aplica las reglas de `src/lib/opiniones-reglas.ts`, que
- * incluyen el cupo por IP: sin él, un script llena la tabla en segundos.
- *
- * Cómo está probado: las reglas y el cupo se comprueban sin base
- * (`scripts/probar-opiniones.mjs`); el camino real de escritura necesita la
- * migración aplicada en Supabase.
+ * El token de GitHub vive en el servidor (nunca prefijado con VITE_), del mismo
+ * modo en que antes vivía `SUPABASE_SECRET_KEY`.
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
 import {
   NOMBRE_MAX,
   NOMBRE_MIN,
@@ -28,6 +22,7 @@ import {
   limpiarEstrellas,
   limpiarTexto,
 } from "@/lib/opiniones-reglas";
+import { getJson, putJson } from "./github-store";
 import { obtenerIPCliente } from "./ip";
 
 export type OpinionPublicada = {
@@ -42,14 +37,10 @@ export type ResultadoOpinion =
   | { ok: true; opinion: OpinionPublicada }
   | { ok: false; motivo: "datos" | "limite" | "servidor" };
 
-function clienteServidor() {
-  const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-  const clave = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !clave) throw new Error("Faltan SUPABASE_URL / SUPABASE_SECRET_KEY en el servidor");
-  return createClient<Database>(url, clave, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
+const ARCHIVO = "data/opiniones.json";
+
+/** Mismo shape que guarda `data/opiniones.json`. */
+type OpinionCruda = OpinionPublicada & { aprobado?: boolean };
 
 export const publicarOpinion = createServerFn({ method: "POST" })
   .validator((entrada: { nombre?: unknown; estrellas?: unknown; texto?: unknown }) => entrada)
@@ -63,16 +54,31 @@ export const publicarOpinion = createServerFn({ method: "POST" })
     if (!hayCupo(await obtenerIPCliente())) return { ok: false, motivo: "limite" };
 
     try {
-      const { data: fila, error } = await clienteServidor()
-        .from("comentarios")
-        .insert({ nombre, estrellas, texto })
-        .select("id, nombre, estrellas, texto, creado")
-        .single();
-      if (error || !fila) {
-        console.error("[opiniones] no se pudo guardar:", error?.message ?? "sin fila");
+      const lista = await getJson<OpinionCruda[]>("datos", ARCHIVO, []);
+      const base = Array.isArray(lista) ? [...lista] : [];
+
+      const opinion: OpinionCruda = {
+        // `Date.now()` y no `max(id)+1`: con dos envíos simultáneos de
+        // visitantes distintos el `max` se repetiría y React chocaría con la
+        // key. Con el timestamp cada opinión es única.
+        id: Date.now(),
+        nombre,
+        estrellas,
+        texto,
+        aprobado: true,
+        creado: new Date().toISOString(),
+      };
+
+      const ok = await putJson("datos", ARCHIVO, [opinion, ...base], `opinion: ${estrellas}★ ${nombre}`);
+      if (!ok) {
+        console.error("[opiniones] no se pudo escribir el archivo");
         return { ok: false, motivo: "servidor" };
       }
-      return { ok: true, opinion: fila as OpinionPublicada };
+
+      return {
+        ok: true,
+        opinion: { id: opinion.id, nombre, estrellas, texto, creado: opinion.creado },
+      };
     } catch (e) {
       console.error("[opiniones] error inesperado:", e instanceof Error ? e.message : e);
       return { ok: false, motivo: "servidor" };

@@ -46,7 +46,7 @@ export default function ScrollProgress() {
       <div
         ref={ref}
         style={{ transform: "scaleX(0)" }}
-        className="h-full w-full origin-left bg-gradient-to-r from-primary via-accent to-primary"
+        className="h-full w-full origin-left bg-primary"
       />
     </div>
   );

@@ -7,8 +7,8 @@
  * el cupo corte de verdad (por clave y global) — si el cupo no cortara, un
  * script podría llenar la tabla de basura.
  *
- * El camino real de escritura (contra Supabase) necesita la migración aplicada
- * y no se puede probar desde acá.
+ * El camino real de escritura (contra GitHub) necesita el token del repo y no
+ * se puede probar desde acá; para eso está `verificar-opiniones-reales.mjs`.
  *
  * Uso: node scripts/probar-opiniones.mjs
  */

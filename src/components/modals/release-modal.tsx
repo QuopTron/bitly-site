@@ -16,6 +16,8 @@ type Props = {
   latestVersion: string;
   /** Lleva a la guía con capturas de la sección de instalación. */
   onOpenGuide?: () => void;
+  /** Se llama recién cuando el visitante toca un archivo concreto. */
+  onDownload?: (url: string) => void;
 };
 
 function formatSize(bytes: number): string {
@@ -41,7 +43,7 @@ function detectArch(): string | null {
   return null;
 }
 
-function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => string }) {
+function WinAssets({ assets, t, onDownload }: { assets: ReleaseAsset[]; t: (k: string) => string; onDownload?: (url: string) => void }) {
   const exeAssets = assets.filter((a) => a.name.endsWith(".exe"));
   if (exeAssets.length === 0) return null;
 
@@ -56,6 +58,7 @@ function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => st
             href={asset.browser_download_url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => onDownload?.(asset.browser_download_url)}
             className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
           >
             <div>
@@ -70,7 +73,7 @@ function WinAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => st
   );
 }
 
-function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) => string }) {
+function AndroidAssets({ assets, t, onDownload }: { assets: ReleaseAsset[]; t: (k: string) => string; onDownload?: (url: string) => void }) {
   const apkAssets = assets.filter((a) => a.name.endsWith(".apk"));
   if (apkAssets.length === 0) return null;
 
@@ -89,6 +92,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
             href={asset.browser_download_url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => onDownload?.(asset.browser_download_url)}
             className={`flex items-center justify-between rounded-xl border p-2.5 transition sm:p-3 ${
               recommended ? "border-primary/60 bg-primary/5 shadow-sm shadow-primary/10" : "border-border/60 bg-card/40 hover:border-primary/40 hover:bg-primary/5"
             }`}
@@ -108,7 +112,7 @@ function AndroidAssets({ assets, t }: { assets: ReleaseAsset[]; t: (k: string) =
   );
 }
 
-export default function ReleaseModal({ open, onClose, platform, assets, version, latestVersion, onOpenGuide }: Props) {
+export default function ReleaseModal({ open, onClose, platform, assets, version, latestVersion, onOpenGuide, onDownload }: Props) {
   const t = useI18n();
   const [detected, setDetected] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -146,8 +150,8 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
       <div className="space-y-4">
         {/* 1. Los archivos, primero: quien ya sabe instalar no necesita nada más. */}
         <div className="space-y-2">
-          {isWindows && <WinAssets assets={filteredAssets} t={t} />}
-          {isAndroid && <AndroidAssets assets={filteredAssets} t={t} />}
+          {isWindows && <WinAssets assets={filteredAssets} t={t} onDownload={onDownload} />}
+          {isAndroid && <AndroidAssets assets={filteredAssets} t={t} onDownload={onDownload} />}
           {(isTv || isIos || isMacos) && filteredAssets.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground sm:text-xs">{t("releaseDownloadFile")}</p>
@@ -157,6 +161,7 @@ export default function ReleaseModal({ open, onClose, platform, assets, version,
                   href={asset.browser_download_url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => onDownload?.(asset.browser_download_url)}
                   className="flex items-center justify-between rounded-xl border border-border/60 bg-card/40 p-2.5 transition hover:border-primary/40 hover:bg-primary/5 sm:p-3"
                 >
                   <div className="min-w-0">

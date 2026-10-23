@@ -35,9 +35,9 @@ const FAQ_JSON = FAQ.map((f) => ({
  *
  *  - `WebSite` + `Organization`: quién publica (search box / knowledge panel).
  *  - `SoftwareApplication`: la ficha de la app (categoría, sistemas, icono).
- *  - `FAQPage`: las preguntas de la sección `#faq`. Tiene que coincidir
- *    carácter a carácter con lo que se ve en la página, por eso sale del mismo
- *    diccionario que el componente.
+ *  - `FAQPage`: las preguntas del modal `#faq`. Tiene que coincidir carácter a
+ *    carácter con lo que se muestra, por eso sale del mismo diccionario que el
+ *    componente.
  */
 export function jsonLd(): string {
   return JSON.stringify(

@@ -12,7 +12,8 @@
  * renueva la sesión y reintenta UNA vez.
  */
 
-import { demoAbrir, demoBuscar, demoClave, demoRescatar } from "@/server/demo-proxy";
+import { demoAbrir, demoBuscar, demoClave, demoLetras, demoRescatar } from "@/server/demo-proxy";
+import type { Letras, PeticionLetras } from "@/server/letras";
 import type { Item, TipoResultado } from "@/server/extensions";
 import {
   cifrar,
@@ -128,6 +129,15 @@ export async function rescatarDemo(pista: PistaParaAudio): Promise<AudioRescatad
   try {
     const { carga } = await sellar(pista);
     return (await demoRescatar({ data: carga })) as AudioRescatado | null;
+  } catch {
+    return null;
+  }
+}
+
+/** Letras del karaoke: metadata pública, resuelta por el servidor. */
+export async function letrasDemo(peticion: PeticionLetras): Promise<Letras | null> {
+  try {
+    return (await demoLetras({ data: peticion })) as Letras | null;
   } catch {
     return null;
   }
