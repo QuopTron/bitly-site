@@ -210,6 +210,28 @@ código):
    repo es privado y está cifrado, pero un comprobante no necesita vivir para
    siempre.
 
+## 5.1 Plan free: cómo entra el sitio
+
+El sitio está pensado para el plan gratuito de Pages/Workers (100.000
+peticiones por día, 10 ms de CPU por petición). Lo que lo hace entrar cómodo:
+
+- **La portada no gasta Functions.** El HTML se prerenderiza en el build y lo
+  sirve el CDN. Al worker sólo llegan las `POST /_serverFn/*` (la demo, los
+  pedidos, las cuentas) y alguna ruta que el CDN no tenga.
+- **La CSP se calcula una vez por versión del HTML.** Se cachea por `ETag`: el
+  primer visitante paga el hash de los guiones inline y el resto lo recibe de
+  memoria. Sin esto, cada visita re-parseaba cientos de KB para llegar al mismo
+  resultado, justo en el límite de CPU del plan free.
+- **Sin servicios que se cobren aparte.** No hay KV, D1, R2, Durable Objects ni
+  cron: el estado vive en el repo privado y en la memoria del isolate.
+- **La caché y los cupos son por isolate.** En free, cada isolate nuevo arranca
+  frío: la primera visita puede tardar un poco más y los cupos se reinician.
+  Para el abuso repartido sigue haciendo falta una regla de WAF (sección 5).
+- **Nada depende de un backend que duerme.** Si el host del backend de yt-dlp
+  está en un plan free que se apaga por inactividad, la demo sigue andando con
+  los catálogos; el canal de YouTube sólo hace falta para folklore de nicho y
+  re-subidos.
+
 ## 6. Comprobar que quedó bien
 
 ```bash

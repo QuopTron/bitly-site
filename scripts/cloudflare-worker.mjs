@@ -126,6 +126,28 @@ async function cspDeHtml(html) {
 }
 
 /**
+ * CSP ya calculada, por versión del HTML (su ETag).
+ *
+ * El plan free de Workers da 10 ms de CPU por petición y el HTML prerenderizado
+ * pesa cientos de KB: recalcular los hashes de los guiones inline en CADA visita
+ * es gastar CPU para obtener siempre el mismo resultado. El ETag cambia cuando
+ * cambia el HTML (nuevo deploy), así que la caché no puede quedar vieja: si no
+ * hay ETag, se calcula como siempre.
+ */
+const CSP_POR_ETAG = new Map();
+const CSP_CACHE_MAX = 8;
+
+async function cspDeHtmlCacheado(html, etag) {
+  if (!etag) return cspDeHtml(html);
+  const guardada = CSP_POR_ETAG.get(etag);
+  if (guardada) return guardada;
+  const csp = await cspDeHtml(html);
+  if (CSP_POR_ETAG.size >= CSP_CACHE_MAX) CSP_POR_ETAG.clear();
+  CSP_POR_ETAG.set(etag, csp);
+  return csp;
+}
+
+/**
  * Pone la CSP calculada en las respuestas HTML. Si el cuerpo viene comprimido
  * (no debería ocurrir dentro del worker), la respuesta sale con una política
  * de emergencia con 'unsafe-inline': preferible una CSP floja a ninguna o a
@@ -141,7 +163,7 @@ async function conCsp(resp) {
   }
   const html = await resp.text();
   const cab = new Headers(resp.headers);
-  cab.set("Content-Security-Policy", await cspDeHtml(html));
+  cab.set("Content-Security-Policy", await cspDeHtmlCacheado(html, resp.headers.get("etag") ?? ""));
   cab.delete("content-length");
   return new Response(html, { status: resp.status, statusText: resp.statusText, headers: cab });
 }
