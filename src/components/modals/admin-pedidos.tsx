@@ -10,11 +10,13 @@ import {
   Save,
   Send,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import {
   actualizarPedido,
   adminPedidos,
+  eliminarPedido,
   enviarCodigoPedido,
   leerComprobante,
   probarCorreo,
@@ -50,14 +52,18 @@ function FilaPedido({
   codigoAdmin,
   codigosActivos,
   onCambio,
+  onEliminar,
 }: {
   pedido: PedidoAdmin;
   codigoAdmin: string;
   codigosActivos: string[];
   onCambio: (p: PedidoAdmin) => void;
+  onEliminar: () => void;
 }) {
   const t = useI18n();
   const [abierto, setAbierto] = useState(false);
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false);
+  const [borrando, setBorrando] = useState(false);
   const [estado, setEstado] = useState<EstadoPedido>(pedido.estado);
   const [codigo, setCodigo] = useState(pedido.codigo ?? "");
   const [nota, setNota] = useState(pedido.nota);
@@ -107,6 +113,24 @@ function FilaPedido({
       setAviso({ tipo: "error", texto: t("adminPedidoError_servidor") });
     } finally {
       setEnviando(false);
+    }
+  };
+
+  const borrar = async () => {
+    if (borrando) return;
+    setBorrando(true);
+    setAviso(null);
+    try {
+      const r = await eliminarPedido({ data: { admin: codigoAdmin, folio: pedido.folio } });
+      if (!r.ok) {
+        setAviso({ tipo: "error", texto: t(r.motivo === "admin" ? "adminError" : "adminPedidoEliminarError") });
+        return;
+      }
+      onEliminar();
+    } catch {
+      setAviso({ tipo: "error", texto: t("adminPedidoEliminarError") });
+    } finally {
+      setBorrando(false);
     }
   };
 
@@ -263,7 +287,44 @@ function FilaPedido({
               {enviando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               {t("adminPedidoEnviar")}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAviso(null);
+                setConfirmarBorrado(true);
+              }}
+              disabled={borrando}
+              className="boton-fantasma ml-auto min-h-9 gap-1.5 px-3 text-[11px] text-destructive disabled:opacity-40"
+            >
+              {borrando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              {t("adminPedidoEliminar")}
+            </button>
           </div>
+
+          {confirmarBorrado && (
+            <div className="space-y-2 rounded-xl border border-destructive/40 bg-destructive/10 p-2.5">
+              <p className="text-[11px] text-destructive">{t("adminPedidoEliminarAviso")}</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void borrar()}
+                  disabled={borrando}
+                  className="boton-spray min-h-9 gap-1.5 px-3 text-[11px] disabled:opacity-50"
+                >
+                  {borrando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {t("adminPedidoEliminarSi")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmarBorrado(false)}
+                  disabled={borrando}
+                  className="boton-fantasma min-h-9 px-3 text-[11px]"
+                >
+                  {t("adminPedidoEliminarNo")}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -417,6 +478,7 @@ export default function AdminPedidos({ codigo }: { codigo: string }) {
               codigoAdmin={codigo}
               codigosActivos={resumen?.codigosActivos ?? []}
               onCambio={(nuevo) => setPedidos((lista) => lista.map((x) => (x.folio === nuevo.folio ? nuevo : x)))}
+              onEliminar={() => setPedidos((lista) => lista.filter((x) => x.folio !== p.folio))}
             />
           ))}
         </ul>

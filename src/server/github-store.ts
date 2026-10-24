@@ -274,6 +274,39 @@ export async function putArchivo(
   });
 }
 
+/**
+ * Borra un archivo del repo.
+ *
+ * Lo usan los pedidos: cuando el admin elimina uno, el comprobante no puede
+ * quedarse para siempre. Es idempotente a propósito: si el archivo ya no está
+ * (404), devuelve `true` y el pedido se puede terminar de limpiar.
+ */
+export async function borrarArchivo(clave: RepoClave, ruta: string, mensaje: string): Promise<boolean> {
+  const repo = repoDe(clave);
+  const llave = `${repo}/${ruta}`;
+  return cola(llave, async () => {
+    const r = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`);
+    if (r && r.status === 404) return true;
+    if (!r || !r.ok) {
+      console.error(`[datos] no se pudo leer ${ruta} para borrarlo: ${r?.status ?? "sin respuesta"}`);
+      return false;
+    }
+    const datos = (await r.json().catch(() => null)) as { sha?: string } | null;
+    if (!datos?.sha) return false;
+
+    const borrado = await conReintentos(`/repos/${repo}/contents/${ruta}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: mensaje, sha: datos.sha, branch: RAMA }),
+    });
+    if (!borrado?.ok) {
+      console.error(`[datos] no se pudo borrar ${ruta}: ${borrado?.status ?? "sin respuesta"}`);
+      return false;
+    }
+    return true;
+  });
+}
+
 /** Lee un archivo binario del repo y lo devuelve en base64 (sin data URL). */
 export async function getArchivo(clave: RepoClave, ruta: string): Promise<string | null> {
   const repo = repoDe(clave);

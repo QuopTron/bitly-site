@@ -202,9 +202,11 @@ código):
    firman con el token de GitHub, así que rotar el token cierra todas las
    sesiones. Cambiarlo ahora no rompe nada (hay 0 cuentas).
 4. **Retención de comprobantes**: los archivos de `data/comprobantes/` no se
-   borran solos. Conviene limpiar los pedidos viejos de vez en cuando
-   (el repo es privado y está cifrado, pero un comprobante no necesita vivir
-   para siempre).
+   borran solos. Desde la pestaña **Pedidos** del panel privado, **Eliminar
+   pedido** borra la fila y su comprobante del repo (con confirmación; no se
+   puede deshacer). Conviene purgar los pedidos cerrados de vez en cuando: el
+   repo es privado y está cifrado, pero un comprobante no necesita vivir para
+   siempre.
 
 ## 6. Comprobar que quedó bien
 

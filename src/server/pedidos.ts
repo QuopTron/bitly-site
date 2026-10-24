@@ -15,7 +15,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { adminValido } from "@/server/analytics";
 import { correoAdmin, correoConfigurado, enviarCorreo } from "@/server/correo";
-import { getArchivo, getJson, putArchivo, putJson } from "@/server/github-store";
+import { borrarArchivo, getArchivo, getJson, putArchivo, putJson } from "@/server/github-store";
 import { obtenerIPCliente } from "@/server/ip";
 import { cuentaDeToken } from "@/server/cuentas";
 import { leerRegistroCodigos } from "@/lib/premium-check";
@@ -593,6 +593,51 @@ export const enviarCodigoPedido = createServerFn({ method: "POST" })
       }
     },
   );
+
+/**
+ * Elimina un pedido y su comprobante.
+ *
+ * Sirve para la retención de datos: un comprobante de transferencia no tiene
+ * por qué vivir para siempre en el repo. Primero se borra el archivo (si ya no
+ * está, sigue), después la fila del pedido: así un fallo a mitad de camino se
+ * puede reintentar sin dejar huérfanos.
+ */
+export const eliminarPedido = createServerFn({ method: "POST" })
+  .validator((d: { admin?: unknown; folio?: unknown }) => d)
+  .handler(async ({ data }): Promise<{ ok: true } | { ok: false; motivo: "admin" | "datos" | "servidor" }> => {
+    if (!(await adminValido(data?.admin))) return { ok: false, motivo: "admin" };
+    const folio = limpiar(data?.folio, 20).toUpperCase();
+    if (!folio) return { ok: false, motivo: "datos" };
+
+    try {
+      const lista = await leerPedidos();
+      const pedido = lista.find((p) => p.folio === folio);
+      if (!pedido) return { ok: false, motivo: "datos" };
+
+      // Sólo se borra dentro de la carpeta de comprobantes: el campo viene del
+      // repo, pero no queremos que un dato manipulado borre otro archivo.
+      if (pedido.comprobante.startsWith(`${CARPETA}/`)) {
+        const borrado = await borrarArchivo(
+          "datos",
+          pedido.comprobante,
+          `pedido ${folio}: comprobante eliminado`,
+        );
+        if (!borrado) return { ok: false, motivo: "servidor" };
+      }
+
+      const ok = await putJson(
+        "datos",
+        ARCHIVO,
+        lista.filter((p) => p.folio !== folio),
+        `pedido ${folio}: eliminado`,
+      );
+      if (!ok) return { ok: false, motivo: "servidor" };
+      return { ok: true };
+    } catch (e) {
+      console.error("[pedidos] no se pudo eliminar:", e instanceof Error ? e.message : e);
+      return { ok: false, motivo: "servidor" };
+    }
+  });
 
 /** Prueba de configuración del correo. Sólo el admin puede dispararla. */
 export const probarCorreo = createServerFn({ method: "POST" })
