@@ -263,6 +263,39 @@ npx wrangler pages secret put YT_DLP_TOKEN        --project-name bitly-site  # e
 de proxy abierto. Sin `YT_DLP_BACKEND_URL`, la demo funciona igual con los
 catálogos y el canal de YouTube simplemente no existe.
 
+## 5.3 Publicar el backend de yt-dlp (Render free)
+
+El backend es `scripts/backend-yt-dlp.mjs`: un proceso con `yt-dlp` que busca en
+YouTube, resuelve la URL de audio y la streamea por su propio proxy (el navegador
+nunca habla con googlevideo). No escribe en disco, así que entra en un free sin
+disco persistente.
+
+1. **Imagen**: ya está `Dockerfile.backend` (Node 22 + `yt-dlp` + `ffmpeg`,
+   escucha en `0.0.0.0:$PORT`).
+2. **Servicio**: Render → **New → Blueprint** → elegí este repo. Toma
+   `render.yaml`: plan free, Docker, health check en `/salud`.
+3. **Secreto**: cargá `YT_DLP_TOKEN` con un valor largo y aleatorio
+   (`node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`).
+4. **Conectar el sitio**:
+   ```bash
+   npx wrangler pages secret put YT_DLP_BACKEND_URL --project-name bitly-site  # https://bitly-yt-dlp.onrender.com
+   npx wrangler pages secret put YT_DLP_TOKEN        --project-name bitly-site  # el MISMO valor
+   ```
+5. **Comprobar** el backend de verdad (salud, 401 sin token, búsqueda,
+   resolución y bytes de audio):
+   ```bash
+   BACKEND_URL=https://bitly-yt-dlp.onrender.com YT_DLP_TOKEN=<el token> \
+     node scripts/verificar-backend.mjs
+   ```
+   En una máquina normal da 11/11. Contra Render free mirá el primer número: si
+   `/salud` tarda 30-50 s, es el arranque en frío y es exactamente lo que el
+   despertador del sitio tapa (sección 5.2).
+
+Qué esperar en el plan free: ~15 minutos de inactividad y la instancia se apaga;
+el primer visitante que abra la demo la despierta, el arranque se paga mientras
+busca y el audio espera lo que haga falta. Sin backend, la demo funciona igual
+con los catálogos; el canal de YouTube es sólo para folklore y re-subidos.
+
 ## 6. Comprobar que quedó bien
 
 ```bash
