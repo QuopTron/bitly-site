@@ -38,7 +38,7 @@ import {
   normalizarItems,
 } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
-import { buscarYouTubeBackend, resolverAudio, type PeticionAudio } from "@/server/rescate";
+import { buscarYouTubeBackend, despertarBackendYouTube, resolverAudio, type PeticionAudio } from "@/server/rescate";
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
@@ -565,6 +565,41 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
 export const demoRescatar = createServerFn({ method: "POST" })
   .validator((d: Carga) => d)
   .handler(async ({ data }): Promise<RespuestaAudio> => rescatarImpl(data));
+
+/**
+ * Despertador del backend propio.
+ *
+ * El modal de la demo lo llama al montar: si el backend vive en un host free
+ * que se apaga por inactividad, el arranque (30 a 60 s) ocurre mientras el
+ * visitante busca o elige una canción, no cuando ya tocó "play". Devuelve si
+ * quedó despierto; el cliente no espera la respuesta para nada.
+ *
+ * Tiene cupo por IP: el ping es barato, pero un endpoint sin freno es un
+ * endpoint para martillar un host ajeno.
+ */
+const calentadas = new Map<string, { n: number; t: number }>();
+const CALENTAR_VENTANA_MS = 10 * 60 * 1000;
+const CALENTAR_MAX = 5;
+
+function puedeCalentar(ip: string): boolean {
+  const ahora = Date.now();
+  const previo = calentadas.get(ip);
+  if (!previo || ahora - previo.t > CALENTAR_VENTANA_MS) {
+    calentadas.set(ip, { n: 1, t: ahora });
+    if (calentadas.size > 500) calentadas.clear();
+    return true;
+  }
+  if (previo.n >= CALENTAR_MAX) return false;
+  previo.n++;
+  return true;
+}
+
+export const demoDespertar = createServerFn({ method: "POST" }).handler(
+  async (): Promise<{ despierto: boolean }> => {
+    if (!puedeCalentar(await quienSolicita())) return { despierto: false };
+    return { despierto: await despertarBackendYouTube() };
+  },
+);
 
 /**
  * Letras para el karaoke. Es metadata, no audio: no hace falta cifrarla y la

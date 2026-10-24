@@ -232,6 +232,37 @@ peticiones por día, 10 ms de CPU por petición). Lo que lo hace entrar cómodo:
   los catálogos; el canal de YouTube sólo hace falta para folklore de nicho y
   re-subidos.
 
+## 5.2 Backend de yt-dlp en un host free (que se apaga solo)
+
+Los planes gratuitos de Render/Fly/Koyeb apagan la instancia por inactividad: la
+primera petición después del apagado tarda en arrancar y, con el timeout de
+búsqueda, se perdía (el visitante veía «sin resultados»). Lo que hace el sitio:
+
+- **Despertador al abrir la demo.** El reproductor llama a `demoDespertar` al
+  montar; el servidor pega `GET /salud` con hasta 40 s de paciencia. El arranque
+  se paga mientras el visitante busca, no cuando toca *play*, y la respuesta no
+  se espera en el cliente. Queda marcado como despierto 10 minutos (por
+  isolate), así que no se repite el ping canción por canción.
+- **Cupo del despertador**: 5 pings por IP cada 10 minutos. `/salud` es barato,
+  pero un endpoint sin freno es una forma de martillar el host.
+- **Búsqueda tolerante**: antes de `/buscar` se le dan hasta 6 s al arranque; si
+  aun así no contesta, la demo sigue con los catálogos y no se bloquea.
+- **Audio con más margen**: el pedido de audio espera el arranque completo (40 s)
+  y después tiene sus 30 s de resolución. Es el momento en que el visitante ya
+  eligió la canción y vale más que suene que responder rápido con «sin audio».
+
+Para conectarlo, cargá en Pages:
+
+```bash
+npx wrangler pages secret put YT_DLP_BACKEND_URL --project-name bitly-site  # https://mi-backend.onrender.com
+npx wrangler pages secret put YT_DLP_TOKEN        --project-name bitly-site  # el mismo del backend
+```
+
+`/salud` queda abierto (es el ping de arranque) y `/buscar` y `/resolver` exigen
+`Authorization: Bearer $YT_DLP_TOKEN`: un backend con URL pública no puede quedar
+de proxy abierto. Sin `YT_DLP_BACKEND_URL`, la demo funciona igual con los
+catálogos y el canal de YouTube simplemente no existe.
+
 ## 6. Comprobar que quedó bien
 
 ```bash

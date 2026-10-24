@@ -588,6 +588,62 @@ function configYouTube(): { yattee: string; auth: string; local: string } {
 // aunque el backend iba a resolver. Las repeticiones entran en la caché del
 // backend y el segundo intento es instantáneo.
 const TIMEOUT_YT_RESOLVER_MS = 30_000;
+
+/* ── Despertar del backend propio (planes free que se apagan) ────── */
+
+/**
+ * Si el backend vive en un plan gratuito que apaga la instancia por
+ * inactividad (Render, Fly free y compañía), la primera petición después del
+ * apagado paga el arranque —30 a 60 s— y con el timeout de búsqueda se perdía:
+ * el visitante veía "sin resultados" y el siguiente tampoco alcanzaba.
+ *
+ * La solución es pedirle `/salud` ANTES de lo importante: el host arranca con
+ * una petición barata, y cuando el visitante toca una canción el proceso ya está
+ * listo. Se recuerda que quedó despierto para no repetir el ping en cada tema.
+ */
+let despiertoHasta = 0;
+let despertando: Promise<boolean> | null = null;
+const DESPIERTO_MS = 10 * 60 * 1000;
+const DESPERTAR_MS = 40_000;
+
+/** ¿El backend local contestó hace poco? (sólo lo sabe este isolate). */
+export function backendLocalDespierto(): boolean {
+  return Date.now() < despiertoHasta;
+}
+
+/**
+ * Despierta el backend local y devuelve si quedó despierto.
+ *
+ * Varias peticiones simultáneas comparten un solo ping. Si el host está
+ * apagado, el ping espera hasta `esperaMs`; abortar no lo cancela —el host sigue
+ * arrancando—, así que el siguiente pedido ya lo encuentra listo.
+ */
+export async function despertarBackendYouTube(esperaMs = DESPERTAR_MS): Promise<boolean> {
+  const { local } = configYouTube();
+  if (!local) return false;
+  if (backendLocalDespierto()) return true;
+  if (despertando) return despertando;
+
+  despertando = (async () => {
+    try {
+      const res = await fetch(`${local}/salud`, {
+        headers: cabecerasBackend(),
+        signal: AbortSignal.timeout(esperaMs),
+      });
+      if (res.ok) {
+        despiertoHasta = Date.now() + DESPIERTO_MS;
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      despertando = null;
+    }
+  })();
+
+  return despertando;
+}
 /**
  * Cuánto espera la calidad estándar al canal de YouTube antes de seguir por la
  * vía sin pérdida. Es corto a propósito: si el catálogo sin pérdida tiene la
@@ -782,6 +838,10 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
   const cfg = configYouTube();
   if (cfg.yattee) return rescatarEnYattee(p, cfg);
   if (!cfg.local) return null;
+  // Acá sí conviene esperar el arranque: es el pedido de audio y el usuario ya
+  // eligió la canción, así que vale más un tema que suene en el primer intento
+  // que responder rápido con "no hay audio".
+  await despertarBackendYouTube();
   const YT_BACKEND_URL = cfg.local;
   const titulo = (p.titulo ?? "").trim();
   const artista = (p.artista ?? "").trim();
@@ -888,6 +948,10 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
   }
 
   if (!cfg.local) return null;
+  // Antes de buscar se le da un margen corto al arranque: si el host está
+  // despierto contesta al instante, y si está apagado se dispara el ping sin
+  // hacer esperar la búsqueda entera.
+  await despertarBackendYouTube(6_000);
   const YT_BACKEND_URL = cfg.local;
   const qs = new URLSearchParams({ consulta, limite: String(tope) });
   const control = new AbortController();

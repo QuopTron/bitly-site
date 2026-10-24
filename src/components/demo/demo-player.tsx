@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
 import { audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
+import { demoDespertar } from "@/server/demo-proxy";
 import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
 import { retraso } from "@/lib/reveal";
@@ -22,6 +23,15 @@ import Karaoke from "@/components/demo/karaoke";
 
 // Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
 const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
+
+/**
+ * Un solo ping de arranque por carga de página.
+ *
+ * El backend de YouTube puede vivir en un plan free que apaga la instancia: si
+ * se lo despierta al abrir la demo, el arranque ocurre mientras el visitante
+ * escribe la búsqueda, no cuando ya tocó play. No se espera la respuesta.
+ */
+let despertado = false;
 
 /** Rellena `{n}` / `{price}` sin sacar el texto del diccionario. */
 function Plantilla(texto: string, vars: Record<string, string | number>) {
@@ -127,6 +137,14 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const pendiente = useRef(0);
 
   const info = extensionDe(extension);
+
+  // Despierta el backend de YouTube mientras el visitante busca. Si el host está
+  // en un plan free que se apaga, el arranque se paga acá y no al tocar play.
+  useEffect(() => {
+    if (despertado) return;
+    despertado = true;
+    void demoDespertar().catch(() => {});
+  }, []);
 
   // Un solo <audio> para toda la demo: cambiar de pista es cambiar `src`.
   useEffect(() => {
