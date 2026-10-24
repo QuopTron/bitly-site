@@ -58,8 +58,10 @@ Ese `_worker.js` es **conservador a propósito**:
 | `POST /_serverFn/*` (la demo) | la app |
 | el resto | la app y, si no contesta, el CDN |
 
-Las carpetas que empiezan con `_` **no se publican como estáticos**, así que
-`_worker.js` y `_ssr/` no quedan descargables.
+`_worker.js` **no se publica como estático**, pero ojo: Pages **sí** sirve la
+carpeta `_ssr/` con su Content-Type real (se comprobó en producción). Por eso el
+entry corta `/_ssr/*` con un 404 antes de consultar al CDN: el bundle se importa
+desde el worker, nadie necesita bajarlo por HTTP.
 
 ### El `_worker.js` siembra `process.env`
 

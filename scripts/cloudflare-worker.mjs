@@ -13,9 +13,10 @@
  *   2. escribe `dist/client/_worker.js`, que delega primero el tráfico de
  *      archivos al CDN (`env.ASSETS`) y el resto a la app.
  *
- * El prefijo `_` importa: Pages NO publica como estáticos los archivos ni las
- * carpetas que empiezan con `_`, así que el código del servidor no queda
- * expuesto como copia descargable.
+ * `_worker.js` no se publica como estático, pero `_ssr/` SÍ: Pages sirve esa
+ * carpeta con su Content-Type real. Por eso el entry bloquea `/_ssr/*` antes de
+ * llegar al CDN — el import del bundle ocurre en el bundler, no por HTTP, así
+ * que cortar esa ruta no rompe nada.
  *
  * Corre solo, como `postbuild` de `pnpm build`.
  */
@@ -150,6 +151,12 @@ export default {
     sembrarEnv(env);
     const { pathname } = new URL(request.url);
     const esRpc = pathname.startsWith("/_serverFn/");
+
+    // El bundle del servidor vive en _ssr/ para poder importarlo, pero no
+    // tiene que bajarse desde el navegador (incluye los source maps).
+    if (pathname === "/_ssr" || pathname.startsWith("/_ssr/")) {
+      return new Response("Not found", { status: 404 });
+    }
 
     if (!esRpc && request.method === "GET") {
       const estatico = await env.ASSETS.fetch(request);
