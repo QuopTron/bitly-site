@@ -644,6 +644,58 @@ export async function despertarBackendYouTube(esperaMs = DESPERTAR_MS): Promise<
 
   return despertando;
 }
+
+/* ── Despertar de Yattee (el servidor del canal YouTube) ──────────── */
+
+/**
+ * Igual que el backend propio, pero para el servidor de Yattee: si vive en un
+ * plan que apaga la instancia, la primera búsqueda paga el arranque y el
+ * visitante se queda sin resultados de YouTube.
+ *
+ * Se le pega a la raíz y NO se mira el código: cualquier respuesta HTTP —200,
+ * 401, 404— significa que el proceso está arriba y atendiendo. Lo que se mide
+ * es que el host conteste, no qué contesta.
+ */
+let yatteeDespiertoHasta = 0;
+let despertandoYattee: Promise<boolean> | null = null;
+
+export function yatteeDespierto(): boolean {
+  return Date.now() < yatteeDespiertoHasta;
+}
+
+export async function despertarYattee(esperaMs = DESPERTAR_MS): Promise<boolean> {
+  const { yattee, auth } = configYouTube();
+  if (!yattee) return false;
+  if (yatteeDespierto()) return true;
+  if (despertandoYattee) return despertandoYattee;
+
+  despertandoYattee = (async () => {
+    const encabezados: Record<string, string> = { Accept: "application/json" };
+    if (auth) encabezados.Authorization = `Basic ${btoa(auth)}`;
+    try {
+      await fetch(`${yattee}/`, { headers: encabezados, signal: AbortSignal.timeout(esperaMs) });
+      // Si hubo respuesta, el host está despierto (el status no importa).
+      yatteeDespiertoHasta = Date.now() + DESPIERTO_MS;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      despertandoYattee = null;
+    }
+  })();
+
+  return despertandoYattee;
+}
+
+/**
+ * Despierta el canal de YouTube que esté configurado: Yattee si está, si no el
+ * backend propio. Es lo que llama el despertador del sitio al abrir la demo.
+ */
+export async function despertarCanalYouTube(esperaMs = DESPERTAR_MS): Promise<boolean> {
+  const { yattee } = configYouTube();
+  if (yattee) return despertarYattee(esperaMs);
+  return despertarBackendYouTube(esperaMs);
+}
 /**
  * Cuánto espera la calidad estándar al canal de YouTube antes de seguir por la
  * vía sin pérdida. Es corto a propósito: si el catálogo sin pérdida tiene la
@@ -836,7 +888,11 @@ async function rescatarEnYattee(
  */
 async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
   const cfg = configYouTube();
-  if (cfg.yattee) return rescatarEnYattee(p, cfg);
+  if (cfg.yattee) {
+    // Acá se espera el arranque completo: el visitante ya eligió la canción.
+    await despertarYattee();
+    return rescatarEnYattee(p, cfg);
+  }
   if (!cfg.local) return null;
   // Acá sí conviene esperar el arranque: es el pedido de audio y el usuario ya
   // eligió la canción, así que vale más un tema que suene en el primer intento
@@ -916,6 +972,9 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
   const tope = Math.max(1, Math.min(24, limite));
 
   if (cfg.yattee) {
+    // Gracia corta: si el servidor de Yattee está dormido, el ping lo despierta
+    // sin hacer esperar la búsqueda entera (el catálogo contesta igual).
+    await despertarYattee(6_000);
     const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
       cfg,
       `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,

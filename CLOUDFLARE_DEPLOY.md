@@ -232,21 +232,27 @@ peticiones por día, 10 ms de CPU por petición). Lo que lo hace entrar cómodo:
   los catálogos; el canal de YouTube sólo hace falta para folklore de nicho y
   re-subidos.
 
-## 5.2 Backend de yt-dlp en un host free (que se apaga solo)
+## 5.2 Canal de YouTube en un host free (que se apaga solo)
 
-Los planes gratuitos de Render/Fly/Koyeb apagan la instancia por inactividad: la
-primera petición después del apagado tarda en arrancar y, con el timeout de
-búsqueda, se perdía (el visitante veía «sin resultados»). Lo que hace el sitio:
+El canal de YouTube puede ser **Yattee** (lo que usa producción hoy: `YATTEE_URL`
++ `YATTEE_AUTH`) o el **backend propio de yt-dlp** (`YT_DLP_BACKEND_URL`). Los dos
+pueden vivir en un plan gratuito de Render/Fly/Koyeb, que apaga la instancia por
+inactividad: la primera petición después del apagado tarda en arrancar y, con el
+timeout de búsqueda, se perdía (el visitante veía «sin resultados»).
+
+Lo que hace el sitio, para cualquiera de los dos:
 
 - **Despertador al abrir la demo.** El reproductor llama a `demoDespertar` al
-  montar; el servidor pega `GET /salud` con hasta 40 s de paciencia. El arranque
-  se paga mientras el visitante busca, no cuando toca *play*, y la respuesta no
-  se espera en el cliente. Queda marcado como despierto 10 minutos (por
-  isolate), así que no se repite el ping canción por canción.
+  montar; el servidor despierta el canal configurado con hasta 40 s de
+  paciencia: a Yattee le pega `GET /` (cualquier respuesta HTTP —200, 401, 404—
+  significa que el proceso está arriba) y al backend propio `GET /salud`. El
+  arranque se paga mientras el visitante busca, no cuando toca *play*, y la
+  respuesta no se espera en el cliente. Queda marcado como despierto 10 minutos
+  (por isolate), así que no se repite el ping canción por canción.
 - **Cupo del despertador**: 5 pings por IP cada 10 minutos. `/salud` es barato,
-  pero un endpoint sin freno es una forma de martillar el host.
-- **Búsqueda tolerante**: antes de `/buscar` se le dan hasta 6 s al arranque; si
-  aun así no contesta, la demo sigue con los catálogos y no se bloquea.
+  pero un endpoint sin freno es una forma de martillar el host.- **Búsqueda tolerante**: antes de `/buscar` (o del search de Yattee) se le dan
+  hasta 6 s al arranque; si aun así no contesta, la demo sigue con los catálogos
+  y no se bloquea.
 - **Audio con más margen**: el pedido de audio espera el arranque completo (40 s)
   y después tiene sus 30 s de resolución. Es el momento en que el visitante ya
   eligió la canción y vale más que suene que responder rápido con «sin audio».

@@ -38,7 +38,7 @@ import {
   normalizarItems,
 } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
-import { buscarYouTubeBackend, despertarBackendYouTube, resolverAudio, type PeticionAudio } from "@/server/rescate";
+import { buscarYouTubeBackend, despertarCanalYouTube, resolverAudio, type PeticionAudio } from "@/server/rescate";
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
@@ -597,7 +597,7 @@ function puedeCalentar(ip: string): boolean {
 export const demoDespertar = createServerFn({ method: "POST" }).handler(
   async (): Promise<{ despierto: boolean }> => {
     if (!puedeCalentar(await quienSolicita())) return { despierto: false };
-    return { despierto: await despertarBackendYouTube() };
+    return { despierto: await despertarCanalYouTube() };
   },
 );
 
