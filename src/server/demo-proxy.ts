@@ -42,6 +42,7 @@ import { buscarYouTubeBackend, despertarCanalYouTube, resolverAudio, type Petici
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
+import { pareceDesvio } from "@/server/relevancia";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
 import {
@@ -367,6 +368,8 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   if (!consulta) return cerrar(data, { origen: "respaldo", items: [] });
 
   let items: Item[] = [];
+  /** Resultados que no tienen que ver con la consulta: último recurso. */
+  let debiles: Item[] = [];
   let aviso: string | undefined;
   let fuente: string | undefined;
 
@@ -389,8 +392,14 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     aviso = String((e as Error)?.message ?? e).slice(0, 200);
   }
 
-  if (items.length > 0) {
+  if (items.length > 0 && !pareceDesvio(items, consulta)) {
     return cerrar(data, { origen: "extension", items, aviso, fuente });
+  }
+  if (items.length > 0) {
+    // El catálogo contestó con el disco de otro artista: se guarda por si no
+    // hay nada mejor y se sigue buscando donde de verdad puede estar.
+    debiles = items;
+    items = [];
   }
 
   try {
@@ -401,12 +410,17 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     aviso = aviso ?? "respaldo";
   }
 
-  // Último respaldo: el backend local de yt-dlp busca en YouTube. Así una
-  // canción que ningún catálogo indexa (folklore de nicho, re-subidos) sigue
-  // siendo encontrable —y reproducible—, en vez de quedar "sin resultados".
-  if (items.length === 0) {
+  // El respaldo también puede devolver otro artista. Ahí sí se prueba YouTube
+  // antes de aceptarlo, que es donde vive el folklore y lo re-subido.
+  const respaldoDesviado = items.length > 0 && pareceDesvio(items, consulta);
+  if (items.length === 0 || respaldoDesviado) {
     const yt = await buscarYouTubeBackend(consulta, limite);
     if (yt && yt.length > 0) return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
+  }
+
+  // Nada mejor: se devuelven los resultados débiles antes que una lista vacía.
+  if (items.length === 0 && debiles.length > 0) {
+    return cerrar(data, { origen: "extension", items: debiles, aviso, fuente });
   }
   // El catálogo de respaldo ES Deezer: decirlo hace dos cosas a la vez: la
   // interfaz etiqueta cada pista con `ext: "deezer"` —así su ISRC, que solo

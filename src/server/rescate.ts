@@ -891,7 +891,11 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
   if (cfg.yattee) {
     // Acá se espera el arranque completo: el visitante ya eligió la canción.
     await despertarYattee();
-    return rescatarEnYattee(p, cfg);
+    const enYattee = await rescatarEnYattee(p, cfg);
+    if (enYattee) return enYattee;
+    // Yattee no tiene la pista (o su relay no la sirve): si hay backend propio,
+    // se prueba ahí antes de dar el audio por perdido.
+    if (!cfg.local) return null;
   }
   if (!cfg.local) return null;
   // Acá sí conviene esperar el arranque: es el pedido de audio y el usuario ya
@@ -980,8 +984,7 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
       `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
       TIMEOUT_YT_BUSQUEDA_MS,
     );
-    if (!Array.isArray(resultados)) return null;
-    return resultados
+    const encontrados = (Array.isArray(resultados) ? resultados : [])
       .filter((r) => {
         const dur = Number(r.lengthSeconds ?? 0);
         return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
@@ -1004,6 +1007,10 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
           isrc: null,
         };
       });
+    // Yattee no encontró nada (o no contestó): si hay backend propio, se prueba
+    // ahí. Es justo el caso del folklore que el índice de Yattee no cubre.
+    if (encontrados.length > 0) return encontrados;
+    if (!cfg.local) return null;
   }
 
   if (!cfg.local) return null;
