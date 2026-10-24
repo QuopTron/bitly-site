@@ -25,7 +25,9 @@ export default function HeroPie({ total, vistas, promedio, opiniones }: Props) {
           {t("opinionesVistas")}
         </span>
 
-        <span aria-hidden className="h-4 w-px bg-border/70" />
+        {/* En celular los datos se envuelven y el separador quedaba colgado al
+            final de la línea, sin nada detrás: ahí se separa con el aire. */}
+        <span aria-hidden className="hidden h-4 w-px bg-border/70 sm:block" />
 
         <span className="inline-flex items-center gap-1.5">
           <Download className="h-3.5 w-3.5 text-primary" aria-hidden />
@@ -33,7 +35,7 @@ export default function HeroPie({ total, vistas, promedio, opiniones }: Props) {
           {t("comentariosDescargas")}
         </span>
 
-        <span aria-hidden className="h-4 w-px bg-border/70" />
+        <span aria-hidden className="hidden h-4 w-px bg-border/70 sm:block" />
 
         <span className="inline-flex items-center gap-1.5">
           <Estrellas valor={promedio} etiqueta={con(t("opinionesEstrella"), { n: promedio.toFixed(1) })} />

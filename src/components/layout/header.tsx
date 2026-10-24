@@ -112,7 +112,10 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
 
   return (
     <header className="relative z-40 shrink-0 px-3 pb-2 pt-2 sm:px-4 sm:pt-3">
-      <div className="relative mx-auto max-w-7xl rounded-[2.2rem] border border-border bg-card/85 px-2.5 py-1.5 sombra-tag-suave backdrop-blur-xl sm:px-4 sm:py-2">
+      {/* El aire vertical no es decorativo: el logo va rotado y con un anillo
+          discontinuo alrededor, así que con menos padding la mancha tocaba el
+          borde de la tarjeta y parecía recortada. */}
+      <div className="relative mx-auto max-w-7xl rounded-[2.2rem] border border-border bg-card/85 px-3 py-2 sombra-tag-suave backdrop-blur-xl sm:px-4 sm:py-2.5">
         {/* Alto fijo por vista: el logo cambia de tamaño entre inicio y el resto,
             y sin este mínimo la cabecera encogía y corría todo el contenido. */}
         <div className="flex min-h-11 items-center gap-2 sm:min-h-12 sm:gap-2.5">
@@ -134,7 +137,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
             >
               <span
                 aria-hidden
-                className={`mancha pointer-events-none absolute -inset-1.5 border border-dashed border-primary/45 transition-opacity duration-500 ${
+                className={`mancha pointer-events-none absolute -inset-1 border border-dashed border-primary/45 transition-opacity duration-500 ${
                   enInicio ? "opacity-0" : "animate-spin opacity-100 [animation-duration:18s]"
                 }`}
               />

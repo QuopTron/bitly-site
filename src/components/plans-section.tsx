@@ -197,11 +197,16 @@ export default function PlansSection({ onCuenta }: Props) {
               {t("plansVerPedido")}
             </button>
           )}
+          {/* Sin sesión no hay «ver pedido», así que WhatsApp ocupa la fila
+              entera: solo en media columna el texto se partía en dos líneas y
+              dejaba un hueco al lado. */}
           <a
             href={enlaceWhatsApp(t("plansWaText"))}
             target="_blank"
             rel="noopener noreferrer"
-            className="boton-fantasma group inline-flex min-h-10 items-center justify-center gap-1.5 px-3 text-xs text-muted-foreground hover:text-foreground"
+            className={`boton-fantasma group inline-flex min-h-10 items-center justify-center gap-1.5 px-3 text-xs text-muted-foreground hover:text-foreground ${
+              hayCuenta ? "" : "col-span-2"
+            }`}
           >
             <MessageCircle className="h-3.5 w-3.5" aria-hidden />
             {t("plansWhatsAppLabel")}
