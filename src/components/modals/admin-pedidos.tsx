@@ -82,7 +82,7 @@ function FilaPedido({
       setEstado(r.pedido.estado);
       setCodigo(r.pedido.codigo ?? "");
       setNota(r.pedido.nota);
-      setAviso({ tipo: "ok", texto: t("adminPedidoGuardado") });
+      setAviso({ tipo: "ok", texto: t(r.aviso ? "adminPedidoGuardadoAviso" : "adminPedidoGuardado") });
     } catch {
       setAviso({ tipo: "error", texto: t("adminPedidoError_servidor") });
     } finally {

@@ -38,18 +38,55 @@ type Intentos = Map<string, { n: number; t: number }>;
  */
 const intentos: Intentos = new Map();
 
-function sinIntentos(clave: string) {
+function sinIntentos(clave: string, max = MAX_INTENTOS) {
   const ahora = Date.now();
   const previo = intentos.get(clave);
   if (!previo || ahora - previo.t > VENTANA_MS) {
     intentos.set(clave, { n: 1, t: ahora });
+    if (intentos.size > 2000) intentos.clear();
     return true;
   }
   previo.n++;
-  return previo.n <= MAX_INTENTOS;
+  return previo.n <= max;
 }
 
+/**
+ * Caché del registro completo.
+ *
+ * `codes.json` pesa y cada lectura es una descarga entera a la API de GitHub.
+ * Sin caché, cualquiera podía disparar una descarga por request (el canje y la
+ * revalidación no tenían freno), lo que agotaba el cupo del token y frenaba el
+ * sitio entero. Cinco minutos alcanzan: la app es la que marca los códigos.
+ */
+const CACHE_REGISTRO_MS = 5 * 60 * 1000;
+let cacheRegistro: { registro: Map<string, string>; expira: number } | null = null;
+let registroEnCurso: Promise<Map<string, string>> | null = null;
+
 export async function leerRegistroCodigos(): Promise<Map<string, string>> {
+  if (cacheRegistro && cacheRegistro.expira > Date.now()) return cacheRegistro.registro;
+  // Varias peticiones simultáneas comparten una sola descarga.
+  if (registroEnCurso) return registroEnCurso;
+  registroEnCurso = descargarRegistro()
+    .then((registro) => {
+      cacheRegistro = { registro, expira: Date.now() + CACHE_REGISTRO_MS };
+      return registro;
+    })
+    .finally(() => {
+      registroEnCurso = null;
+    });
+  return registroEnCurso;
+}
+
+async function ipCliente(): Promise<string> {
+  try {
+    const { obtenerIPCliente } = await import("@/server/ip");
+    return await obtenerIPCliente();
+  } catch {
+    return "anonima";
+  }
+}
+
+async function descargarRegistro(): Promise<Map<string, string>> {
   const token = process.env.BITLY_CODES_TOKEN;
   if (!token) throw new Error("Falta BITLY_CODES_TOKEN en el servidor");
 
@@ -138,8 +175,10 @@ export const canjearCodigo = createServerFn({ method: "POST" })
   .validator((d: { codigo: string }) => d)
   .handler(async ({ data }): Promise<Resultado> => {
     const codigo = (data.codigo ?? "").trim();
-    if (codigo.length < 20) return { estado: "no_encontrado" };
-    if (!sinIntentos("canje")) return { estado: "desconocido", aviso: "intentos" };
+    if (codigo.length < 20 || codigo.length > 500) return { estado: "no_encontrado" };
+    // Por IP: antes era una clave fija ("canje"), así que ocho intentos en todo
+    // el mundo dejaban el canje bloqueado para todos.
+    if (!sinIntentos(`canje|${await ipCliente()}`)) return { estado: "desconocido", aviso: "intentos" };
 
     let registro: Map<string, string>;
     try {
@@ -186,7 +225,10 @@ export const revalidarPremium = createServerFn({ method: "POST" })
   .validator((d: { codigo: string }) => d)
   .handler(async ({ data }): Promise<{ estado: EstadoCodigo }> => {
     const codigo = (data.codigo ?? "").trim();
-    if (!codigo) return { estado: "no_encontrado" };
+    if (!codigo || codigo.length > 500) return { estado: "no_encontrado" };
+    // Freno propio: esta función la dispara cada visita con código guardado y
+    // no tenía ningún límite.
+    if (!sinIntentos(`revalidar|${await ipCliente()}`, 20)) return { estado: "desconocido" };
     try {
       const registro = await leerRegistroCodigos();
       const estado = registro.get(codigo);

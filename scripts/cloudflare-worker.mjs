@@ -152,9 +152,35 @@ export default {
     const { pathname } = new URL(request.url);
     const esRpc = pathname.startsWith("/_serverFn/");
 
-    // El bundle del servidor vive en _ssr/ para poder importarlo, pero no
-    // tiene que bajarse desde el navegador (incluye los source maps).
-    if (pathname === "/_ssr" || pathname.startsWith("/_ssr/")) {
+    // Tope de cuerpo en el borde: el comprobante más grande permitido son 4 MB
+    // de base64, así que nada legítimo pasa de 6 MB. Sin esto, un POST enorme
+    // obliga al isolate a parsear (y guardar en memoria) el cuerpo entero antes
+    // de que el handler pueda rechazarlo.
+    if (esRpc) {
+      const largo = Number(request.headers.get("content-length") ?? 0);
+      if (Number.isFinite(largo) && largo > 6 * 1024 * 1024) {
+        return new Response("Payload too large", { status: 413 });
+      }
+    }
+
+    // Rutas que no son para el navegador: el bundle del servidor (_ssr), los
+    // restos de build, los source maps, los metadatos del proyecto y cualquier
+    // archivo oculto. Pages no las publica, pero una ruta explícita acá es la
+    // diferencia entre un 404 y filtrar el código del servidor si algún día el
+    // pipeline cambia.
+    const privada =
+      pathname === "/_ssr" ||
+      pathname.startsWith("/_ssr/") ||
+      pathname === "/_build" ||
+      pathname.startsWith("/_build/") ||
+      pathname === "/_worker.js" ||
+      pathname.startsWith("/_worker.js/") ||
+      pathname === "/.env" ||
+      pathname.startsWith("/.env") ||
+      pathname.startsWith("/.git/") ||
+      pathname.startsWith("/node_modules/") ||
+      /\.map$/.test(pathname);
+    if (privada) {
       return new Response("Not found", { status: 404 });
     }
 

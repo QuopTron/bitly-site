@@ -13,7 +13,7 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { codigoAdminValido } from "@/server/analytics";
+import { adminValido } from "@/server/analytics";
 import { correoAdmin, correoConfigurado, enviarCorreo } from "@/server/correo";
 import { getArchivo, getJson, putArchivo, putJson } from "@/server/github-store";
 import { obtenerIPCliente } from "@/server/ip";
@@ -155,21 +155,65 @@ function archivoValido(entrada: string): { tipo: string; ext: string } | null {
   return null;
 }
 
-/** Cupo simple por IP para no llenar el repo de pedidos basura. */
+/**
+ * Cupo por IP + tope global para no llenar el repo de pedidos basura.
+ *
+ * El cupo por IP frena a una persona; el global frena a una botnet rotando IPs
+ * que, si no, podría subir 4 MB de comprobantes por pedido y llenar el repo
+ * (cada pedido es un commit, y el archivo queda para siempre).
+ */
 const intentos = new Map<string, { n: number; t: number }>();
+const global = { n: 0, t: 0 };
 const VENTANA_MS = 10 * 60 * 1000;
 const MAX_INTENTOS = 6;
+const MAX_GLOBAL = 40;
 
 async function hayCupo(): Promise<boolean> {
   const ip = await obtenerIPCliente();
   const ahora = Date.now();
+  if (ahora - global.t > VENTANA_MS) {
+    global.t = ahora;
+    global.n = 0;
+  }
+  if (++global.n > MAX_GLOBAL) return false;
+
   const previo = intentos.get(ip);
   if (!previo || ahora - previo.t > VENTANA_MS) {
     intentos.set(ip, { n: 1, t: ahora });
+    if (intentos.size > 2000) intentos.clear();
     return true;
   }
   previo.n++;
   return previo.n <= MAX_INTENTOS;
+}
+
+/**
+ * Cupo de LECTURA de pedidos: más holgado que el de creación (consultar el
+ * estado es normal y hasta se recarga), pero corta el escaneo masivo de folios,
+ * que no tiene otro costo que una llamada a la API de GitHub por intento.
+ */
+const lecturas = new Map<string, { n: number; t: number }>();
+const MAX_LECTURAS = 30;
+
+async function hayCupoLectura(): Promise<boolean> {
+  const ip = await obtenerIPCliente();
+  const ahora = Date.now();
+  const previo = lecturas.get(ip);
+  if (!previo || ahora - previo.t > VENTANA_MS) {
+    lecturas.set(ip, { n: 1, t: ahora });
+    if (lecturas.size > 2000) lecturas.clear();
+    return true;
+  }
+  previo.n++;
+  return previo.n <= MAX_LECTURAS;
+}
+
+/** Compara secretos sin cortar en el primer byte distinto (token de pedido). */
+function igualSeguro(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diferencia = 0;
+  for (let i = 0; i < a.length; i++) diferencia |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diferencia === 0;
 }
 
 async function leerPedidos(): Promise<PedidoGuardado[]> {
@@ -271,9 +315,10 @@ export const consultarPedido = createServerFn({ method: "POST" })
     const folio = limpiar(data?.folio, 20).toUpperCase();
     const token = limpiar(data?.token, 64);
     if (!folio || !token) return { ok: false, motivo: "datos" };
+    if (!(await hayCupoLectura())) return { ok: false, motivo: "limite" };
     try {
       const pedido = (await leerPedidos()).find((p) => p.folio === folio);
-      if (!pedido || pedido.token !== token) return { ok: false, motivo: "no_encontrado" };
+      if (!pedido || !igualSeguro(pedido.token, token)) return { ok: false, motivo: "no_encontrado" };
       return { ok: true, pedido: publico(pedido) };
     } catch {
       return { ok: false, motivo: "servidor" };
@@ -301,7 +346,7 @@ export const recuperarPedido = createServerFn({ method: "POST" })
 export const adminPedidos = createServerFn({ method: "POST" })
   .validator((d: { admin?: unknown }) => d)
   .handler(async ({ data }): Promise<ResultadoAdmin> => {
-    if (!codigoAdminValido(data?.admin)) return { ok: false, motivo: "admin" };
+    if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
     try {
       const lista = ordenarNuevos(await leerPedidos());
       return {
@@ -320,7 +365,7 @@ export const adminPedidos = createServerFn({ method: "POST" })
 export const resumenCodigos = createServerFn({ method: "POST" })
   .validator((d: { admin?: unknown }) => d)
   .handler(async ({ data }): Promise<ResumenCodigos | null> => {
-    if (!codigoAdminValido(data?.admin)) return null;
+    if (!await adminValido(data?.admin)) return null;
     try {
       const registro = await leerRegistroCodigos();
       const resumen: ResumenCodigos = {
@@ -350,23 +395,24 @@ export const resumenCodigos = createServerFn({ method: "POST" })
   });
 
 /**
- * Espeja el registro real de códigos (`bitly_codes_premium`) dentro de
- * `bitly-data` para que la cuenta del sitio y la app compartan una vista.
+ * Espeja el CONTEO del registro real de códigos (`bitly_codes_premium`) dentro
+ * de `bitly-data`.
  *
  * La fuente de verdad sigue siendo `bitly_codes_premium` (la app ya lee ese
- * repo); esto sólo deja un índice versionado en la base del sitio. Se escribe a
- * pedido del admin, no en cada carga, para no gastar commits ni rate limit.
+ * repo); esto sólo deja un resumen versionado en la base del sitio. Se escriben
+ * los conteos, NUNCA los códigos: antes este espejo guardaba el registro
+ * completo, así que una filtración de `bitly-data` regalaba todos los códigos
+ * válidos y duplicaba la superficie de un dato sensible sin que nada lo leyera.
+ * Se escribe a pedido del admin, no en cada carga, para no gastar commits.
  */
 export const sincronizarCodigos = createServerFn({ method: "POST" })
   .validator((d: { admin?: unknown }) => d)
   .handler(async ({ data }): Promise<{ ok: true; total: number } | { ok: false; motivo: string }> => {
-    if (!codigoAdminValido(data?.admin)) return { ok: false, motivo: "admin" };
+    if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
     try {
       const registro = await leerRegistroCodigos();
-      const estados: Record<string, string> = {};
       const conteo = { activos: 0, usados: 0, cancelados: 0, libres: 0, otros: 0 };
-      for (const [codigo, estado] of registro) {
-        estados[codigo] = estado;
+      for (const [, estado] of registro) {
         if (estado === "activo") conteo.activos++;
         else if (estado === "usado") conteo.usados++;
         else if (estado === "cancelado") conteo.cancelados++;
@@ -381,7 +427,6 @@ export const sincronizarCodigos = createServerFn({ method: "POST" })
           fuente: "QuopTron/bitly_codes_premium",
           total: registro.size,
           ...conteo,
-          estados,
         },
         `códigos: espejo de ${registro.size} códigos`,
       );
@@ -396,7 +441,7 @@ export const sincronizarCodigos = createServerFn({ method: "POST" })
 export const leerComprobante = createServerFn({ method: "POST" })
   .validator((d: { admin?: unknown; folio?: unknown }) => d)
   .handler(async ({ data }): Promise<{ tipo: string; base64: string } | null> => {
-    if (!codigoAdminValido(data?.admin)) return null;
+    if (!await adminValido(data?.admin)) return null;
     const folio = limpiar(data?.folio, 20).toUpperCase();
     if (!folio) return null;
     try {
@@ -423,8 +468,8 @@ export const actualizarPedido = createServerFn({ method: "POST" })
   .handler(
     async ({
       data,
-    }): Promise<{ ok: true; pedido: PedidoPublico } | { ok: false; motivo: string }> => {
-      if (!codigoAdminValido(data?.admin)) return { ok: false, motivo: "admin" };
+    }): Promise<{ ok: true; pedido: PedidoPublico; aviso: boolean } | { ok: false; motivo: string }> => {
+      if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
       const folio = limpiar(data?.folio, 20).toUpperCase();
       const codigoPremium = limpiar(data?.codigoPremium, 500);
       const nota = limpiar(data?.nota, 600);
@@ -463,7 +508,36 @@ export const actualizarPedido = createServerFn({ method: "POST" })
           `pedido ${folio}: ${actualizado.estado}`,
         );
         if (!ok) return { ok: false, motivo: "servidor" };
-        return { ok: true, pedido: publico(actualizado) };
+
+        // Aviso automático al comprador: antes había que acordarse de apretar
+        // «Enviar por correo». Un fallo de correo no revierte el guardado, sólo
+        // deja `aviso: false` para que el panel lo muestre.
+        let aviso = false;
+        const cambio = actualizado.estado !== actual.estado || actualizado.codigo !== actual.codigo;
+        if (
+          cambio &&
+          actualizado.estado !== "cancelado" &&
+          actualizado.codigo &&
+          correoValido(actualizado.correo) &&
+          correoConfigurado()
+        ) {
+          try {
+            const cuerpo = cuerpoCorreo(actualizado);
+            const envio = await enviarCorreo({
+              to: actualizado.correo,
+              subject: cuerpo.subject,
+              text: cuerpo.text,
+              html: cuerpo.html,
+              replyTo: correoAdmin(),
+            });
+            aviso = envio.ok;
+            if (!envio.ok) console.error("[pedidos] aviso al comprador falló:", envio.motivo);
+          } catch (e) {
+            console.error("[pedidos] aviso al comprador falló:", e instanceof Error ? e.message : e);
+          }
+        }
+
+        return { ok: true, pedido: publico(actualizado), aviso };
       } catch (e) {
         console.error("[pedidos] no se pudo actualizar:", e instanceof Error ? e.message : e);
         return { ok: false, motivo: "servidor" };
@@ -479,7 +553,7 @@ export const enviarCodigoPedido = createServerFn({ method: "POST" })
     }): Promise<
       { ok: true } | { ok: false; motivo: "admin" | "datos" | "sin_codigo" | "sin_configurar" | "envio" | "servidor" }
     > => {
-      if (!codigoAdminValido(data?.admin)) return { ok: false, motivo: "admin" };
+      if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
       const folio = limpiar(data?.folio, 20).toUpperCase();
       if (!folio) return { ok: false, motivo: "datos" };
 
@@ -524,7 +598,7 @@ export const enviarCodigoPedido = createServerFn({ method: "POST" })
 export const probarCorreo = createServerFn({ method: "POST" })
   .validator((d: { admin?: unknown; para?: unknown }) => d)
   .handler(async ({ data }): Promise<{ ok: boolean; motivo?: string }> => {
-    if (!codigoAdminValido(data?.admin)) return { ok: false, motivo: "admin" };
+    if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
     // Se puede probar contra otro buzón (el propio admin elige), pero nunca
     // contra una dirección arbitraria que venga del navegador sin validar.
     const pedido = limpiar(data?.para, 120).toLowerCase();

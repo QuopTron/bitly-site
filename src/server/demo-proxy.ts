@@ -109,6 +109,8 @@ function crearCupo(maxPorIp: number, maxGlobal: number) {
 const dentroDeCupo = crearCupo(12, 150);
 /** El rescate es más caro (mint firmado) y tiene caché, así que su techo es menor. */
 const dentroDeCupoRescate = crearCupo(20, 240);
+/** Letras: una consulta por pista a LRCLIB; sin cupo era un proxy abierto. */
+const dentroDeCupoLetras = crearCupo(30, 200);
 
 async function quienSolicita(): Promise<string> {
   return obtenerIPCliente();
@@ -570,4 +572,7 @@ export const demoRescatar = createServerFn({ method: "POST" })
  */
 export const demoLetras = createServerFn({ method: "POST" })
   .validator((d: PeticionLetras) => d)
-  .handler(async ({ data }): Promise<Letras | null> => letrasImpl(data));
+  .handler(async ({ data }): Promise<Letras | null> => {
+    if (!dentroDeCupoLetras(await quienSolicita())) return null;
+    return letrasImpl(data);
+  });

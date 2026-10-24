@@ -189,13 +189,22 @@ export async function verificarClave(
   }
 }
 
+let avisoSecreto = false;
+
 function secretoSesion(): string {
-  const base =
-    process.env.BITLY_SESSION_SECRET ||
-    process.env.BITLY_DATA_TOKEN ||
-    process.env.BITLY_CODES_TOKEN ||
-    "";
+  const dedicado = process.env.BITLY_SESSION_SECRET;
+  const base = dedicado || process.env.BITLY_DATA_TOKEN || process.env.BITLY_CODES_TOKEN || "";
   if (!base) throw new Error("Falta BITLY_SESSION_SECRET en el servidor");
+  // Usar un PAT de GitHub como clave HMAC funciona, pero mezcla dos secretos con
+  // vidas distintas: rotar el token (o revocarlo) cierra todas las sesiones, y
+  // el PAT queda expuesto a dos usos. Se avisa una vez por isolate.
+  if (!dedicado && !avisoSecreto) {
+    avisoSecreto = true;
+    console.warn(
+      "[cuentas] BITLY_SESSION_SECRET no está definido: las sesiones se firman con el token de GitHub. " +
+        "Definí un secreto propio (16+ caracteres) para separar las dos claves.",
+    );
+  }
   return `bitly-session-v1:${base}`;
 }
 
@@ -257,6 +266,29 @@ function publica(c: CuentaGuardada): CuentaPublica {
 
 const intentos = new Map<string, { n: number; t: number }>();
 const VENTANA_MS = 10 * 60 * 1000;
+
+/**
+ * Tope por IP sumando TODOS los correos.
+ *
+ * El cupo de `login|<correo>` frena la fuerza bruta contra una cuenta; este
+ * frena el caso contrario: probar una clave filtrada contra cientos de correos
+ * distintos desde la misma IP (credential stuffing), que el cupo por correo no
+ * vería porque cada clave sería la primera.
+ */
+const porIp = new Map<string, { n: number; t: number }>();
+const MAX_INGRESOS_POR_IP = 30;
+
+function hayCupoIp(ip: string): boolean {
+  const ahora = Date.now();
+  const previo = porIp.get(ip);
+  if (!previo || ahora - previo.t > VENTANA_MS) {
+    porIp.set(ip, { n: 1, t: ahora });
+    if (porIp.size > 2000) porIp.clear();
+    return true;
+  }
+  previo.n++;
+  return previo.n <= MAX_INGRESOS_POR_IP;
+}
 
 function hayCupo(clave: string, max: number): boolean {
   const ahora = Date.now();
@@ -341,12 +373,20 @@ export const iniciarSesion = createServerFn({ method: "POST" })
     if (!correoValido(correo) || clave.length < 1 || clave.length > 200) {
       return { ok: false, motivo: "datos" };
     }
+    const ip = await obtenerIPCliente();
+    if (!hayCupoIp(ip)) return { ok: false, motivo: "limite" };
     if (!hayCupo(await claveDeIntento(`login|${correo}`), 8)) return { ok: false, motivo: "limite" };
 
     try {
       const cuentas = await leerCuentas();
       const indice = cuentas.findIndex((c) => c.correo === correo);
-      if (indice < 0) return { ok: false, motivo: "datos" };
+      if (indice < 0) {
+        // Misma demora que una clave incorrecta: sin esto, un correo sin cuenta
+        // contesta al instante y uno registrado tarda lo que tarda PBKDF2, así
+        // que cualquiera podría averiguar quién tiene cuenta en el sitio.
+        await hashClave(clave, new Uint8Array(16), ITERACIONES);
+        return { ok: false, motivo: "datos" };
+      }
       const cuenta = cuentas[indice];
       if (!(await verificarClave(clave, cuenta.salt, cuenta.hash, cuenta.iteraciones))) {
         return { ok: false, motivo: "datos" };

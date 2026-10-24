@@ -13,6 +13,18 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   Cross-Origin-Opener-Policy: same-origin
+  X-Permitted-Cross-Domain-Policies: none
+
+# ── RPC y bundle del servidor ─────────────────────────────────────────────
+# Las server functions son POST y no se cachean; el no-store lo deja explícito
+# para cualquier proxy intermedio. Nada de esto debe indexarse.
+/_serverFn/*
+  Cache-Control: no-store
+  X-Robots-Tag: noindex, nofollow
+
+/_ssr/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
 
 # ── Caché ───────────────────────────────────────────────────────────────────
 # Bundles con hash en el nombre: el contenido de una URL no cambia nunca, así

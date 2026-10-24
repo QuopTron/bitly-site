@@ -48,12 +48,62 @@ export type Estadisticas = {
 };
 
 export function codigoAdminValido(codigo: unknown): boolean {
-  const esperado = (process.env.BITLY_ADMIN_CODE || "flox flox2026").trim();
+  // Sin valor por defecto A PROPÓSITO: este repositorio es público, así que un
+  // código escrito acá es un código que todo el mundo conoce. Si la variable
+  // falta, el panel queda cerrado (fail closed) y el error queda en el log del
+  // Worker; nunca se abre con una contraseña compartida.
+  const esperado = (process.env.BITLY_ADMIN_CODE ?? "").trim();
+  if (!esperado) {
+    console.error("[admin] falta BITLY_ADMIN_CODE: el panel privado queda deshabilitado");
+    return false;
+  }
   const dado = String(codigo ?? "").trim();
   if (dado.length !== esperado.length) return false;
   let diferencia = 0;
   for (let i = 0; i < esperado.length; i++) diferencia |= esperado.charCodeAt(i) ^ dado.charCodeAt(i);
   return diferencia === 0;
+}
+
+/**
+ * Verificación del código admin con contador de FALLOS por IP.
+ *
+ * Comparar el código en tiempo constante evita filtrar cuántos caracteres
+ * acertó, pero no frena a quien prueba miles de combinaciones. Acá se cuentan
+ * sólo los intentos equivocados (así el dueño puede abrir el panel las veces que
+ * quiera) y se corta tras `MAX_FALLOS` en la ventana.
+ *
+ * El contador vive en memoria del isolate: no es una barrera global, pero sí
+ * convierte una ráfaga de fuerza bruta en unos pocos intentos útiles. La defensa
+ * de verdad contra fuerza bruta distribuida es una regla de rate limiting en
+ * Cloudflare, delante del sitio.
+ */
+const FALLOS_ADMIN = new Map<string, { n: number; t: number }>();
+const VENTANA_ADMIN_MS = 10 * 60 * 1000;
+const MAX_FALLOS_ADMIN = 10;
+
+export async function adminValido(codigo: unknown): Promise<boolean> {
+  let ip = "anonima";
+  try {
+    const { obtenerIPCliente } = await import("@/server/ip");
+    ip = await obtenerIPCliente();
+  } catch {
+    /* fuera de una petición HTTP */
+  }
+
+  const ahora = Date.now();
+  const previo = FALLOS_ADMIN.get(ip);
+  const vigente = previo && ahora - previo.t <= VENTANA_ADMIN_MS ? previo : null;
+  if (vigente && vigente.n >= MAX_FALLOS_ADMIN) return false;
+
+  if (codigoAdminValido(codigo)) {
+    FALLOS_ADMIN.delete(ip);
+    return true;
+  }
+
+  if (vigente) vigente.n++;
+  else FALLOS_ADMIN.set(ip, { n: 1, t: ahora });
+  if (FALLOS_ADMIN.size > 2000) FALLOS_ADMIN.clear();
+  return false;
 }
 
 function idValido(id: unknown): string | null {
@@ -81,11 +131,43 @@ function recortarSesiones(sesiones: Record<string, Sesion>): Record<string, Sesi
   return Object.fromEntries(ordenadas);
 }
 
+/**
+ * Cupo general de analítica por IP.
+ *
+ * Estas funciones escriben un commit en el repo privado, así que sin freno un
+ * script podía inflar el historial de git y gastar la cuota de la API con sólo
+ * repetir latidos. El cliente late cada 45 s: 40 escrituras cada 10 minutos
+ * dejan lugar a varias pestañas y a una recarga, y cortan el abuso.
+ */
+const cupoAnalitica = new Map<string, { n: number; t: number }>();
+const VENTANA_ANALITICA_MS = 10 * 60 * 1000;
+const MAX_ANALITICA_POR_IP = 40;
+
+async function hayCupoAnalitica(): Promise<boolean> {
+  let ip = "anonima";
+  try {
+    const { obtenerIPCliente } = await import("@/server/ip");
+    ip = await obtenerIPCliente();
+  } catch {
+    /* fuera de una petición HTTP */
+  }
+  const ahora = Date.now();
+  const previo = cupoAnalitica.get(ip);
+  if (!previo || ahora - previo.t > VENTANA_ANALITICA_MS) {
+    cupoAnalitica.set(ip, { n: 1, t: ahora });
+    if (cupoAnalitica.size > 2000) cupoAnalitica.clear();
+    return true;
+  }
+  previo.n++;
+  return previo.n <= MAX_ANALITICA_POR_IP;
+}
+
 export const registrarSesion = createServerFn({ method: "POST" })
   .validator((d: { id?: unknown; dispositivo?: unknown; idioma?: unknown; pantalla?: unknown; origen?: unknown; seccion?: unknown }) => d)
   .handler(async ({ data }): Promise<boolean> => {
     const id = idValido(data?.id);
     if (!id) return false;
+    if (!(await hayCupoAnalitica())) return false;
     try {
       const archivo = await leerArchivo();
       const anterior = archivo.sesiones[id];
@@ -157,12 +239,12 @@ export const latidoSesion = createServerFn({ method: "POST" })
 
 export const verificarCodigo = createServerFn({ method: "POST" })
   .validator((d: { codigo?: unknown }) => d)
-  .handler(async ({ data }): Promise<boolean> => codigoAdminValido(data?.codigo));
+  .handler(async ({ data }): Promise<boolean> => adminValido(data?.codigo));
 
 export const leerEstadisticas = createServerFn({ method: "POST" })
   .validator((d: { codigo?: unknown }) => d)
   .handler(async ({ data }): Promise<Estadisticas | null> => {
-    if (!codigoAdminValido(data?.codigo)) return null;
+    if (!(await adminValido(data?.codigo))) return null;
     try {
       const [archivo, stats, vistas, opiniones] = await Promise.all([
         leerArchivo(),

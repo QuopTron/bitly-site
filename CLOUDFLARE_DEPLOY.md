@@ -108,7 +108,7 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_CODES_TOKEN` | **Obligatoria** para el canje de códigos Premium: token de GitHub con lectura al repo privado `QuopTron/bitly_codes_premium`. Sin ella el canje responde "no pudimos verificar". |
 | `BITLY_DATA_TOKEN` | **Obligatoria** para la base de datos del sitio: token de GitHub con `contents: write` sobre `QuopTron/bitly-data` (opiniones, vistas y contadores de descargas). Si falta, se usa `BITLY_CODES_TOKEN` como respaldo. |
 | `BITLY_DATA_REPO`, `BITLY_CHATS_REPO` | Opcionales: cambian el repo de datos o el de chats (`QuopTron/bitly-data` y `QuopTron/bitly-chats` por defecto). |
-| `BITLY_ADMIN_CODE` | Código del panel admin (tres clics en el logo). Si falta, se usa el valor por defecto del código. |
+| `BITLY_ADMIN_CODE` | **Obligatoria**: código del panel admin (tres clics en el logo). No hay valor por defecto: sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CODE». Usá 16+ caracteres aleatorios. |
 | `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
 | `BITLY_SESSION_SECRET` | Opcional: secreto para firmar las sesiones de las cuentas del sitio. Si falta, se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN`. Cambiarlo cierra todas las sesiones. |
 | `BITLY_SMTP_HOST`, `BITLY_SMTP_PORT`, `BITLY_SMTP_USER`, `BITLY_SMTP_PASS` | SMTP para los correos de pedidos. En Gmail: `smtp.gmail.com`, puerto `465` y una **contraseña de aplicación**. |
@@ -154,8 +154,10 @@ guardan igual.
   `data/comprobantes/`; los pedidos en `data/pedidos.json`.
 - Las cuentas del sitio viven en `data/cuentas.json` (contraseñas con PBKDF2,
   nunca en claro) y las sesiones se firman con `BITLY_SESSION_SECRET`. El botón
-  **Sincronizar códigos** del panel admin espeja el registro de
-  `bitly_codes_premium` en `data/codigos.json`.
+  **Sincronizar códigos** del panel admin espeja en `data/codigos.json` los
+  conteos del registro de `bitly_codes_premium` (activos/usados/cancelados),
+  nunca la lista de códigos: duplicar códigos válidos en otro repo sólo agranda
+  el daño de una filtración.
 - El QR de pago se sirve desde `public/qr.png` (o `.jpg`/`.jpeg`/`.webp`). Si no
   existe, el modal muestra un aviso y el enlace de WhatsApp en su lugar.
 
@@ -164,7 +166,47 @@ de desarrollo (`pnpm dev`): ahí las server functions corren en Node y leen
 `process.env` directo. Con `wrangler pages dev` el `.dev.vars` de la raíz no
 llega al `env` del runtime — es una limitación de ese comando, no del deploy.
 
-## 5. Comprobar que quedó bien
+## 5. Seguridad: qué ya está y qué conviene sumar
+
+Lo que el sitio hace solo:
+
+- **Nada de secretos en el cliente.** Los tokens de GitHub viven en el Worker;
+  el build de producción va sin source maps y `/_ssr/`, `/_build/`, los `.map`
+  y los archivos ocultos responden 404 desde el propio worker.
+- **Datos cifrados en reposo** con `BITLY_DATA_SECRET` (AES-256-GCM): pedidos,
+  cuentas, comprobantes, contadores.
+- **Panel privado cerrado por defecto**: `BITLY_ADMIN_CODE` es obligatoria y la
+  comparación es en tiempo constante, con 10 fallos por IP cada 10 minutos.
+  No hay código por defecto escrito en el repo.
+- **Contraseñas** con PBKDF2-SHA256 (100.000 iteraciones, el tope del runtime) y
+  sal por cuenta; el login tarda lo mismo exista o no el correo.
+- **Cupos por IP y globales** en pedidos, opiniones, chats, cuentas, canje de
+  códigos, búsqueda y audio de la demo, letras y analítica; cuerpo máximo de
+  6 MB en las server functions (413 por encima).
+- **CSP con hashes** de los guiones inline (sin `unsafe-inline` en `script-src`),
+  más HSTS, `X-Frame-Options: DENY`, `nosniff` y `frame-ancestors 'none'`.
+
+Lo que conviene sumar desde el panel de Cloudflare (no se puede hacer desde el
+código):
+
+1. **Rate limiting en el borde** para `/_serverFn/*` y `POST` en general
+   (Security → WAF → Rate limiting rules). Los cupos del Worker viven en la
+   memoria de cada isolate: frenan una ráfaga, pero una botnet repartida sólo se
+   corta en el edge.
+2. **Token propio para los datos**: hoy `BITLY_DATA_TOKEN` no está definido y se
+   usa `BITLY_CODES_TOKEN`, así que un solo PAT abre los dos repos. Creá un
+   token *fine-grained* con `contents: write` sólo sobre `bitly-data` y
+   `bitly-chats`, cargalo como `BITLY_DATA_TOKEN` y dejá el de códigos con
+   lectura de `bitly_codes_premium`.
+3. **`BITLY_SESSION_SECRET` propio** (16+ caracteres): sin él las sesiones se
+   firman con el token de GitHub, así que rotar el token cierra todas las
+   sesiones. Cambiarlo ahora no rompe nada (hay 0 cuentas).
+4. **Retención de comprobantes**: los archivos de `data/comprobantes/` no se
+   borran solos. Conviene limpiar los pedidos viejos de vez en cuando
+   (el repo es privado y está cifrado, pero un comprobante no necesita vivir
+   para siempre).
+
+## 6. Comprobar que quedó bien
 
 ```bash
 # 1. La landing responde

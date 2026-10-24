@@ -202,8 +202,11 @@ try {
 
   // ── 3. Autoplay con clic REAL ──
   await clic(ses, "#demo ul li button");
+  // La resolución del audio pasa por el relay de stash y, si ese canal no
+  // responde, por el backend local de yt-dlp: en una red lenta 30 s no alcanzan
+  // y el verificador fallaba por impaciencia, no por un bug del reproductor.
   await esperar(ses, `!!document.querySelector("#demo svg.lucide-pause")`, {
-    tiempo: 30000,
+    tiempo: 60000,
     nombre: "que arranque solo (icono de pausa)",
   });
   await dormir(1200);

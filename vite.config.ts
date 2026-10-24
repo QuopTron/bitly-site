@@ -19,11 +19,12 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    // Source maps: sin ellos Lighthouse baja "best practices" con
-    // "missing source maps for large first-party JavaScript". Sólo se descargan
-    // con las devtools abiertas, así que no pesan para el visitante.
+    // Source maps: SÓLO en desarrollo. En producción se publicaban en
+    // `/assets/*.map` y cualquiera podía bajarse el código fuente completo del
+    // cliente. Lighthouse no lo penaliza (la auditoría `valid-source-maps` tiene
+    // peso 0), así que el build de producción va sin mapas.
     build: {
-      sourcemap: true,
+      sourcemap: mode === "development",
       rolldownOptions: {
         // Módulo nativo de Cloudflare: existe en producción pero no en el
         // build local, así que se deja como import externo.

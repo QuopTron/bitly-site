@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 /**
- * Verifica el navbar de secciones EN EL NAVEGADOR, en pantalla de celular.
+ * Verifica la navegación de vistas EN EL NAVEGADOR, en celular y escritorio.
  *
- * Lo que importa acá no es que los links existan, sino que sirvan en gama baja:
- * que la fila no desborde a lo ancho, que cada destino tenga 44 px de alto (dedo,
- * no puntero), que al tocar una sección la página salte sin que el propio navbar
- * tape el título, y que la sección activa se anuncie sola.
+ * El sitio dejó de ser una página con anclas: ahora es un shell con cuatro
+ * pantallas (inicio, instalar, planes, demo) que se deslizan. Por eso este
+ * verificador mide lo que importa en este diseño:
+ *
+ *   · el riel de escritorio tiene las cuatro vistas, con 40 px de alto y sin
+ *     desbordar a lo ancho;
+ *   · tocar una vista cambia de pantalla y se anuncia con `aria-current`;
+ *   · en celular el riel no entra (es `hidden lg:block`): el menú de la cabecera
+ *     es el que navega, y se cierra solo al elegir;
+ *   · nada desborda a lo ancho en 360 px.
  *
  *   pnpm dev
- *   DEMO_URL=http://localhost:3100 node scripts/verificar-nav.mjs
+ *   DEMO_URL=http://localhost:3000 node scripts/verificar-nav.mjs
  */
 
 import path from "node:path";
@@ -20,7 +26,8 @@ const BASE = process.env.DEMO_URL ?? "http://localhost:3000";
 const PUERTO = Number(process.env.CDP_PORT ?? 9349);
 const PERFIL = path.join(raiz, ".capturas-perfil-nav");
 
-const ESPERADOS = ["#inicio", "#demo", "#instalar", "#opiniones", "#planes", "#contacto"];
+/** Las cuatro vistas del shell, en el orden del riel. */
+const VISTAS = ["inicio", "instalar", "planes", "demo"];
 
 let ok = 0;
 let fallos = 0;
@@ -45,148 +52,147 @@ async function esperar(ses, expr, { tiempo = 20000, nombre = expr, cada = 150 } 
   throw new Error(`Timeout esperando: ${nombre}`);
 }
 
-/**
- * Espera a que el scroll se detenga de verdad.
- *
- * El salto a un ancla es suave y Chrome lo estira según la distancia: un
- * `dormir` fijo mide a mitad de camino y da un falso negativo.
- */
-async function esperarQuieto(ses, tiempo = 9000) {
-  const fin = Date.now() + tiempo;
-  let previo = -1;
-  let iguales = 0;
-  while (Date.now() < fin) {
-    const y = await js(ses, `Math.round(window.scrollY)`);
-    if (y === previo) {
-      if (++iguales >= 2) return y;
-    } else {
-      iguales = 0;
-    }
-    previo = y;
-    await dormir(300);
-  }
-  return previo;
-}
-
-const leerNav = `(() => {
-  const nav = document.querySelector('nav[aria-label]');
+/** Lee el riel visible (el de escritorio). */
+const leerRiel = `(() => {
+  const nav = [...document.querySelectorAll('nav[aria-label]')].find((n) => {
+    const r = n.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
   if (!nav) return null;
-  const r = nav.getBoundingClientRect();
-  const links = [...nav.querySelectorAll("a[href^='#']")];
+  const botones = [...nav.querySelectorAll("button")];
   return {
     nombre: nav.getAttribute("aria-label"),
-    pegado: Math.round(r.top),
-    alto: Math.round(r.height),
-    hrefs: links.map((a) => a.getAttribute("href")),
-    altos: links.map((a) => Math.round(a.getBoundingClientRect().height)),
-    activo: links.find((a) => a.getAttribute("aria-current"))?.getAttribute("href") ?? null,
-    doc: document.documentElement.scrollWidth - window.innerWidth,
+    textos: botones.map((b) => b.innerText.trim()),
+    altos: botones.map((b) => Math.round(b.getBoundingClientRect().height)),
+    activo: botones.findIndex((b) => b.getAttribute("aria-current") === "page"),
+    doc: Math.round(document.documentElement.scrollWidth - window.innerWidth),
   };
 })()`;
 
+/** Qué pantalla está visible. */
+const leerVista = `(() => {
+  const visibles = [...document.querySelectorAll("[data-vista]")]
+    .filter((d) => d.getAttribute("aria-hidden") !== "true")
+    .map((d) => d.getAttribute("data-vista"));
+  return visibles[0] ?? null;
+})()`;
+
+const clicBoton = async (ses, texto) => {
+  const hecho = await js(
+    ses,
+    `(() => {
+      const nav = [...document.querySelectorAll('nav[aria-label]')].find((n) => {
+        const r = n.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (!nav) return false;
+      const b = [...nav.querySelectorAll("button")].find((x) => x.innerText.trim().toLowerCase() === ${JSON.stringify(
+        texto.toLowerCase(),
+      )});
+      if (!b) return false;
+      b.click();
+      return true;
+    })()`,
+  );
+  if (!hecho) throw new Error(`no encontré el botón «${texto}»`);
+  await dormir(700);
+};
+
 const { browser, cerrar } = await abrirChrome({ puerto: PUERTO, perfil: PERFIL });
-const ses = await nuevaSesion(browser, { w: 360, h: 640, dpr: 2, movil: true });
 
 try {
-  console.log(`${BASE} · navbar de secciones (360×640)\n`);
-  await ses.ev("Page.navigate", { url: BASE });
-  await esperar(ses, `document.querySelector("nav[aria-label]")`, { nombre: "el navbar montó" });
-  await dormir(800);
+  // ── Escritorio: el riel completo ────────────────────────────────────────
+  const grande = await nuevaSesion(browser, { w: 1200, h: 900, dpr: 1 });
+  console.log(`${BASE} · navegación de vistas\n\n— escritorio 1200×900 —`);
+  await grande.ev("Page.navigate", { url: BASE });
+  await esperar(grande, `document.querySelector("[data-vista]")`, { nombre: "el shell montó" });
+  await dormir(900);
 
-  // ── 1. Estructura ──
-  const nav = await js(ses, leerNav);
-  console.log("navbar:", JSON.stringify(nav));
-  check("el navbar existe y tiene nombre accesible", nav !== null && (nav.nombre ?? "").length > 0, String(nav?.nombre));
-  check("lleva a todas las secciones", JSON.stringify(nav?.hrefs) === JSON.stringify(ESPERADOS), JSON.stringify(nav?.hrefs));
+  const riel = await js(grande, leerRiel);
+  console.log("riel:", JSON.stringify(riel));
+  check("el riel existe y tiene nombre accesible", Boolean(riel?.nombre), String(riel?.nombre));
   check(
-    "cada destino tiene 44 px de alto o más",
-    (nav?.altos ?? []).every((h) => h >= 44),
-    JSON.stringify(nav?.altos),
+    "entra la navegación completa (4 vistas)",
+    (riel?.textos ?? []).filter((t) => t.length > 0).length === VISTAS.length,
+    JSON.stringify(riel?.textos),
   );
-  check("la fila no desborda la página a lo ancho", (nav?.doc ?? 99) <= 1, `sobra=${nav?.doc}px`);
-
-  // ── 2. Salta a la sección sin que el navbar tape el título ──
-  await js(
-    ses,
-    `document.querySelector('nav[aria-label] a[href="#opiniones"]').click()`,
-  );
-  await esperarQuieto(ses);
-  const salto = await js(
-    ses,
-    `(() => {
-      const nav = document.querySelector("nav[aria-label]").getBoundingClientRect();
-      const s = document.querySelector("#opiniones").getBoundingClientRect();
-      return { navAbajo: Math.round(nav.bottom), seccionArriba: Math.round(s.top), y: Math.round(window.scrollY) };
-    })()`,
-  );
-  console.log("salto a opiniones:", JSON.stringify(salto));
-  check("la página se movió", (salto?.y ?? 0) > 100, `y=${salto?.y}`);
   check(
-    "el título queda justo debajo del navbar, no tapado ni lejos",
-    (salto?.seccionArriba ?? 0) >= (salto?.navAbajo ?? 99) - 2 &&
-      (salto?.seccionArriba ?? 9999) <= (salto?.navAbajo ?? 0) + 40,
-    `sección=${salto?.seccionArriba} nav=${salto?.navAbajo}`,
+    "cada destino tiene 40 px de alto o más",
+    (riel?.altos ?? []).every((h) => h >= 40),
+    JSON.stringify(riel?.altos),
   );
+  check("la fila no desborda la página a lo ancho", (riel?.doc ?? 99) <= 1, `sobra=${riel?.doc}px`);
+  check("arranca en Inicio y lo anuncia", (await js(grande, leerVista)) === "inicio" && riel?.activo === 0);
 
-  // ── 3. El navbar queda pegado y anuncia la sección activa ──
-  const pegado = await js(ses, leerNav);
-  console.log("pegado:", JSON.stringify(pegado));
-  check("el navbar queda pegado arriba", Math.abs(pegado?.pegado ?? 99) <= 1, `top=${pegado?.pegado}`);
+  for (const [i, vista] of VISTAS.entries()) {
+    if (i === 0) continue;
+    const etiqueta = (riel?.textos ?? [])[i];
+    await clicBoton(grande, etiqueta);
+    const visible = await js(grande, leerVista);
+    const tras = await js(grande, leerRiel);
+    check(
+      `«${etiqueta}» abre la pantalla ${vista} y la anuncia`,
+      visible === vista && tras?.activo === i,
+      `visible=${visible} activo=${tras?.activo}`,
+    );
+  }
+
+  // La pantalla anterior no tiene que quedar enfocable.
+  const inicioInerte = await js(
+    grande,
+    `document.querySelector('[data-vista="inicio"]')?.hasAttribute("inert") === true`,
+  );
+  check("la pantalla que no se ve queda inerte", inicioInerte);
+  await grande.cerrar().catch(() => {});
+
+  // ── Celular: el riel se esconde y manda el menú ─────────────────────────
+  console.log("\n— celular 360×640 —");
+  const chico = await nuevaSesion(browser, { w: 360, h: 640, dpr: 2, movil: true });
+  await chico.ev("Page.navigate", { url: BASE });
+  await esperar(chico, `document.querySelector("[data-vista]")`, { nombre: "el shell montó" });
+  await dormir(900);
+
+  const rielMovil = await js(chico, leerRiel);
+  check("en celular el riel de escritorio no se ve", rielMovil === null, JSON.stringify(rielMovil));
   check(
-    "anuncia la sección activa",
-    pegado?.activo === "#opiniones",
-    `activo=${pegado?.activo}`,
+    "la página no desborda a lo ancho",
+    (await js(chico, `Math.round(document.documentElement.scrollWidth - window.innerWidth)`)) <= 1,
   );
 
-  // ── 4. Cambiar de sección actualiza el anuncio ──
-  await js(ses, `document.querySelector('nav[aria-label] a[href="#planes"]').click()`);
-  await esperarQuieto(ses);
-  const tras = await js(ses, leerNav);
-  check("al saltar a otra sección, el anuncio cambia", tras?.activo === "#planes", `activo=${tras?.activo}`);
-
-  // ── 5. "Inicio" vuelve al principio de verdad ──
-  // Antes apuntaba a los botones de descarga: caía en el medio del hero y
-  // dejaba el título cortado arriba. Ahora apunta al encabezado, así que tiene
-  // que terminar en el tope exacto de la página.
-  await js(ses, `document.querySelector('nav[aria-label] a[href="#inicio"]').click()`);
-  await esperarQuieto(ses);
-  const volvio = await js(ses, `Math.round(window.scrollY)`);
-  const navInicio = await js(ses, leerNav);
-  console.log("volver arriba:", JSON.stringify({ y: volvio, activo: navInicio?.activo }));
-  check("Inicio vuelve al tope de la página", volvio === 0, `y=${volvio}`);
-  check("y queda marcada la sección Inicio", navInicio?.activo === "#inicio", `activo=${navInicio?.activo}`);
-
-  // ── 6. "Contacto" llega al pie, que antes no existía como destino ──
-  await js(ses, `document.querySelector('nav[aria-label] a[href="#contacto"]').click()`);
-  await esperarQuieto(ses);
-  const pie = await js(
-    ses,
-    `(() => {
-      const f = document.querySelector("#contacto");
-      if (!f) return null;
-      const r = f.getBoundingClientRect();
-      return { top: Math.round(r.top), alto: Math.round(r.height), visible: r.top < window.innerHeight && r.bottom > 0 };
-    })()`,
-  );
-  const navPie = await js(ses, leerNav);
-  console.log("contacto:", JSON.stringify({ pie: pie?.top, activo: navPie?.activo }));
-  check("el pie existe y trae el contacto", (pie?.alto ?? 0) > 100, `alto=${pie?.alto}`);
-  check("Contacto deja el pie a la vista", pie?.visible === true, `top=${pie?.top}`);
-  check("y queda marcada la sección Contacto", navPie?.activo === "#contacto", `activo=${navPie?.activo}`);
-
-  // ── 7. En escritorio entra completa y centrada ──
-  await ses.ev("Emulation.setDeviceMetricsOverride", {
-    width: 1200, height: 900, deviceScaleFactor: 1, mobile: false,
+  const abrir = `(() => {
+    const b = document.querySelector('header button[aria-expanded]');
+    if (!b) return false;
+    if (b.getAttribute("aria-expanded") === "true") return true;
+    b.click();
+    return true;
+  })()`;
+  await js(chico, abrir);
+  await esperar(chico, `[...document.querySelectorAll('nav[aria-label]')].some((n) => n.offsetHeight > 0)`, {
+    nombre: "el menú móvil se abrió",
   });
-  await dormir(500);
-  const grande = await js(ses, leerNav);
-  console.log("escritorio:", JSON.stringify(grande));
-  check("en escritorio están todas las secciones", JSON.stringify(grande?.hrefs) === JSON.stringify(ESPERADOS));
-  check("en escritorio la fila no desborda", (grande?.doc ?? 99) <= 1, `sobra=${grande?.doc}px`);
+  const menu = await js(chico, leerRiel);
+  console.log("menú móvil:", JSON.stringify(menu));
+  check("el menú trae las cuatro vistas", (menu?.textos ?? []).length >= VISTAS.length, JSON.stringify(menu?.textos));
+  check(
+    "cada destino del menú mide 36 px o más",
+    (menu?.altos ?? []).every((h) => h >= 36),
+    JSON.stringify(menu?.altos),
+  );
+
+  const etiquetaPlanes = menu?.textos?.[VISTAS.indexOf("planes")] ?? "Planes";
+  await clicBoton(chico, etiquetaPlanes);
+  await dormir(400);
+  const expanded = await js(chico, `document.querySelector('header button[aria-expanded]')?.getAttribute("aria-expanded")`);
+  check("al elegir una vista el menú se cierra", expanded === "false", `aria-expanded=${expanded}`);
+  check("y la pantalla cambia a Planes", (await js(chico, leerVista)) === "planes");
+  check(
+    "sigue sin desbordar después de navegar",
+    (await js(chico, `Math.round(document.documentElement.scrollWidth - window.innerWidth)`)) <= 1,
+  );
+  await chico.cerrar().catch(() => {});
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);
   if (fallos > 0) process.exitCode = 1;
 } finally {
-  await ses.cerrar().catch(() => {});
   await cerrar();
 }

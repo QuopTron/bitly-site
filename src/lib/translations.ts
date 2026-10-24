@@ -297,6 +297,7 @@ export const DICT: Record<string, [string, string]> = {
   adminPedidoNotaPlaceholder:["Ej: comprobante verificado",         "E.g. receipt verified"],
   adminPedidoGuardar:   ["Guardar",                                 "Save"],
   adminPedidoGuardado:  ["Pedido actualizado.",                     "Order updated."],
+  adminPedidoGuardadoAviso:["Pedido actualizado y aviso enviado al comprador.", "Order updated and notice sent to the buyer."],
   adminPedidoEnviar:    ["Enviar por correo",                       "Send by email"],
   adminPedidoEnviado:   ["Código enviado al comprador.",            "Code sent to the buyer."],
   adminPedidoSinCodigo: ["Asigná un código antes de enviarlo.",     "Assign a code before sending."],
