@@ -148,10 +148,30 @@ async function cspDeHtmlCacheado(html, etag) {
 }
 
 /**
- * Pone la CSP calculada en las respuestas HTML. Si el cuerpo viene comprimido
- * (no debería ocurrir dentro del worker), la respuesta sale con una política
- * de emergencia con 'unsafe-inline': preferible una CSP floja a ninguna o a
- * una que bloquee los guiones y deje la página sin hidratar.
+ * Cabeceras de seguridad de las páginas HTML.
+ *
+ * public/_headers las pone en los archivos estáticos, pero las páginas que arma
+ * el worker (/, /admin, 404) no pasan por ese archivo: sin esto, el HTML salía
+ * sólo con la CSP y sin HSTS, nosniff, referrer-policy ni permissions-policy.
+ * Se replican acá los mismos valores.
+ */
+const CABECERAS_HTML = {
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "X-Permitted-Cross-Domain-Policies": "none",
+  "Permissions-Policy":
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()",
+};
+
+/**
+ * Pone la CSP calculada y las cabeceras de seguridad en las respuestas HTML. Si
+ * el cuerpo viene comprimido (no debería ocurrir dentro del worker), la
+ * respuesta sale con una política de emergencia con 'unsafe-inline': preferible
+ * una CSP floja a ninguna o a una que bloquee los guiones y deje la página sin
+ * hidratar.
  */
 async function conCsp(resp) {
   const tipo = resp.headers.get("content-type") ?? "";
@@ -159,11 +179,13 @@ async function conCsp(resp) {
   if (resp.headers.get("content-encoding") && resp.headers.get("content-encoding") !== "identity") {
     const cab = new Headers(resp.headers);
     cab.set("Content-Security-Policy", CSP_FIJOS + "; script-src 'self' 'unsafe-inline'");
+    for (const [clave, valor] of Object.entries(CABECERAS_HTML)) cab.set(clave, valor);
     return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: cab });
   }
   const html = await resp.text();
   const cab = new Headers(resp.headers);
   cab.set("Content-Security-Policy", await cspDeHtmlCacheado(html, resp.headers.get("etag") ?? ""));
+  for (const [clave, valor] of Object.entries(CABECERAS_HTML)) cab.set(clave, valor);
   cab.delete("content-length");
   return new Response(html, { status: resp.status, statusText: resp.statusText, headers: cab });
 }
@@ -181,7 +203,12 @@ export default {
     if (esRpc) {
       const largo = Number(request.headers.get("content-length") ?? 0);
       if (Number.isFinite(largo) && largo > 6 * 1024 * 1024) {
-        return new Response("Payload too large", { status: 413 });
+        // public/_headers sólo aplica a archivos estáticos: en las respuestas
+        // de la RPC el no-store se pone acá.
+        return new Response("Payload too large", {
+          status: 413,
+          headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" },
+        });
       }
     }
 
@@ -212,8 +239,14 @@ export default {
     }
 
     const respuesta = await app.fetch(request, env, ctx);
-    if (respuesta.status !== 404) return conCsp(respuesta);
-    return conCsp(await env.ASSETS.fetch(request));
+    const salida = respuesta.status !== 404 ? respuesta : await env.ASSETS.fetch(request);
+    const final = await conCsp(salida);
+    if (!esRpc) return final;
+    // La RPC nunca se cachea ni se indexa, venga del código o de un proxy.
+    const cab = new Headers(final.headers);
+    cab.set("Cache-Control", "no-store");
+    cab.set("X-Robots-Tag", "noindex, nofollow");
+    return new Response(final.body, { status: final.status, statusText: final.statusText, headers: cab });
   },
 };
 `;

@@ -359,6 +359,32 @@ estado que devuelve el servidor es el real del registro, un código usado **no**
 deja Premium guardado y un código activo sí lo activa (después se limpia del
 perfil de prueba).
 
+### 6.1 Auditoría completa de producción
+
+`pnpm verificar:produccion` recorre el despliegue real **sin escribir nada**: no
+crea cuentas, pedidos ni egresos. Revisa cabeceras de seguridad y CSP en `/` y
+`/admin/`, rutas privadas y fugas (`/_ssr/`, `/_worker.js`, `.env`, `.git`,
+`package.json`, source maps), el HTML del panel (noindex y sin correo, token ni
+clave), la RPC (403 por GET, `no-store`, corte de 7 MB con 413), el acceso al
+panel con un token inventado y con la clave equivocada, la consistencia de las
+métricas, caché y compresión, el service worker, el manifiesto PWA y el 404.
+
+La parte que entra al panel necesita el correo y la clave del dueño, y sin ellos
+se salta ese bloque (avisa y sigue con el resto):
+
+```bash
+# sólo lectura; correo y clave van por entorno y nunca se imprimen
+BITLY_ADMIN_EMAIL='<correo del dueño>' BITLY_ADMIN_CLAVE='<clave del panel>' \
+  node scripts/auditoria-produccion.mjs
+
+# contra otro despliegue (por ejemplo un preview)
+PROD_URL=https://<hash>.bitly-site.pages.dev BITLY_ADMIN_EMAIL='<correo>' \
+  BITLY_ADMIN_CLAVE='<clave>' node scripts/auditoria-produccion.mjs
+```
+
+Termina con `PRODUCCIÓN: TODO OK` y código 0, o con la lista de `FALLA` y
+código 1. Conviene correrla después de cada deploy.
+
 Si el punto 2 devuelve **405**, el build volvió a publicar sólo estáticos: falta
 el `_worker.js` (¿se rompió el `build`?).
 

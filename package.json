@@ -22,6 +22,7 @@
     "verificar:panel": "node scripts/verificar-panel.mjs",
     "verificar:cambio": "node scripts/verificar-cambio.mjs",
     "verificar:worker": "node scripts/verificar-worker.mjs",
+    "verificar:produccion": "node scripts/auditoria-produccion.mjs",
     "probar:cuota": "node scripts/probar-cuota.mjs",
     "probar:opiniones": "node scripts/probar-opiniones.mjs",
     "probar:correo": "node scripts/probar-correo.mjs",
