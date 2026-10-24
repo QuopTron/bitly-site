@@ -174,8 +174,8 @@ try {
   console.log("menú móvil:", JSON.stringify(menu));
   check("el menú trae las cuatro vistas", (menu?.textos ?? []).length >= VISTAS.length, JSON.stringify(menu?.textos));
   check(
-    "cada destino del menú mide 36 px o más",
-    (menu?.altos ?? []).every((h) => h >= 36),
+    "cada destino del menú mide 44 px o más (dedo, no puntero)",
+    (menu?.altos ?? []).every((h) => h >= 44),
     JSON.stringify(menu?.altos),
   );
 

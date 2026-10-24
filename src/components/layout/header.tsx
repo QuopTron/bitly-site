@@ -269,7 +269,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
                     type="button"
                     onClick={() => irA(id)}
                     aria-current={vista === id ? "page" : undefined}
-                    className={`texto-tag flex min-h-9 items-center justify-between gap-2 rounded-full border px-3 text-[0.72rem] transition-colors ${
+                    className={`texto-tag flex min-h-11 items-center justify-between gap-2 rounded-full border px-3 text-[0.72rem] transition-colors ${
                       vista === id
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border/60 bg-background/45 text-muted-foreground hover:bg-background hover:text-foreground"
