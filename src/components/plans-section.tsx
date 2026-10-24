@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Check, X as XIcon, MessageCircle, Gem, Info } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
 import { getFaseActual } from "@/lib/pricing";
@@ -7,9 +7,12 @@ import { retraso } from "@/lib/reveal";
 import { enlaceWhatsApp } from "@/lib/contacto";
 import SectionHeader from "@/components/ui/section-header";
 import ModalWrapper from "@/components/ui/modal-wrapper";
-import PagoModal from "@/components/modals/pago-modal";
-import EstadoPedidoModal from "@/components/modals/estado-pedido-modal";
 import { useHayCuenta } from "@/lib/cuentas-cliente";
+
+// Igual que los diálogos del shell: no se ven al entrar y pesan (el de pago
+// arrastra servidor de pedidos y precios), así que van en su propio chunk.
+const PagoModal = lazy(() => import("@/components/modals/pago-modal"));
+const EstadoPedidoModal = lazy(() => import("@/components/modals/estado-pedido-modal"));
 
 const freeFeatures = ["freeCompare1", "freeCompare2", "freeCompare3", "freeCompare4"];
 const freeBlocked = ["freeNoUnlimited", "freeNoFlac", "freeNoBatch"];
@@ -235,24 +238,30 @@ export default function PlansSection({ onCuenta }: Props) {
         </button>
       </ModalWrapper>
 
-      <PagoModal
-        open={showPago}
-        onClose={() => setShowPago(false)}
-        onCuenta={onCuenta}
-        onVerEstado={() => {
-          setShowPago(false);
-          setShowEstado(true);
-        }}
-      />
-      <EstadoPedidoModal
-        open={showEstado}
-        onClose={() => setShowEstado(false)}
-        onCuenta={onCuenta}
-        onComprar={() => {
-          setShowEstado(false);
-          setShowPago(true);
-        }}
-      />
+      <Suspense fallback={null}>
+        {showPago && (
+          <PagoModal
+            open
+            onClose={() => setShowPago(false)}
+            onCuenta={onCuenta}
+            onVerEstado={() => {
+              setShowPago(false);
+              setShowEstado(true);
+            }}
+          />
+        )}
+        {showEstado && (
+          <EstadoPedidoModal
+            open
+            onClose={() => setShowEstado(false)}
+            onCuenta={onCuenta}
+            onComprar={() => {
+              setShowEstado(false);
+              setShowPago(true);
+            }}
+          />
+        )}
+      </Suspense>
     </section>
   );
 }

@@ -7,11 +7,7 @@ import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
 import DemoPlayer from "@/components/demo/demo-player";
 import ComentariosInicio from "@/components/inicio/comentarios-inicio";
-import FaqModal from "@/components/modals/faq-modal";
-import ComentariosModal from "@/components/modals/comentarios-modal";
-import CodigoModal from "@/components/modals/codigo-modal";
-import AdminModal from "@/components/modals/admin-modal";
-import CuentaModal from "@/components/modals/cuenta-modal";
+
 import { useAnalitica } from "@/lib/analytics";
 import { useInstalacionPwa } from "@/lib/pwa";
 import { initRates } from "@/lib/currency";
@@ -21,7 +17,20 @@ import { TITULO } from "@/lib/seo";
 import { EVENTO_NAVEGAR, VISTAS, esVista, type VistaId } from "@/lib/navegacion";
 import { INFO_POR_DEFECTO, leerDatosSitio, registrarDescarga, type InfoApp, type StatsSitio } from "@/server/datos";
 
+/**
+ * Diálogos bajo demanda.
+ *
+ * Ninguno se ve al cargar la página y entre todos pesaban decenas de KB en el
+ * bundle inicial (el del admin trae toda la gestión de pedidos). Con `lazy` y
+ * renderizado condicional viajan en su propio chunk: el primer pintado no los
+ * espera y el diálogo aparece en cuanto se pide.
+ */
 const ReleaseModal = lazy(() => import("@/components/modals/release-modal"));
+const FaqModal = lazy(() => import("@/components/modals/faq-modal"));
+const ComentariosModal = lazy(() => import("@/components/modals/comentarios-modal"));
+const CodigoModal = lazy(() => import("@/components/modals/codigo-modal"));
+const AdminModal = lazy(() => import("@/components/modals/admin-modal"));
+const CuentaModal = lazy(() => import("@/components/modals/cuenta-modal"));
 
 type Datos = { info: InfoApp; stats: StatsSitio; vistas: number; release: ReleaseIndex | null };
 
@@ -280,18 +289,27 @@ export default function Index() {
         })}
       </main>
 
-      <FaqModal open={showFaq} onClose={() => setShowFaq(false)} />
-      <ComentariosModal open={showComentarios} onClose={() => setShowComentarios(false)} />
-      <CodigoModal
-        open={showCodigo}
-        onClose={() => setShowCodigo(false)}
-        onOk={(codigo) => {
-          setAdminCodigo(codigo);
-          setShowCodigo(false);
-        }}
-      />
-      <AdminModal open={!!adminCodigo} onClose={() => setAdminCodigo("")} codigo={adminCodigo} />
-      <CuentaModal open={showCuenta} onClose={() => setShowCuenta(false)} />
+      <Suspense fallback={null}>
+        {showFaq && <FaqModal open onClose={() => setShowFaq(false)} />}
+        {showComentarios && <ComentariosModal open onClose={() => setShowComentarios(false)} />}
+        {showCodigo && (
+          <CodigoModal
+            open
+            onClose={() => setShowCodigo(false)}
+            onOk={(codigo) => {
+              setAdminCodigo(codigo);
+              setShowCodigo(false);
+            }}
+          />
+        )}
+        {showCuenta && <CuentaModal open onClose={() => setShowCuenta(false)} />}
+      </Suspense>
+
+      {adminCodigo && (
+        <Suspense fallback={null}>
+          <AdminModal open onClose={() => setAdminCodigo("")} codigo={adminCodigo} />
+        </Suspense>
+      )}
 
       <Suspense fallback={null}>
         {showRelease && (
