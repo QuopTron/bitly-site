@@ -10,6 +10,9 @@ node_modules/
 # Bundles y capturas que generan los harness de `scripts/` en cada corrida
 /scripts/.cache/
 
+# Claves privadas de firma (Ed25519 de los códigos Premium). Nunca al repo.
+/scripts/keys/
+
 # Estado local de wrangler (miniflare: cache, kv, r2, d1)
 /.wrangler/
 /.wrangler-verif*/
