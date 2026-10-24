@@ -2,9 +2,24 @@
  * Pedidos de Premium con comprobante de pago.
  *
  * El sitio no cobra ni valida transferencias: recibe el comprobante, lo guarda
- * en el repo privado de datos y deja el pedido en estado `pendiente`. El dueño
- * lo revisa desde el panel admin, asigna un código y se lo envía al comprador
- * (o usa el envío opcional por Resend/webhook).
+ * en el repo privado de datos y deja el pedido en estado `pendiente`.
+ *
+ * Ciclo de vida:
+ *
+ *   pendiente  el comprador acaba de subir el comprobante y tiene una ventana
+ *              corta para arrepentirse (10 min en producción, 1 en local).
+ *              En este estado puede anular el pedido él mismo.
+ *   revision   la ventana se cerró sin anular: recién ahí se avisa al dueño y
+ *              el comprador ve «el equipo está revisando el comprobante». Los
+ *              códigos todavía NO existen.
+ *   pagado     el dueño validó el pago: se emiten los códigos (cantidad de
+ *              códigos comprados) y se entregan en el sitio y por correo.
+ *   enviado    el correo salió.
+ *   cancelado  anulado por el comprador, abortado o dado de baja por el dueño.
+ *
+ * Volver un pedido a `pendiente` o `revision` suelta los códigos asignados: al
+ * comprador no se le puede «quitar» el correo que ya recibió, pero el pedido
+ * deja de figurar como entregado y se pueden emitir códigos nuevos.
  *
  * Todo lo privado vive en el servidor: el comprobante se guarda como archivo
  * binario en `data/comprobantes/` y los pedidos en `data/pedidos.json`. El
@@ -17,8 +32,10 @@ import { adminValido } from "@/server/analytics";
 import { correoAdmin, correoConfigurado, enviarCorreo } from "@/server/correo";
 import { borrarArchivo, getArchivo, getJson, putArchivo, putJson } from "@/server/github-store";
 import { obtenerIPCliente } from "@/server/ip";
-import { cuentaDeToken } from "@/server/cuentas";
+import { banearCuenta, cuentaDeToken } from "@/server/cuentas";
 import { leerRegistroCodigos } from "@/lib/premium-check";
+import { getFaseActual } from "@/lib/pricing";
+import { MAX_CODIGOS, emitirCodigos, firmaConfigurada } from "@/server/codigos";
 import { avisoNuevoPedido, correoDePrueba, cuerpoCorreo } from "@/server/correo-compra";
 
 const ARCHIVO = "data/pedidos.json";
@@ -26,7 +43,26 @@ const CARPETA = "data/comprobantes";
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_PEDIDOS = 800;
 
-export type EstadoPedido = "pendiente" | "pagado" | "enviado" | "cancelado";
+/**
+ * Ventana para anular una compra recién subida.
+ *
+ * En producción son 10 minutos; en local 1, para poder probar el vencimiento
+ * sin esperar. Se puede fijar con `BITLY_VENTANA_PEDIDO_MIN` (minutos).
+ */
+const VENTANA_MIN = (() => {
+  const propio = Number(process.env.BITLY_VENTANA_PEDIDO_MIN);
+  if (Number.isFinite(propio) && propio > 0) return propio;
+  return process.env.NODE_ENV === "production" ? 10 : 1;
+})();
+const VENTANA_ANULACION_MS = VENTANA_MIN * 60_000;
+
+/** Precio por código, en Bs. El total del pedido es esto × cantidad. */
+const PRECIO_UNIDAD = getFaseActual().precio;
+
+export type EstadoPedido = "pendiente" | "revision" | "pagado" | "enviado" | "cancelado";
+
+/** Estados en los que el pedido sigue vivo (bloquea comprar de nuevo). */
+const ABIERTOS: EstadoPedido[] = ["pendiente", "revision"];
 
 type PedidoGuardado = {
   folio: string;
@@ -37,7 +73,18 @@ type PedidoGuardado = {
   comprobante: string;
   tipoComprobante: string;
   estado: EstadoPedido;
+  /** Cuántos códigos compró (el precio es por unidad). */
+  cantidad: number;
+  /** Total en Bs que declaró el sitio al crear el pedido. */
+  total: number;
+  /** Códigos emitidos; el primero también queda en `codigo` por compatibilidad. */
+  codigos: string[];
+  /** Primer código, para lo que ya leía un solo código (`miCuenta`, correos). */
   codigo: string | null;
+  /** ISO: fin de la ventana para anular sin consecuencias. */
+  ventanaFin: string;
+  /** Quién lo anuló, para poder distinguir una anulación de un abuso. */
+  anuladoPor?: "comprador" | "abortado" | "admin" | "vencido";
   nota: string;
   /** Cuenta del sitio que hizo el pedido (null en compras de invitado). */
   cuentaId: string | null;
@@ -49,7 +96,12 @@ export type PedidoPublico = {
   folio: string;
   nombre: string;
   estado: EstadoPedido;
+  cantidad: number;
+  total: number;
+  codigos: string[];
   codigo: string | null;
+  /** ISO: hasta cuándo se puede anular. */
+  ventanaFin: string;
   nota: string;
   creado: string;
   actualizado: string;
@@ -59,7 +111,10 @@ export type PedidoPublico = {
 
 type ResultadoCrear =
   | { ok: true; folio: string; token: string; pedido: PedidoPublico }
-  | { ok: false; motivo: "datos" | "archivo" | "limite" | "servidor" };
+  | {
+      ok: false;
+      motivo: "datos" | "archivo" | "limite" | "servidor" | "pendiente" | "baneado";
+    };
 
 type ResultadoConsulta =
   | { ok: true; pedido: PedidoPublico }
@@ -85,6 +140,8 @@ export type ResumenCodigos = {
   otros: number;
   codigosActivos: string[];
   correoConfigurado: boolean;
+  /** ¿Hay clave Ed25519 para emitir códigos nuevos? */
+  firmaConfigurada: boolean;
 };
 
 /* ── Utilidades ─────────────────────────────────────────────────────────── */
@@ -131,11 +188,19 @@ function mismoContacto(p: PedidoGuardado, contacto: string): boolean {
 }
 
 function publico(p: PedidoGuardado): PedidoPublico {
+  // Los pedidos viejos no tienen los campos nuevos: se normalizan al leer, así
+  // el panel y el comprador no ven `undefined` en un pedido de ayer.
+  const codigos = Array.isArray(p.codigos) && p.codigos.length ? p.codigos : p.codigo ? [p.codigo] : [];
+  const cantidad = Number.isFinite(p.cantidad) && p.cantidad > 0 ? p.cantidad : Math.max(1, codigos.length);
   return {
     folio: p.folio,
     nombre: p.nombre,
     estado: p.estado,
-    codigo: p.codigo,
+    cantidad,
+    total: Number.isFinite(p.total) ? p.total : cantidad * PRECIO_UNIDAD,
+    codigos,
+    codigo: codigos[0] ?? null,
+    ventanaFin: p.ventanaFin ?? p.creado,
     nota: p.nota,
     creado: p.creado,
     actualizado: p.actualizado,
@@ -225,6 +290,74 @@ function ordenarNuevos(lista: PedidoGuardado[]): PedidoGuardado[] {
   return lista.slice().sort((a, b) => (a.creado < b.creado ? 1 : -1)).slice(0, MAX_PEDIDOS);
 }
 
+/** Códigos ya entregados en cualquier pedido: nunca se entregan dos veces. */
+function codigosEnUso(lista: PedidoGuardado[]): Set<string> {
+  const enUso = new Set<string>();
+  for (const p of lista) {
+    if (p.codigo) enUso.add(p.codigo);
+    if (Array.isArray(p.codigos)) for (const c of p.codigos) enUso.add(c);
+  }
+  return enUso;
+}
+
+/** Pedido que hoy impide comprar de nuevo (misma cuenta o mismo correo). */
+function pedidoAbierto(
+  lista: PedidoGuardado[],
+  cuentaId: string | null,
+  correo: string,
+): PedidoGuardado | undefined {
+  return lista.find(
+    (p) =>
+      ABIERTOS.includes(p.estado) &&
+      ((cuentaId && p.cuentaId === cuentaId) || p.correo.toLowerCase() === correo),
+  );
+}
+
+/**
+ * Cierra la ventana de los pedidos vencidos y avisa al dueño.
+ *
+ * Los Workers no tienen reloj propio ni cron: la transición se resuelve cuando
+ * alguien mira los pedidos (el comprador recargando el estado o el dueño
+ * abriendo el panel). Es el mismo criterio que usa la cuota de la demo y evita
+ * un cron que habría que pagar aparte.
+ *
+ * Si el correo falla, el pedido igual cambia de estado: el aviso es un extra,
+ * el estado es la verdad.
+ */
+async function cerrarVencidos(lista: PedidoGuardado[]): Promise<PedidoGuardado[]> {
+  const ahora = Date.now();
+  const vencidos = lista.filter((p) => {
+    if (p.estado !== "pendiente") return false;
+    const fin = Date.parse(p.ventanaFin ?? "");
+    return Number.isFinite(fin) && fin <= ahora;
+  });
+  if (vencidos.length === 0) return lista;
+
+  const marca = new Date(ahora).toISOString();
+  const cerrados = new Set(vencidos.map((p) => p.folio));
+  const siguiente = lista.map((p) =>
+    cerrados.has(p.folio)
+      ? { ...p, estado: "revision" as EstadoPedido, actualizado: marca }
+      : p,
+  );
+
+  // Se guarda antes de avisar: si el guardado falla, no se manda un correo que
+  // después no coincide con lo que muestra el panel.
+  const ok = await putJson("datos", ARCHIVO, ordenarNuevos(siguiente), `pedidos: ${cerrados.size} a revisión`);
+  if (!ok) return lista;
+
+  if (correoConfigurado()) {
+    for (const p of vencidos) {
+      try {
+        await enviarCorreo({ to: correoAdmin(), ...avisoNuevoPedido(p) });
+      } catch (e) {
+        console.error("[pedidos] aviso al admin falló:", e instanceof Error ? e.message : e);
+      }
+    }
+  }
+  return siguiente;
+}
+
 /* ── Comprador ─────────────────────────────────────────────────────────── */
 
 export const crearPedido = createServerFn({ method: "POST" })
@@ -236,6 +369,7 @@ export const crearPedido = createServerFn({ method: "POST" })
       comprobante?: unknown;
       web?: unknown;
       sesionCuenta?: unknown;
+      cantidad?: unknown;
     }) => d,
   )
   .handler(async ({ data }): Promise<ResultadoCrear> => {
@@ -247,7 +381,14 @@ export const crearPedido = createServerFn({ method: "POST" })
     const celularCrudo = limpiar(data?.celular, 30);
     const comprobante = String(data?.comprobante ?? "").replace(/\s+/g, "");
     const cuenta = await cuentaDeToken(limpiar(data?.sesionCuenta, 500));
+    // `Number(null)` es 0 y `Number(undefined)` es NaN: los dos caen en 1, que es
+    // el comportamiento de siempre para quien no manda cantidad.
+    const cantidadCruda = Math.trunc(Number(data?.cantidad));
+    const cantidad = Number.isFinite(cantidadCruda) && cantidadCruda > 0
+      ? Math.min(cantidadCruda, MAX_CODIGOS)
+      : 1;
 
+    if (cuenta?.baneada) return { ok: false, motivo: "baneado" };
     if (!correoValido(correo)) return { ok: false, motivo: "datos" };
     if (!celularValido(celularCrudo)) return { ok: false, motivo: "datos" };
     const tipo = archivoValido(comprobante);
@@ -256,10 +397,22 @@ export const crearPedido = createServerFn({ method: "POST" })
 
     const folio = `FLX-${azar(8)}`;
     const token = azar(28);
-    const ahora = new Date().toISOString();
+    const ahoraMs = Date.now();
+    const ahora = new Date(ahoraMs).toISOString();
     const ruta = `${CARPETA}/${folio}.${tipo.ext}`;
 
     try {
+      // Un pedido abierto por cuenta o por correo bloquea la compra: sin esto
+      // se podía subir otro comprobante y terminar con dos pedidos y dos
+      // códigos por el mismo pago.
+      // Se resuelven las ventanas vencidas antes de mirar: si no, alguien con un
+      // pedido que venció hace un minuto sigue bloqueado como «pendiente».
+      const existentes = await cerrarVencidos(await leerPedidos());
+      const abierto = pedidoAbierto(existentes, cuenta?.id ?? null, correo);
+      if (abierto) {
+        return { ok: false, motivo: "pendiente" };
+      }
+
       const guardado = await putArchivo(
         "datos",
         ruta,
@@ -277,31 +430,28 @@ export const crearPedido = createServerFn({ method: "POST" })
         comprobante: ruta,
         tipoComprobante: tipo.tipo,
         estado: "pendiente",
+        cantidad,
+        total: PRECIO_UNIDAD * cantidad,
+        codigos: [],
         codigo: null,
+        ventanaFin: new Date(ahoraMs + VENTANA_ANULACION_MS).toISOString(),
         nota: "",
         cuentaId: cuenta?.id ?? null,
         creado: ahora,
         actualizado: ahora,
       };
 
-      const lista = await leerPedidos();
       const ok = await putJson(
         "datos",
         ARCHIVO,
-        ordenarNuevos([pedido, ...lista]),
+        ordenarNuevos([pedido, ...existentes]),
         `pedido ${folio}: nuevo`,
       );
       if (!ok) return { ok: false, motivo: "servidor" };
 
-      // Aviso al dueño: si el correo falla, el pedido igual queda guardado y
-      // visible en el panel. Nunca se pierde una compra por un problema de SMTP.
-      try {
-        const aviso = avisoNuevoPedido(pedido);
-        await enviarCorreo({ to: correoAdmin(), ...aviso });
-      } catch (e) {
-        console.error("[pedidos] aviso al admin falló:", e instanceof Error ? e.message : e);
-      }
-
+      // El aviso al dueño NO sale acá: sale cuando se cierra la ventana de
+      // anulación (`cerrarVencidos`). Si el comprador se arrepiente a los dos
+      // minutos, el correo nunca llega y el panel no tiene ruido que limpiar.
       return { ok: true, folio, token, pedido: publico(pedido) };
     } catch (e) {
       console.error("[pedidos] no se pudo crear:", e instanceof Error ? e.message : e);
@@ -317,7 +467,10 @@ export const consultarPedido = createServerFn({ method: "POST" })
     if (!folio || !token) return { ok: false, motivo: "datos" };
     if (!(await hayCupoLectura())) return { ok: false, motivo: "limite" };
     try {
-      const pedido = (await leerPedidos()).find((p) => p.folio === folio);
+      // Se cierran TODOS los vencidos y después se busca el folio: el pedido que
+      // el comprador está mirando es justamente el que puede haber vencido.
+      const lista = await cerrarVencidos(await leerPedidos());
+      const pedido = lista.find((p) => p.folio === folio);
       if (!pedido || !igualSeguro(pedido.token, token)) return { ok: false, motivo: "no_encontrado" };
       return { ok: true, pedido: publico(pedido) };
     } catch {
@@ -333,13 +486,122 @@ export const recuperarPedido = createServerFn({ method: "POST" })
     if (!folio || !contacto) return { ok: false, motivo: "datos" };
     if (!(await hayCupo())) return { ok: false, motivo: "limite" };
     try {
-      const pedido = (await leerPedidos()).find((p) => p.folio === folio);
+      const lista = await cerrarVencidos(await leerPedidos());
+      const pedido = lista.find((p) => p.folio === folio);
       if (!pedido || !mismoContacto(pedido, contacto)) return { ok: false, motivo: "no_encontrado" };
       return { ok: true, token: pedido.token, pedido: publico(pedido) };
     } catch {
       return { ok: false, motivo: "servidor" };
     }
   });
+
+/**
+ * Anulación normal del comprador, sólo dentro de la ventana.
+ *
+ * Después de la ventana el pedido ya está en revisión y la anulación pasa a ser
+ * una decisión del dueño (`actualizarPedido` → cancelado).
+ */
+export const anularPedido = createServerFn({ method: "POST" })
+  .validator((d: { folio?: unknown; token?: unknown }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<
+      { ok: true; pedido: PedidoPublico } | { ok: false; motivo: "datos" | "no_encontrado" | "fuera_de_tiempo" | "servidor" }
+    > => {
+      const folio = limpiar(data?.folio, 20).toUpperCase();
+      const token = limpiar(data?.token, 64);
+      if (!folio || !token) return { ok: false, motivo: "datos" };
+
+      try {
+        const lista = await cerrarVencidos(await leerPedidos());
+        const indice = lista.findIndex((p) => p.folio === folio);
+        if (indice < 0 || !igualSeguro(lista[indice].token, token)) {
+          return { ok: false, motivo: "no_encontrado" };
+        }
+        const actual = lista[indice];
+        if (actual.estado !== "pendiente") return { ok: false, motivo: "fuera_de_tiempo" };
+
+        const actualizado: PedidoGuardado = {
+          ...actual,
+          estado: "cancelado",
+          anuladoPor: "comprador",
+          nota: actual.nota || "Anulado por el comprador dentro del plazo",
+          actualizado: new Date().toISOString(),
+        };
+        const siguiente = lista.slice();
+        siguiente[indice] = actualizado;
+        const ok = await putJson(
+          "datos",
+          ARCHIVO,
+          ordenarNuevos(siguiente),
+          `pedido ${folio}: anulado por el comprador`,
+        );
+        if (!ok) return { ok: false, motivo: "servidor" };
+        return { ok: true, pedido: publico(actualizado) };
+      } catch (e) {
+        console.error("[pedidos] no se pudo anular:", e instanceof Error ? e.message : e);
+        return { ok: false, motivo: "servidor" };
+      }
+    },
+  );
+
+/**
+ * Abortar una compra: el caso extremo.
+ *
+ * No es la anulación normal. Acá el comprador ya usó el sistema para subir un
+ * comprobante y después decide que no quiere nada: se cancela el pedido Y se da
+ * de baja la cuenta, para que no pueda volver a hacer el mismo circuito. La
+ * anulación normal (dentro de la ventana, sin consecuencias) es `anularPedido`.
+ */
+export const abortarCompra = createServerFn({ method: "POST" })
+  .validator((d: { folio?: unknown; token?: unknown }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<
+      | { ok: true; baneada: boolean }
+      | { ok: false; motivo: "datos" | "no_encontrado" | "no_es_tu_pedido" | "fuera_de_tiempo" | "servidor" }
+    > => {
+      const folio = limpiar(data?.folio, 20).toUpperCase();
+      const token = limpiar(data?.token, 64);
+      if (!folio || !token) return { ok: false, motivo: "datos" };
+
+      try {
+        const lista = await cerrarVencidos(await leerPedidos());
+        const indice = lista.findIndex((p) => p.folio === folio);
+        if (indice < 0 || !igualSeguro(lista[indice].token, token)) {
+          return { ok: false, motivo: "no_encontrado" };
+        }
+        const actual = lista[indice];
+        // Abortar sólo tiene sentido mientras la ventana sigue abierta: si ya
+        // pasó, el pedido es del dueño y la baja de la cuenta no corresponde.
+        if (actual.estado !== "pendiente") return { ok: false, motivo: "fuera_de_tiempo" };
+
+        const actualizado: PedidoGuardado = {
+          ...actual,
+          estado: "cancelado",
+          anuladoPor: "abortado",
+          codigos: [],
+          codigo: null,
+          nota: "Compra abortada por el comprador (cuenta dada de baja)",
+          actualizado: new Date().toISOString(),
+        };
+        const siguiente = lista.slice();
+        siguiente[indice] = actualizado;
+        const ok = await putJson("datos", ARCHIVO, ordenarNuevos(siguiente), `pedido ${folio}: abortado`);
+        if (!ok) return { ok: false, motivo: "servidor" };
+
+        const baneada = actual.cuentaId
+          ? await banearCuenta(actual.cuentaId, `abortó la compra ${folio}`)
+          : false;
+        return { ok: true, baneada };
+      } catch (e) {
+        console.error("[pedidos] no se pudo abortar:", e instanceof Error ? e.message : e);
+        return { ok: false, motivo: "servidor" };
+      }
+    },
+  );
 
 /* ── Admin ─────────────────────────────────────────────────────────────── */
 
@@ -348,7 +610,9 @@ export const adminPedidos = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<ResultadoAdmin> => {
     if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
     try {
-      const lista = ordenarNuevos(await leerPedidos());
+      // Abrir el panel es también lo que cierra las ventanas vencidas y manda
+      // los avisos: así el dueño ve el pedido ya en revisión desde el minuto 10.
+      const lista = ordenarNuevos(await cerrarVencidos(await leerPedidos()));
       return {
         ok: true,
         pedidos: lista.map((p) => ({
@@ -377,6 +641,7 @@ export const resumenCodigos = createServerFn({ method: "POST" })
         otros: 0,
         codigosActivos: [],
         correoConfigurado: correoConfigurado(),
+        firmaConfigurada: firmaConfigurada(),
       };
       for (const [codigo, estado] of registro) {
         if (estado === "activo") {
@@ -463,6 +728,7 @@ export const actualizarPedido = createServerFn({ method: "POST" })
       estado?: unknown;
       codigoPremium?: unknown;
       nota?: unknown;
+      cantidad?: unknown;
     }) => d,
   )
   .handler(
@@ -471,33 +737,88 @@ export const actualizarPedido = createServerFn({ method: "POST" })
     }): Promise<{ ok: true; pedido: PedidoPublico; aviso: boolean } | { ok: false; motivo: string }> => {
       if (!await adminValido(data?.admin)) return { ok: false, motivo: "admin" };
       const folio = limpiar(data?.folio, 20).toUpperCase();
-      const codigoPremium = limpiar(data?.codigoPremium, 500);
+      // Se pueden pegar VARIOS códigos separados por coma, espacio o salto de
+      // línea: así reasignar a mano un pedido de tres códigos no son tres viajes.
+      const pegados = limpiar(data?.codigoPremium, 4000)
+        .split(/[\s,;]+/)
+        .map((c) => c.trim())
+        .filter(Boolean);
       const nota = limpiar(data?.nota, 600);
       const estado = limpiar(data?.estado, 20) as EstadoPedido;
-      const estados: EstadoPedido[] = ["pendiente", "pagado", "enviado", "cancelado"];
+      const estados: EstadoPedido[] = ["pendiente", "revision", "pagado", "enviado", "cancelado"];
+      const cantidadCruda = Math.trunc(Number(data?.cantidad));
       if (!folio) return { ok: false, motivo: "datos" };
-      if (codigoPremium && codigoPremium.length < 20) return { ok: false, motivo: "codigo" };
+      if (pegados.some((c) => c.length < 20 || c.length > 500)) return { ok: false, motivo: "codigo" };
       if (estado && !estados.includes(estado)) return { ok: false, motivo: "datos" };
 
       try {
-        const lista = await leerPedidos();
+        const lista = await cerrarVencidos(await leerPedidos());
         const indice = lista.findIndex((p) => p.folio === folio);
         if (indice < 0) return { ok: false, motivo: "no_encontrado" };
 
-        if (
-          codigoPremium &&
-          lista.some((p, i) => i !== indice && p.codigo === codigoPremium)
-        ) {
-          return { ok: false, motivo: "codigo_repetido" };
+        const actual = lista[indice];
+        const cantidad = Number.isFinite(cantidadCruda) && cantidadCruda > 0
+          ? Math.min(cantidadCruda, MAX_CODIGOS)
+          : publico(actual).cantidad;
+        const nuevoEstado: EstadoPedido = estado || actual.estado;
+
+        // Códigos que ya tiene el pedido (incluye pedidos viejos con uno solo).
+        let codigos = Array.isArray(actual.codigos) && actual.codigos.length
+          ? [...actual.codigos]
+          : actual.codigo
+            ? [actual.codigo]
+            : [];
+
+        // Códigos de otros pedidos: no se pueden repetir.
+        const enUso = codigosEnUso(lista.filter((_, i) => i !== indice));
+
+        if (pegados.length > 0) {
+          for (const codigo of pegados) {
+            if (enUso.has(codigo)) return { ok: false, motivo: "codigo_repetido" };
+            enUso.add(codigo);
+          }
+          codigos = pegados;
         }
 
-        const actual = lista[indice];
+        // Volver atrás (pendiente / revisión) o cancelar SUELTA los códigos: el
+        // pedido deja de estar entregado y esos códigos no quedan colgados acá.
+        const suelta = nuevoEstado === "pendiente" || nuevoEstado === "revision" || nuevoEstado === "cancelado";
+        if (suelta && pegados.length === 0) codigos = [];
+
+        // La cantidad es la que manda: si el dueño la baja, sobran códigos y se
+        // descartan los últimos (los que no llegó a usar).
+        if (codigos.length > cantidad) codigos = codigos.slice(0, cantidad);
+
+        // Validar el pago es lo que emite los códigos: la cantidad comprada, ni
+        // una más ni una menos. Si ya había códigos pegados a mano, se completan.
+        if ((nuevoEstado === "pagado" || nuevoEstado === "enviado") && codigos.length < cantidad) {
+          const emision = await emitirCodigos(cantidad - codigos.length, folio, enUso);
+          if (!emision.ok) {
+            return {
+              ok: false,
+              motivo: emision.motivo === "sin_stock" ? "sin_stock" : "sin_clave",
+            };
+          }
+          codigos = [...codigos, ...emision.codigos];
+        }
+
+        const ahora = new Date().toISOString();
         const actualizado: PedidoGuardado = {
           ...actual,
-          estado: estado || (codigoPremium ? "enviado" : actual.estado),
-          codigo: codigoPremium || actual.codigo,
+          estado: nuevoEstado,
+          cantidad,
+          total: PRECIO_UNIDAD * cantidad,
+          codigos,
+          codigo: codigos[0] ?? null,
+          // Reabrir un pedido reinicia el plazo: «dame tiempo» no puede
+          // significar un plazo que ya venció hace tres días.
+          ventanaFin:
+            nuevoEstado === "pendiente"
+              ? new Date(Date.now() + VENTANA_ANULACION_MS).toISOString()
+              : actual.ventanaFin,
+          anuladoPor: nuevoEstado === "cancelado" ? actual.anuladoPor ?? "admin" : undefined,
           nota: nota || actual.nota,
-          actualizado: new Date().toISOString(),
+          actualizado: ahora,
         };
         const siguiente = lista.slice();
         siguiente[indice] = actualizado;
@@ -513,7 +834,10 @@ export const actualizarPedido = createServerFn({ method: "POST" })
         // «Enviar por correo». Un fallo de correo no revierte el guardado, sólo
         // deja `aviso: false` para que el panel lo muestre.
         let aviso = false;
-        const cambio = actualizado.estado !== actual.estado || actualizado.codigo !== actual.codigo;
+        const cambio =
+          actualizado.estado !== actual.estado ||
+          actualizado.codigos.join("|") !== (actual.codigos ?? []).join("|") ||
+          actualizado.codigo !== actual.codigo;
         if (
           cambio &&
           actualizado.estado !== "cancelado" &&
@@ -562,7 +886,12 @@ export const enviarCodigoPedido = createServerFn({ method: "POST" })
         const indice = lista.findIndex((p) => p.folio === folio);
         if (indice < 0) return { ok: false, motivo: "datos" };
         const pedido = lista[indice];
-        if (!pedido.codigo) return { ok: false, motivo: "sin_codigo" };
+        const codigos = Array.isArray(pedido.codigos) && pedido.codigos.length
+          ? pedido.codigos
+          : pedido.codigo
+            ? [pedido.codigo]
+            : [];
+        if (codigos.length === 0) return { ok: false, motivo: "sin_codigo" };
         if (!correoValido(pedido.correo)) return { ok: false, motivo: "datos" };
         if (!correoConfigurado()) return { ok: false, motivo: "sin_configurar" };
 

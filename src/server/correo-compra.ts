@@ -24,6 +24,10 @@ export type PedidoParaCorreo = {
   celular: string;
   comprobante: string;
   codigo: string | null;
+  /** Todos los códigos del pedido; si falta, se usa `codigo`. */
+  codigos?: string[];
+  cantidad?: number;
+  total?: number;
 };
 
 const SITIO_WEB = "https://bitly-site.pages.dev";
@@ -56,18 +60,27 @@ function pie(nota: string): string {
 /** Correo que recibe el comprador con su código de activación. */
 export function cuerpoCorreo(p: PedidoParaCorreo): CorreoArmado {
   const nombre = p.nombre ? `, ${p.nombre}` : "";
-  const codigo = p.codigo ?? "";
+  // Un pedido puede llevar varios códigos (uno por unidad comprada). Se acepta
+  // el campo nuevo y, si no está, el `codigo` de siempre.
+  const codigos = (p.codigos?.length ? p.codigos : p.codigo ? [p.codigo] : []).filter(Boolean);
+  const varios = codigos.length > 1;
+  const codigo = codigos[0] ?? "";
   const folio = escaparHtml(p.folio);
-  const subject = `Gracias por comprar Bitly${nombre} — tu código Premium`;
+  const subject = varios
+    ? `Gracias por comprar Bitly${nombre} — tus ${codigos.length} códigos Premium`
+    : `Gracias por comprar Bitly${nombre} — tu código Premium`;
   const whatsapp = enlaceWhatsApp(`Hola, tengo una duda con mi pedido ${p.folio}`);
 
   const text = [
     `Hola${nombre}:`,
     "",
-    "Gracias por comprar Bitly. Tu pago quedó confirmado y este es tu código",
-    "de activación Premium, de por vida:",
+    varios
+      ? "Gracias por comprar Bitly. Tu pago quedó confirmado y estos son tus"
+      : "Gracias por comprar Bitly. Tu pago quedó confirmado y este es tu código",
+    `${varios ? "códigos" : "código"} de activación Premium, de por vida:`,
+    ...(p.cantidad && p.total ? ["", `Pedido de ${p.cantidad} código(s): ${p.total} Bs`] : []),
     "",
-    codigo,
+    ...(varios ? codigos.map((c, i) => `${i + 1}. ${c}`) : [codigo]),
     "",
     "Cómo activarlo:",
     `1. Entrá a ${SITIO_WEB} y abrí la demo.`,
@@ -82,17 +95,27 @@ export function cuerpoCorreo(p: PedidoParaCorreo): CorreoArmado {
     "Bitly · música sin pérdida",
   ].join("\n");
 
+  // Con varios códigos, cada uno en su propia caja: pegados en un solo bloque
+  // móvil se copian mal, y el pedido de tres códigos es justo el que más se usa
+  // para compartir con amigos.
+  const cajasHtml = codigos
+    .map(
+      (c, i) => `${varios ? `<div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#82828c;padding:${i === 0 ? "0" : "10px"} 0 6px;">Código ${i + 1}</div>` : ""}
+      <div style="padding:16px 18px;border:1px solid #2e2e34;border-radius:14px;background:#121216;margin-bottom:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;line-height:1.55;color:#f5f5f7;word-break:break-all;">${escaparHtml(c)}</div>`,
+    )
+    .join("\n      ");
+
   const html = marco(`    <tr><td style="padding:24px 26px 0;">
       <div style="font-size:10px;letter-spacing:.34em;text-transform:uppercase;color:#82828c;">Bitly · música sin pérdida</div>
       <div style="margin-top:16px;font-size:27px;line-height:1.15;font-weight:800;color:#f5f5f7;letter-spacing:-.02em;">Gracias por comprar Bitly</div>
-      <div style="margin-top:9px;font-size:14px;line-height:1.65;color:#a1a1aa;">Hola${escaparHtml(nombre)}: tu pago quedó confirmado. Abajo está tu código Premium, tuyo de por vida.</div>
+      <div style="margin-top:9px;font-size:14px;line-height:1.65;color:#a1a1aa;">Hola${escaparHtml(nombre)}: tu pago quedó confirmado. Abajo ${varios ? `están tus ${codigos.length} códigos Premium, tuyos` : "está tu código Premium, tuyo"} de por vida.</div>
     </td></tr>
     <tr><td style="padding:18px 26px 0;">
       <div style="height:1px;background:#26262b;"></div>
     </td></tr>
     <tr><td style="padding:18px 26px 0;">
-      <div style="font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#82828c;padding-bottom:8px;">Tu código de activación</div>
-      <div style="padding:16px 18px;border:1px solid #2e2e34;border-radius:14px;background:#121216;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;line-height:1.55;color:#f5f5f7;word-break:break-all;">${escaparHtml(codigo)}</div>
+      <div style="font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:#82828c;padding-bottom:8px;">${varios ? "Tus códigos de activación" : "Tu código de activación"}</div>
+      ${cajasHtml}
     </td></tr>
     <tr><td style="padding:22px 26px 0;">
       <div style="font-size:13px;font-weight:700;color:#f5f5f7;padding-bottom:7px;">Activarlo toma un minuto</div>
@@ -133,6 +156,8 @@ export function avisoNuevoPedido(p: PedidoParaCorreo): CorreoArmado {
     `Nombre: ${p.nombre || "(sin nombre)"}`,
     `Correo: ${p.correo}`,
     `Celular: ${p.celular}`,
+    `Códigos: ${(p.codigos?.length ?? (p.codigo ? 1 : 0)) || p.cantidad || 1}` +
+      (p.total ? ` · Total: ${p.total} Bs` : ""),
     `Archivo: ${p.comprobante}`,
     "",
     "Revisalo en el panel privado del sitio: tres clics en el logo.",
@@ -151,6 +176,7 @@ export function avisoNuevoPedido(p: PedidoParaCorreo): CorreoArmado {
         <tr><td style="color:#82828c;">Nombre</td><td>${escaparHtml(p.nombre || "(sin nombre)")}</td></tr>
         <tr><td style="color:#82828c;">Correo</td><td>${escaparHtml(p.correo)}</td></tr>
         <tr><td style="color:#82828c;">Celular</td><td>${escaparHtml(p.celular)}</td></tr>
+        <tr><td style="color:#82828c;">Códigos</td><td>${escaparHtml(String(p.cantidad ?? p.codigos?.length ?? 1))}${p.total ? ` · ${escaparHtml(String(p.total))} Bs` : ""}</td></tr>
         <tr><td style="color:#82828c;">Archivo</td><td style="font-size:11px;word-break:break-all;">${escaparHtml(p.comprobante)}</td></tr>
       </table>
       <div style="margin-top:18px;"><a href="${SITIO_WEB}" style="display:inline-block;background:#f5f5f7;color:#0b0b0d;text-decoration:none;font-size:12px;font-weight:700;padding:11px 18px;border-radius:999px;">Abrir el panel</a></div>

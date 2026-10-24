@@ -81,11 +81,21 @@ type CuentaGuardada = CuentaPublica & {
   salt: string;
   iteraciones: number;
   ultimoAcceso: string;
+  /**
+   * Cuenta dada de baja a mano.
+   *
+   * Solo se llega acá por el caso extremo: alguien crea un pedido y aborta la
+   * compra a propósito (subir un comprobante falso y arrepentirse no cuenta).
+   * Una cuenta baneada no puede entrar ni comprar; los pedidos ya hechos no se
+   * tocan, para no perder la trazabilidad de lo que pasó.
+   */
+  baneada?: boolean;
+  motivoBaneo?: string;
 };
 
 type ResultadoSesion =
   | { ok: true; token: string; cuenta: CuentaPublica }
-  | { ok: false; motivo: "datos" | "existe" | "limite" | "servidor" };
+  | { ok: false; motivo: "datos" | "existe" | "limite" | "baneada" | "servidor" };
 
 type ResultadoMiCuenta =
   | {
@@ -105,6 +115,7 @@ type PedidoCrudo = {
   actualizado?: unknown;
   correo?: unknown;
   cuentaId?: unknown;
+  ventanaFin?: unknown;
 };
 
 /* ── Utilidades ───────────────────────────────────────────────────────── */
@@ -323,6 +334,34 @@ export async function cuentaDeToken(token: string | null | undefined): Promise<C
   return cuenta ?? null;
 }
 
+/**
+ * Baja de una cuenta por abuso (ver `baneada` en `CuentaGuardada`).
+ *
+ * Se llama desde `abortarCompra`, que es el único camino que llega acá. No se
+ * borra la cuenta: se marca, así queda el rastro y el dueño puede revertirlo
+ * editando el JSON del repo.
+ */
+export async function banearCuenta(id: string, motivo: string): Promise<boolean> {
+  if (!id) return false;
+  try {
+    const cuentas = await leerCuentas();
+    const indice = cuentas.findIndex((c) => c.id === id);
+    if (indice < 0) return false;
+    const actualizada: CuentaGuardada = {
+      ...cuentas[indice],
+      baneada: true,
+      motivoBaneo: limpiar(motivo, 200),
+      actualizado: new Date().toISOString(),
+    };
+    const siguiente = cuentas.slice();
+    siguiente[indice] = actualizada;
+    return putJson("datos", ARCHIVO, siguiente, `cuenta ${id}: baja por abuso`);
+  } catch (e) {
+    console.error("[cuentas] no se pudo dar de baja:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
 /* ── Registro e inicio de sesión ──────────────────────────────────────── */
 
 export const registrarCuenta = createServerFn({ method: "POST" })
@@ -338,7 +377,11 @@ export const registrarCuenta = createServerFn({ method: "POST" })
 
     try {
       const cuentas = await leerCuentas();
-      if (cuentas.some((c) => c.correo === correo)) return { ok: false, motivo: "existe" };
+      // Un correo dado de baja no se puede volver a registrar: si no, el baneo
+      // se esquiva creando la cuenta de nuevo con el mismo correo.
+      const previa = cuentas.find((c) => c.correo === correo);
+      if (previa?.baneada) return { ok: false, motivo: "baneada" };
+      if (previa) return { ok: false, motivo: "existe" };
       if (cuentas.length >= MAX_CUENTAS) return { ok: false, motivo: "limite" };
 
       const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -391,6 +434,9 @@ export const iniciarSesion = createServerFn({ method: "POST" })
       if (!(await verificarClave(clave, cuenta.salt, cuenta.hash, cuenta.iteraciones))) {
         return { ok: false, motivo: "datos" };
       }
+      // La baja se avisa DESPUÉS de verificar la clave: si se contestara antes,
+      // cualquiera podría averiguar qué correos están baneados probando claves.
+      if (cuenta.baneada) return { ok: false, motivo: "baneada" };
 
       // `ultimoAcceso` es informativo: no vale un commit en cada login. Se
       // actualiza como mucho una vez al día para no inflar el historial.
@@ -418,18 +464,27 @@ export const miCuenta = createServerFn({ method: "POST" })
 
     try {
       const crudos = await getJson<PedidoCrudo[]>("datos", ARCHIVO_PEDIDOS, []);
+      const ahoraMs = Date.now();
       const pedidos: PedidoDeCuenta[] = (Array.isArray(crudos) ? crudos : [])
         .filter((p) => p.cuentaId === cuenta.id && typeof p.folio === "string")
         .sort((a, b) => (String(a.creado) < String(b.creado) ? 1 : -1))
         .slice(0, 25)
-        .map((p) => ({
-          folio: String(p.folio),
-          estado: String(p.estado ?? "pendiente"),
-          codigo: typeof p.codigo === "string" && p.codigo ? p.codigo : null,
-          nota: String(p.nota ?? ""),
-          creado: String(p.creado ?? ""),
-          actualizado: String(p.actualizado ?? ""),
-        }));
+        .map((p) => {
+          const crudo = String(p.estado ?? "pendiente");
+          // La ventana se resuelve también acá: «Mi cuenta» es lo primero que
+          // mira el comprador, y ver «Pendiente» un pedido que ya venció lo
+          // deja esperando una anulación que ya no existe.
+          const fin = Date.parse(String(p.ventanaFin ?? ""));
+          const vencido = crudo === "pendiente" && Number.isFinite(fin) && fin <= ahoraMs;
+          return {
+            folio: String(p.folio),
+            estado: vencido ? "revision" : crudo,
+            codigo: typeof p.codigo === "string" && p.codigo ? p.codigo : null,
+            nota: String(p.nota ?? ""),
+            creado: String(p.creado ?? ""),
+            actualizado: String(p.actualizado ?? ""),
+          };
+        });
       // El primer pedido con código y sin cancelar es el Premium vigente de la
       // cuenta: los pedidos vienen del más nuevo al más viejo.
       const conCodigo = pedidos.find((p) => p.codigo && p.estado !== "cancelado");

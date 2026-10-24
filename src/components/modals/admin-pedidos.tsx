@@ -4,6 +4,7 @@ import {
   ClipboardCopy,
   Eye,
   FileText,
+  KeyRound,
   Loader2,
   Mail,
   RefreshCw,
@@ -31,10 +32,11 @@ type PedidoAdmin = PedidoPublico & { comprobante: string; tipoComprobante: strin
 
 type Aviso = { tipo: "ok" | "error"; texto: string } | null;
 
-const ESTADOS: EstadoPedido[] = ["pendiente", "pagado", "enviado", "cancelado"];
+const ESTADOS: EstadoPedido[] = ["pendiente", "revision", "pagado", "enviado", "cancelado"];
 
 const COLOR: Record<EstadoPedido, string> = {
   pendiente: "border-amber-500/40 bg-amber-500/10 text-amber-500",
+  revision: "border-violet-500/40 bg-violet-500/10 text-violet-400",
   pagado: "border-sky-500/40 bg-sky-500/10 text-sky-500",
   enviado: "border-primary/40 bg-primary/10 text-primary",
   cancelado: "border-destructive/40 bg-destructive/10 text-destructive",
@@ -72,7 +74,8 @@ function FilaPedido({
   const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [borrando, setBorrando] = useState(false);
   const [estado, setEstado] = useState<EstadoPedido>(pedido.estado);
-  const [codigo, setCodigo] = useState(pedido.codigo ?? "");
+  const [codigo, setCodigo] = useState((pedido.codigos ?? []).join(", "));
+  const [cantidad, setCantidad] = useState(pedido.cantidad);
   const [nota, setNota] = useState(pedido.nota);
   const [guardando, setGuardando] = useState(false);
   const [enviando, setEnviando] = useState(false);
@@ -84,8 +87,19 @@ function FilaPedido({
     setGuardando(true);
     setAviso(null);
     try {
+      // El campo de códigos se manda tal cual sólo si el admin lo tocó: si va
+      // siempre, «volver a pendiente» arrastra los códigos viejos y no se
+      // liberan, que es justo lo que hay que poder hacer.
+      const original = (pedido.codigos ?? []).join(", ");
       const r = await actualizarPedido({
-        data: { admin: codigoAdmin, folio: pedido.folio, estado, codigoPremium: codigo, nota },
+        data: {
+          admin: codigoAdmin,
+          folio: pedido.folio,
+          estado,
+          cantidad,
+          codigoPremium: codigo.trim() === original ? "" : codigo,
+          nota,
+        },
       });
       if (!r.ok) {
         setAviso({ tipo: "error", texto: t(`adminPedidoError_${r.motivo}`) });
@@ -93,7 +107,8 @@ function FilaPedido({
       }
       onCambio({ ...pedido, ...r.pedido, comprobante: pedido.comprobante, tipoComprobante: pedido.tipoComprobante });
       setEstado(r.pedido.estado);
-      setCodigo(r.pedido.codigo ?? "");
+      setCantidad(r.pedido.cantidad);
+      setCodigo((r.pedido.codigos ?? []).join(", "));
       setNota(r.pedido.nota);
       setAviso({ tipo: "ok", texto: t(r.aviso ? "adminPedidoGuardadoAviso" : "adminPedidoGuardado") });
     } catch {
@@ -208,9 +223,25 @@ function FilaPedido({
               <p className="text-muted-foreground">{t("pagoCelular")}</p>
               <p className="font-medium text-foreground">{pedido.celular}</p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-card/40 p-2.5 sm:col-span-2">
+            <div className="rounded-xl border border-border/60 bg-card/40 p-2.5">
               <p className="text-muted-foreground">{t("pagoCorreo")}</p>
               <p className="break-all font-medium text-foreground">{pedido.correo}</p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card/40 p-2.5">
+              <p className="text-muted-foreground">
+                {t("adminPedidoCantidad")} · {t("adminPedidoTotal")}
+              </p>
+              <p className="font-medium text-foreground">
+                {pedido.cantidad} × {pedido.total / Math.max(1, pedido.cantidad)} = {pedido.total} Bs
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card/40 p-2.5 sm:col-span-2">
+              <p className="text-muted-foreground">{t("adminPedidoVentana")}</p>
+              <p className="font-medium text-foreground">
+                {pedido.estado === "pendiente"
+                  ? new Date(pedido.ventanaFin).toLocaleString()
+                  : t("adminPedidoVentanaCerrada")}
+              </p>
             </div>
           </div>
 
@@ -238,6 +269,35 @@ function FilaPedido({
             </button>
           </div>
 
+          {pedido.codigos.length > 0 ? (
+            <div className="rounded-2xl border border-primary/30 bg-primary/10 p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">
+                {t("adminPedidoCodigosLista")} ({pedido.codigos.length})
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {pedido.codigos.map((c) => (
+                  <li key={c} className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 select-all break-all rounded-lg bg-background/60 px-1.5 py-1 text-[10px] text-foreground">
+                      {c}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(c)}
+                      aria-label={t("adminPedidoCopiarFolio")}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                    >
+                      <ClipboardCopy className="h-3 w-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="rounded-xl bg-muted/40 px-3 py-2 text-[10px] text-muted-foreground">
+              {t("adminPedidoCodigosVacio")}
+            </p>
+          )}
+
           {vista && (
             <div className="rounded-2xl border border-border bg-background/60 p-2">
               {vista.tipo.startsWith("image/") ? (
@@ -260,7 +320,7 @@ function FilaPedido({
             </div>
           )}
 
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <label className="text-[10px] text-muted-foreground">
               {t("adminPedidoEstado")}
               <select
@@ -276,10 +336,25 @@ function FilaPedido({
               </select>
             </label>
             <label className="text-[10px] text-muted-foreground">
+              {t("adminPedidoCantidad")}
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={cantidad}
+                onChange={(e) => setCantidad(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                className="mt-1 min-h-10 w-20 rounded-xl border border-border bg-background/60 px-2 text-xs text-foreground outline-none focus-visible:border-primary"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-2">
+            <label className="text-[10px] text-muted-foreground">
               {t("adminPedidoCodigo")}
               <input
                 value={codigo}
                 onChange={(e) => setCodigo(e.target.value)}
+                aria-describedby={`codigos-ayuda-${pedido.folio}`}
                 list={`codigos-${pedido.folio}`}
                 spellCheck={false}
                 placeholder={t("adminPedidoCodigoPlaceholder")}
@@ -324,9 +399,9 @@ function FilaPedido({
             <button
               type="button"
               onClick={() => void enviar()}
-              disabled={enviando || !pedido.codigo}
+              disabled={enviando || pedido.codigos.length === 0}
               className="boton-fantasma min-h-9 gap-1.5 px-3 text-[11px] disabled:opacity-40"
-              title={!pedido.codigo ? t("adminPedidoSinCodigo") : undefined}
+              title={pedido.codigos.length === 0 ? t("adminPedidoSinCodigo") : undefined}
             >
               {enviando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               {t("adminPedidoEnviar")}
@@ -449,6 +524,13 @@ export default function AdminPedidos({ codigo }: { codigo: string }) {
         <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
           <ShieldCheck className="h-3 w-3 text-primary" aria-hidden />
           {t("adminPedidoActivos")}: <strong className="text-foreground">{resumen?.activos ?? 0}</strong>
+        </span>
+        <span
+          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/40 px-2 py-1 text-muted-foreground"
+          title={t(resumen?.firmaConfigurada ? "adminPedidoFirmaOk" : "adminPedidoFirmaNo")}
+        >
+          <KeyRound className={`h-3 w-3 ${resumen?.firmaConfigurada ? "text-primary" : "text-amber-500"}`} aria-hidden />
+          {resumen?.firmaConfigurada ? t("adminPedidoFirmaOk") : t("adminPedidoFirmaNo")}
         </span>
         <button
           type="button"

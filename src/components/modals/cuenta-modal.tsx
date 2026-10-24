@@ -105,9 +105,11 @@ export default function CuentaModal({ open, onClose }: Props) {
         setError(
           r.motivo === "limite"
             ? t("cuentaErrorLimite")
-            : r.motivo === "servidor"
-              ? t("cuentaErrorServidor")
-              : t("cuentaErrorCredenciales"),
+            : r.motivo === "baneada"
+              ? t("cuentaErrorBaneada")
+              : r.motivo === "servidor"
+                ? t("cuentaErrorServidor")
+                : t("cuentaErrorCredenciales"),
         );
         return;
       }
@@ -137,11 +139,13 @@ export default function CuentaModal({ open, onClose }: Props) {
         setError(
           r.motivo === "existe"
             ? t("cuentaErrorExiste")
-            : r.motivo === "limite"
-              ? t("cuentaErrorLimite")
-              : r.motivo === "servidor"
-                ? t("cuentaErrorServidor")
-                : t("cuentaErrorDatos"),
+            : r.motivo === "baneada"
+              ? t("cuentaErrorBaneada")
+              : r.motivo === "limite"
+                ? t("cuentaErrorLimite")
+                : r.motivo === "servidor"
+                  ? t("cuentaErrorServidor")
+                  : t("cuentaErrorDatos"),
         );
         return;
       }
