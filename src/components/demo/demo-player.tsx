@@ -33,6 +33,13 @@ const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal
  */
 let despertado = false;
 
+/**
+ * Cuánto se muestra el spinner antes de decir que la búsqueda se está
+ * demorando. Cubre el peor caso normal del servidor (~11 s de failover + 8 s
+ * del catálogo + la búsqueda en el canal de YouTube) con margen.
+ */
+const TOPE_BUSQUEDA_MS = 25_000;
+
 /** Rellena `{n}` / `{price}` sin sacar el texto del diccionario. */
 function Plantilla(texto: string, vars: Record<string, string | number>) {
   return texto.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ""));
@@ -114,6 +121,13 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const [resultados, setResultados] = useState<Pista[] | null>(null);
   const [cargando, setCargando] = useState(false);
   const [sinResultados, setSinResultados] = useState(false);
+  /**
+   * La búsqueda pasó el tope sin contestar. No cancela nada: el pedido sigue en
+   * vuelo y, si el servidor contesta más tarde, los resultados igual aparecen.
+   * Existe porque una búsqueda colgada dejaba el marco en «Buscando…» para
+   * siempre, sin forma de saber si había que reintentar.
+   */
+  const [busquedaLenta, setBusquedaLenta] = useState(false);
   const [respaldada, setRespaldada] = useState(false);
   const [limitado, setLimitado] = useState(false);
 
@@ -135,6 +149,10 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const audio = useRef<HTMLAudioElement | null>(null);
   const listaRef = useRef<HTMLDivElement>(null);
   const pendiente = useRef(0);
+  /** Pistas cuyo audio ya se pidió por detrás (ver `precalentar`). */
+  const precalentado = useRef(new Set<string>());
+  /** Orden de la búsqueda vigente: una respuesta vieja no pinta nada. */
+  const busquedaEnCurso = useRef(0);
 
   const info = extensionDe(extension);
 
@@ -181,30 +199,64 @@ export default function DemoPlayer({ onCuenta }: Props) {
     };
   }, []);
 
+  /**
+   * Deja resuelto el audio del primer resultado mientras el visitante mira la
+   * lista. En los temas de nicho la extracción tarda ~25 s: pedirla recién al
+   * tocar deja al visitante esperando delante de la barra; pedirla al llegar
+   * los resultados hace que esa espera se pague mientras elige.
+   *
+   * Es UNA sola pista por búsqueda y no gasta cuota (gastar es de `reproducir`).
+   * Si el visitante no llega a tocarla, el audio quedó resuelto para el mismo
+   * tema si vuelve a buscar: la caché del servidor lo devuelve al instante.
+   */
+  const precalentar = useCallback((pistas: Pista[]) => {
+    const primera = pistas.find((p) => p.tipo === "track" && !p.audioUrl);
+    if (!primera || precalentado.current.has(primera.id)) return;
+    precalentado.current.add(primera.id);
+    void audioDe(primera).catch(() => {});
+  }, []);
+
   const hacerBusqueda = useCallback(async (q: string, extId: ExtensionId, filtroId: string | null) => {
     const limpio = q.trim();
     if (!limpio) return;
+    const orden = ++busquedaEnCurso.current;
     setCargando(true);
+    setBusquedaLenta(false);
     setSinResultados(false);
     setRespaldada(false);
     setLimitado(false);
     // Una búsqueda nueva cierra la vista de contenidos: no hay dónde volver.
     setAnterior(null);
+    // Tope para la ESPERA VISIBLE, no para el pedido: si el servidor está
+    // colgado (se vio quedarse en «Buscando…» más de dos minutos), se dice en
+    // vez de girar la ruedita; si contesta después, igual se pinta.
+    const relojito = setTimeout(() => {
+      if (orden !== busquedaEnCurso.current) return;
+      setCargando(false);
+      setBusquedaLenta(true);
+    }, TOPE_BUSQUEDA_MS);
     try {
       const r = await buscar(limpio, extId, filtroId);
+      if (orden !== busquedaEnCurso.current) return;
+      setBusquedaLenta(false);
       setResultados(r.pistas);
       setSinResultados(r.pistas.length === 0);
       setRespaldada(r.pistas.length > 0 && r.origen === "respaldo");
       setOtraFuente(r.pistas.length > 0 ? r.otraFuente ?? null : null);
       setLimitado(Boolean(r.limitado));
+      // Con la cuota agotada el toque abre el tope, no el audio: no hay razón
+      // para gastar una extracción en un tema que no se va a poder escuchar.
+      if (!cuota.sinCuota) precalentar(r.pistas);
       requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
     } catch {
+      if (orden !== busquedaEnCurso.current) return;
       setResultados([]);
       setSinResultados(true);
     } finally {
-      setCargando(false);
+      clearTimeout(relojito);
+      if (orden === busquedaEnCurso.current) setCargando(false);
     }
-  }, []);
+  }, [precalentar, cuota.sinCuota]);
 
   // Cambiar de fuente reabre la búsqueda: cada extensión tiene su propio
   // vocabulario de filtros y sus propios resultados.
@@ -648,7 +700,13 @@ export default function DemoPlayer({ onCuenta }: Props) {
               ref={listaRef}
               className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 sm:px-3"
             >
-              {resultados === null && !cargando && (
+              {busquedaLenta && !cargando && (
+                <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                  {t("demoSearchSlow")}
+                </div>
+              )}
+
+              {resultados === null && !cargando && !busquedaLenta && (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-2 text-center">
                   <Search className="h-8 w-8 text-muted-foreground" />
                   <p className="text-xs text-muted-foreground">{t("demoIdle")}</p>

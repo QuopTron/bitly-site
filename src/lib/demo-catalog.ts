@@ -106,17 +106,17 @@ export async function buscar(
 }
 
 /**
- * URL del audio de una pista. Resuelta una vez, queda guardada en la propia
- * pista para no repetir la llamada al saltar de pista. Se envían título,
- * artista, álbum y duración porque el matching de la app desempata con ellos.
+ * Resoluciones EN CURSO por pista. La precarga del primer resultado y el clic
+ * del visitante piden el mismo audio con décimas de segundo de diferencia: sin
+ * esto serían dos extracciones de 25 s en paralelo (y dos esperas) en vez de
+ * una sola que los dos aprovechan.
  *
- * Con `codigo` viaja el código Premium guardado: el servidor lo verifica y
- * decide si esta pista viene en FLAC o en calidad estándar (ver `demo-proxy`).
+ * Sólo viven mientras la llamada está pendiente: al terminar se borran, así un
+ * fallo no queda cacheado y el siguiente intento vuelve a pedir el audio.
  */
-export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
-  if (p.audioUrl) {
-    return { url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined };
-  }
+const enCurso = new Map<string, Promise<AudioRescatado | null>>();
+
+async function resolverAudio(p: Pista): Promise<AudioRescatado | null> {
   const audio = await rescatarDemo({
     titulo: p.titulo,
     artista: p.artista,
@@ -131,6 +131,25 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
   p.canal = audio.canal ?? null;
   if (audio.duracion > 0) p.duracion = audio.duracion;
   return audio;
+}
+
+/**
+ * URL del audio de una pista. Resuelta una vez, queda guardada en la propia
+ * pista para no repetir la llamada al saltar de pista. Se envían título,
+ * artista, álbum y duración porque el matching de la app desempata con ellos.
+ *
+ * Con `codigo` viaja el código Premium guardado: el servidor lo verifica y
+ * decide si esta pista viene en FLAC o en calidad estándar (ver `demo-proxy`).
+ */
+export function audioDe(p: Pista): Promise<AudioRescatado | null> {
+  if (p.audioUrl) {
+    return Promise.resolve({ url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined });
+  }
+  const pendiente = enCurso.get(p.id);
+  if (pendiente) return pendiente;
+  const promesa = resolverAudio(p).finally(() => enCurso.delete(p.id));
+  enCurso.set(p.id, promesa);
+  return promesa;
 }
 
 /** Letras para el karaoke; `null` si no hay o la consulta falla. */

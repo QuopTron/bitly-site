@@ -573,6 +573,8 @@ export const DICT: Record<string, [string, string]> = {
   demoSearching:        ["Buscando…",                              "Searching…"],
   demoIdle:             ["Escribí algo o probá con una sugerencia", "Type something or try a suggestion"],
   demoNoResults:        ["No encontramos nada con ese término.",  "We found nothing for that term."],
+  demoSearchSlow:       ["La búsqueda está tardando más de lo normal. Probá de nuevo en un momento.",
+                                                                    "The search is taking longer than usual. Try again in a moment."],
   demoFreeLeft:         ["Te quedan {n} reproducciones",           "{n} plays left"],
   demoFreeOne:          ["Te queda {n} reproducción",              "{n} play left"],
   demoFreeNone:         ["Sin reproducciones",                     "No plays left"],
