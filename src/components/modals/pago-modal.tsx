@@ -307,7 +307,7 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
                 <span className="text-xs text-muted-foreground">
                   {archivo ? archivo.name : t("pagoSubir")}
                 </span>
-                <span className="text-[10px] text-muted-foreground/70">{t("pagoFormatos")}</span>
+                <span className="text-[10px] text-muted-foreground">{t("pagoFormatos")}</span>
                 <input
                   id="pago-archivo"
                   type="file"

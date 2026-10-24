@@ -146,7 +146,12 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
               >
                 Bitly
               </span>
+              {/* Marca decorativa: queda fuera del árbol accesible para que el
+                  nombre del botón («Bitly - inicio») coincida con el texto
+                  visible. Si se anuncia, el lector diría «Bitly powered by FloX»
+                  y el enlace de inicio perdía su propósito. */}
               <span
+                aria-hidden
                 className={`overflow-hidden whitespace-nowrap text-[9px] uppercase tracking-[0.1em] text-muted-foreground transition-all duration-300 sm:text-xs sm:tracking-[0.22em] ${
                   enInicio ? "mt-0.5 max-h-4 translate-y-0 opacity-100" : "mt-0 max-h-0 -translate-y-1 opacity-0"
                 }`}

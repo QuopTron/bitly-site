@@ -184,7 +184,7 @@ export default function AdminModal({ open, onClose, codigo }: { open: boolean; o
                       <span className="truncate font-medium capitalize text-foreground">{s.dispositivo}</span>
                       <span className="truncate text-muted-foreground">{NOMBRE_SECCION[seccion] ? t(NOMBRE_SECCION[seccion]) : seccion}</span>
                       <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{tiempo(s.segundos, es)}</span>
-                      <span className="w-14 shrink-0 text-right text-[10px] text-muted-foreground/70">
+                      <span className="w-14 shrink-0 text-right text-[10px] text-muted-foreground">
                         {new Date(s.ultimo).toLocaleTimeString(es ? "es" : "en", { hour: "2-digit", minute: "2-digit" })}
                       </span>
                     </li>

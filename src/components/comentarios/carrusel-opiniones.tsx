@@ -208,7 +208,7 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
                 <Estrellas valor={o.estrellas} etiqueta={con(t("opinionesEstrella"), { n: o.estrellas })} />
               </div>
               <p className="mt-2 line-clamp-2 text-[0.72rem] leading-relaxed text-muted-foreground">{o.texto}</p>
-              <p className="mt-1.5 text-[10px] text-muted-foreground/70">{cuando(o.creado, es)}</p>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">{cuando(o.creado, es)}</p>
             </article>
           ))}
         </div>

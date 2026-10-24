@@ -172,6 +172,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
       { rel: "manifest", href: "/site.webmanifest" },
       { rel: "preload", href: "/fonts/inter-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
+      // Titan One pinta los títulos grandes y el tag del fondo, que es el
+      // elemento LCP en móvil: sin precargarla, el navegador la descubre recién
+      // al parsear la CSS y el título aparece tarde.
+      { rel: "preload", href: "/fonts/titanone-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
       { rel: "preconnect", href: "https://api.github.com" },
       { rel: "dns-prefetch", href: "https://api.github.com" },
     ],

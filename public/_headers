@@ -15,6 +15,12 @@
   Cross-Origin-Opener-Policy: same-origin
 
 # ── Caché ───────────────────────────────────────────────────────────────────
+# Bundles con hash en el nombre: el contenido de una URL no cambia nunca, así
+# que se pueden cachear para siempre. Sin esta regla Pages los sirve con
+# `max-age=0, must-revalidate` y el navegador revalida en cada visita.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # Las tipografías y los iconos viven en la raíz sin hash en el nombre: sin un
 # max-age largo, cada visita volvería a bajarlas.
 /fonts/*

@@ -313,7 +313,7 @@ export default function Gallery({
             <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{actual.pie}</span>
           )}
         </span>
-        <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-muted-foreground/70">
+        <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-muted-foreground">
           {indice + 1}/{capturas.length}
         </span>
       </div>
