@@ -25,7 +25,21 @@ import { obtenerIPCliente } from "@/server/ip";
 const ARCHIVO = "data/cuentas.json";
 const ARCHIVO_PEDIDOS = "data/pedidos.json";
 const MAX_CUENTAS = 5_000;
-const ITERACIONES = 120_000;
+/**
+ * Iteraciones de PBKDF2.
+ *
+ * 100.000 es el TOPE del runtime de Cloudflare: por encima responde
+ * "Pbkdf2 failed: iteration counts above 100000 are not supported". Con 120.000
+ * el alta y el login andaban en Node (y en `wrangler pages dev`), pero en
+ * producción cualquier registro terminaba en "no pudimos completar la
+ * operación" y cualquier login en "correo o contraseña incorrectos", porque
+ * `verificarClave` se come la excepción y devuelve `false`. No subir este número:
+ * si algún día hace falta más, hay que cambiar de algoritmo (scrypt/Argon2 vía
+ * WASM), no de iteraciones.
+ */
+const ITERACIONES = 100_000;
+/** Cuentas viejas creadas con más iteraciones no se pueden verificar en Workers. */
+const ITERACIONES_MAX = 100_000;
 const TTL_SESION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type CuentaPublica = {
@@ -158,6 +172,10 @@ export async function verificarClave(
   hash: string,
   iteraciones: number,
 ): Promise<boolean> {
+  // Un registro con más iteraciones que el tope no se puede recalcular acá:
+  // `deriveBits` tira antes de comparar. Se rechaza explícito en vez de dejar
+  // que la excepción se confunda con "clave incorrecta".
+  if (!Number.isFinite(iteraciones) || iteraciones < 1 || iteraciones > ITERACIONES_MAX) return false;
   try {
     const calculado = await hashClave(clave, deB64(salt), iteraciones);
     if (calculado.length !== hash.length) return false;
