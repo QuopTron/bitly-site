@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, MessageCircle, MessageSquare, PenLine, Send, Star } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { publicarOpinion } from "@/server/opiniones";
@@ -21,6 +21,27 @@ export default function ComentariosModal({ open, onClose }: Props) {
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
+  const botonesEstrella = useRef<Array<HTMLButtonElement | null>>([]);
+
+  /**
+   * La calificación es un radiogroup de verdad: las flechas (y Inicio/Fin)
+   * cambian la nota y mueven el foco, y hay un solo punto de tabulación.
+   * Sin esto un lector de pantalla no puede saber qué nota está elegida.
+   */
+  const irA = (n: number) => {
+    const nota = Math.min(5, Math.max(1, n));
+    setEstrellas(nota);
+    botonesEstrella.current[nota - 1]?.focus();
+  };
+  const alTeclado = (e: React.KeyboardEvent) => {
+    const actual = estrellas || 1;
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") irA(actual + 1);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowDown") irA(actual - 1);
+    else if (e.key === "Home") irA(1);
+    else if (e.key === "End") irA(5);
+    else return;
+    e.preventDefault();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -92,11 +113,22 @@ export default function ComentariosModal({ open, onClose }: Props) {
           <form onSubmit={enviar} className="mt-3 rounded-xl border border-border/60 bg-background/40 p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-muted-foreground">{t("opinionesEstrellas")}</span>
-              <span className="flex items-center gap-0.5">
+              <span
+                role="radiogroup"
+                aria-label={t("opinionesEstrellas")}
+                onKeyDown={alTeclado}
+                className="flex items-center gap-0.5"
+              >
                 {NOTAS.map((n) => (
                   <button
                     key={n}
+                    ref={(el) => {
+                      botonesEstrella.current[n - 1] = el;
+                    }}
                     type="button"
+                    role="radio"
+                    aria-checked={estrellas === n}
+                    tabIndex={estrellas === n || (estrellas === 0 && n === 1) ? 0 : -1}
                     onClick={() => setEstrellas(n)}
                     aria-label={con(t("opinionesEstrella"), { n })}
                     className="rounded p-0.5"

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { bloquearFondo, soltarFondo } from "@/components/ui/modal-wrapper";
 
 export type Captura = {
   src: string;
@@ -114,6 +115,8 @@ function Lente({
 }) {
   const t = useI18n();
   const captura = capturas[indice];
+  const lente = useRef<HTMLDivElement>(null);
+  const tituloId = useId();
 
   useEffect(() => {
     const alTeclear = (e: KeyboardEvent) => {
@@ -122,20 +125,32 @@ function Lente({
       if (e.key === "ArrowLeft") onMove(-1);
     };
     window.addEventListener("keydown", alTeclear);
-    const anterior = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", alTeclear);
-      document.body.style.overflow = anterior;
-    };
+    return () => window.removeEventListener("keydown", alTeclear);
   }, [onClose, onMove]);
+
+  // Foco y bloqueo del fondo, una sola vez por apertura.
+  useEffect(() => {
+    // El bloqueo se cuenta junto con el de los otros diálogos: si se abriera la
+    // ayuda con la lente abierta, cerrar una no puede soltar el scroll de la
+    // otra.
+    bloquearFondo();
+    const antes = document.activeElement as HTMLElement | null;
+    lente.current?.focus();
+    return () => {
+      soltarFondo();
+      if (antes && document.contains(antes)) antes.focus();
+    };
+  }, []);
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-3 bg-black/85 p-4 backdrop-blur-sm sm:p-8"
+      ref={lente}
+      tabIndex={-1}
+      className="fixed inset-0 z-[70] flex flex-col items-center justify-center gap-3 bg-black/85 p-4 outline-none backdrop-blur-sm sm:p-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={tituloId}
     >
       <button
         onClick={onClose}
@@ -180,7 +195,7 @@ function Lente({
       </div>
 
       <div className="max-w-xl text-center" onClick={(e) => e.stopPropagation()}>
-        <p className="text-sm font-semibold text-white">{captura.titulo}</p>
+        <p id={tituloId} className="text-sm font-semibold text-white">{captura.titulo}</p>
         {captura.pie && <p className="mt-1 text-xs text-white/70">{captura.pie}</p>}
         <p className="mt-1 text-xs text-white/40">
           {indice + 1} / {capturas.length}

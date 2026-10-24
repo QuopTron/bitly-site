@@ -27,7 +27,7 @@ let bloqueados = 0;
 let overflowPrevio = "";
 let paddingPrevio = "";
 
-function bloquearFondo() {
+export function bloquearFondo() {
   if (bloqueados === 0) {
     // Se compensa el ancho de la barra de scroll: sin esto, el contenido salta
     // a la derecha al desaparecer.
@@ -40,7 +40,7 @@ function bloquearFondo() {
   bloqueados++;
 }
 
-function soltarFondo() {
+export function soltarFondo() {
   bloqueados = Math.max(0, bloqueados - 1);
   if (bloqueados === 0) {
     document.body.style.overflow = overflowPrevio;

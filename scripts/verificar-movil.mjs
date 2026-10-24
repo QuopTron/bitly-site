@@ -7,21 +7,16 @@
  *
  * Comprueba tres cosas:
  *
- *  1. Estructura: que las optimizaciones estén de verdad en el DOM —canvas en
- *     perfil liviano, ninguna capa con `backdrop-filter`, sin animar los halos
- *     enormes, sin desbordes horizontales—.
- *  2. Apariciones: que al bajar, todo lo que se anima al entrar termine visible
- *     (sin capas que queden en gris).
+ *  1. Estructura: que las optimizaciones estén de verdad en el DOM —fondo
+ *     estático sin canvas, ninguna capa con `backdrop-filter`, sin animar capas
+ *     grandes, sin desbordes horizontales—.
+ *  2. Apariciones: que al bajar cada pantalla, todo lo que se anima al entrar
+ *     termine visible (sin bloques que queden en gris).
  *  3. Costo: cuadros por segundo y p95 del frame durante un scroll real, con la
- *     CPU recortada. El listón es 45 fps y p95 < 40 ms.
- *
- * Nota sobre lo que NO mide: no hay comparación contra la configuración de
- * escritorio. Se probó forzándola a la fuerza sobre el mismo viewport, pero en
- * headless el ruido entre dos pasadas de la MISMA configuración (17 a 34 fps)
- * es mayor que la diferencia entre configuraciones, así que cualquier número
- * que saliera de ahí sería inventado. De la ganancia quedan los datos duros del
- * DOM: 22 puntos sin líneas contra 80 puntos con 3 160 comparaciones por cuadro,
- * y 0 capas translúcidas contra 18.
+ *     CPU recortada. El listón es 45 fps y p95 < 40 ms. El scroll es el de la
+ *     pantalla activa: desde el rediseño cada vista tiene su propio contenedor
+ *     con `overflow-y-auto`, así que `window.scrollY` no se mueve y medirlo
+ *     mediría una página quieta.
  *
  *   pnpm dev
  *   node scripts/verificar-movil.mjs
@@ -74,7 +69,8 @@ async function esperar(ses, expr, { tiempo = 90000, nombre = expr, cada = 150 } 
  * sale con un solo frame (que no significa que el sitio vaya lento).
  */
 async function medirScroll(ses, ms = 1800, salto = 220, pausa = 28) {
-  await js(ses, `window.scrollTo({ top: 0, left: 0, behavior: "instant" })`);
+  const PANEL = `[data-vista="inicio"]`;
+  await js(ses, `(() => { const p = document.querySelector('${PANEL}'); if (p) p.scrollTop = 0; })()`);
   await dormir(400);
 
   const medicion = js(
@@ -108,8 +104,8 @@ async function medirScroll(ses, ms = 1800, salto = 220, pausa = 28) {
 
   const hasta = Date.now() + ms;
   while (Date.now() < hasta) {
-    // `instant` ignora el `scroll-behavior: smooth` del CSS.
-    await js(ses, `window.scrollBy({ top: ${salto}, left: 0, behavior: "instant" })`);
+    // Cada vista scrollea dentro de su propio panel, no en `window`.
+    await js(ses, `(() => { const p = document.querySelector('${PANEL}'); if (p) p.scrollTop += ${salto}; })()`);
     await dormir(pausa);
   }
   return medicion;
@@ -153,16 +149,27 @@ try {
   check("la página no se desborda a lo ancho", ancho?.doc <= ancho?.vw + 1, `scrollWidth=${ancho?.doc} vs ${ancho?.vw}`);
   check("ningún elemento genera scroll horizontal", (ancho?.culpables?.length ?? 1) === 0, JSON.stringify(ancho?.culpables));
 
-  // ── 2. Las partículas bajan a la versión liviana ──
-  const particulas = await js(
+  // ── 2. El fondo es estático: pared de spray en CSS, sin canvas ──
+  const fondo = await js(
     ses,
-    `(() => { const c = document.querySelector("canvas"); return c ? { ...c.dataset } : null; })()`,
+    `(() => {
+      const pared = document.querySelector(".pared-puntos");
+      const capa = pared ? pared.parentElement : null;
+      const estilo = pared ? getComputedStyle(pared) : null;
+      return {
+        pared: !!pared,
+        patron: estilo ? estilo.backgroundImage !== "none" : false,
+        tags: document.querySelectorAll(".tag-fondo").length,
+        lienzos: document.querySelectorAll("canvas").length,
+        animando: capa ? capa.getAnimations({ subtree: true }).length : -1,
+      };
+    })()`,
   );
-  console.log("partículas:", JSON.stringify(particulas));
-  check("el canvas existe (hay fondo)", particulas !== null);
-  check("perfil liviano: 22 puntos", particulas?.puntos === "22", `puntos=${particulas?.puntos}`);
-  check("perfil liviano: sin líneas O(n²)", particulas?.lineas === "off", `lineas=${particulas?.lineas}`);
-  check("perfil liviano: sin halo del puntero", particulas?.glow === "off", `glow=${particulas?.glow}`);
+  console.log("fondo:", JSON.stringify(fondo));
+  check("el fondo está montado (pared con patrón)", fondo?.pared === true && fondo?.patron === true, JSON.stringify(fondo));
+  check("tiene los dos tags de fondo", fondo?.tags === 2, `tags=${fondo?.tags}`);
+  check("no hay canvas en celular", fondo?.lienzos === 0, `canvas=${fondo?.lienzos}`);
+  check("el fondo no anima nada", fondo?.animando === 0, `animando=${fondo?.animando}`);
 
   // ── 3. Ninguna capa con `backdrop-filter` (lo que más arruina el scroll) ──
   const blur = await js(
@@ -180,24 +187,25 @@ try {
   check("hay elementos translúcidos en el sitio", (blur?.conClase ?? 0) > 0, `${blur?.conClase}`);
   check("ninguno usa backdrop-filter en celular", blur?.activas === 0, `activas=${blur?.activas}`);
 
-  // ── 4. Los halos enormes no se animan; lo chico sí ──
+  // ── 4. Ninguna capa grande se anima en celular ──
+  // Lo que arruina el scroll no es "que haya animaciones", sino animar cajas
+  // enormes con blur. Se miran todas las animaciones corriendo y se mide el
+  // área del elemento animado.
   const anim = await js(
     ses,
     `(() => {
-      const corriendo = (sel) => [...document.querySelectorAll(sel)].filter((el) => el.getAnimations().length > 0).length;
-      return {
-        deriva: corriendo(".anim-deriva"),
-        halo: corriendo(".anim-halo"),
-        flota: corriendo(".anim-flota"),
-        brillo: corriendo(".anim-brillo"),
-      };
+      const corriendo = document.getAnimations().filter((a) => a.playState === "running");
+      const grandes = corriendo
+        .map((a) => a.effect && a.effect.target)
+        .filter(Boolean)
+        .map((el) => ({ el, r: el.getBoundingClientRect() }))
+        .filter(({ r }) => r.width * r.height > 200000)
+        .map(({ el }) => el.tagName + "." + String(el.className).slice(0, 40));
+      return { total: corriendo.length, grandes };
     })()`,
   );
   console.log("animaciones:", JSON.stringify(anim));
-  check("los halos del fondo NO se animan en celular", anim?.deriva === 0, `deriva=${anim?.deriva}`);
-  check("los halos con blur NO se animan en celular", anim?.halo === 0, `halo=${anim?.halo}`);
-  check("el logo sigue flotando (elemento chico)", (anim?.flota ?? 0) > 0, `flota=${anim?.flota}`);
-  check("el brillo del título sigue", (anim?.brillo ?? 0) > 0, `brillo=${anim?.brillo}`);
+  check("no se animan capas grandes en celular", anim?.grandes?.length === 0, JSON.stringify(anim?.grandes));
 
   // ── 5. Las 4 burbujas entran sin scroll, también en 360 px ──
   const burbujas = await js(
@@ -219,31 +227,73 @@ try {
   check("sin scroll horizontal en las burbujas", (burbujas?.scrollX ?? 99) <= 1, `scrollX=${burbujas?.scrollX}`);
 
   // ── 6. Al bajar, todo lo que aparece termina visible ──
-  const alto = await js(ses, `document.documentElement.scrollHeight`);
-  for (let y = 0; y <= alto; y += 260) {
-    await js(ses, `window.scrollTo({ top: ${y}, left: 0, behavior: "instant" })`);
-    await dormir(60);
-  }
-  // Margen de sobra: la última aparición puede tener 150 ms de retraso más
-  // 600 ms de animación, y con la CPU recortada se estira.
-  await dormir(1800);
-  const reveals = await js(
+  // Cada pantalla scrollea en su propio panel: se recorre ESE panel, no window.
+  const revelar = async (sel) => {
+    const alto = await js(ses, `(() => { const p = document.querySelector('${sel}'); return p ? p.scrollHeight : 0; })()`);
+    for (let y = 0; y <= alto; y += 240) {
+      await js(ses, `(() => { const p = document.querySelector('${sel}'); if (p) p.scrollTop = ${y}; })()`);
+      await dormir(60);
+    }
+    // Margen de sobra: la última aparición puede tener 150 ms de retraso más
+    // 600 ms de animación, y con la CPU recortada se estira.
+    await dormir(1800);
+    return js(
+      ses,
+      `(() => {
+        const todos = [...document.querySelectorAll('${sel} [data-reveal]')];
+        const ocultos = todos.filter((el) => Number(getComputedStyle(el).opacity) < 0.99);
+        return {
+          total: todos.length,
+          ocultos: ocultos.length,
+          cuales: ocultos.map((el) => el.tagName + "." + String(el.className).slice(0, 46)),
+        };
+      })()`,
+    );
+  };
+
+  const reveals = await revelar('[data-vista="inicio"]');
+  console.log("apariciones (inicio):", JSON.stringify(reveals));
+  check("hay bloques que aparecen al bajar", (reveals?.total ?? 0) >= 3, `${reveals?.total}`);
+  check("en Inicio todos terminan visibles", reveals?.ocultos === 0, JSON.stringify(reveals?.cuales));
+
+  // Las otras pantallas sólo se revelan cuando entran en pantalla: se navega a
+  // Planes con el menú del celular y se comprueba que no quede nada en gris.
+  await js(
+    ses,
+    `[...document.querySelectorAll("header button")]
+      .find((b) => /abrir menú|open menu/i.test(b.getAttribute("aria-label") || ""))?.click()`,
+  );
+  await dormir(400);
+  const navego = await js(
     ses,
     `(() => {
-      const todos = [...document.querySelectorAll("[data-reveal]")];
-      const ocultos = todos.filter((el) => Number(getComputedStyle(el).opacity) < 0.99);
-      return {
-        total: todos.length,
-        ocultos: ocultos.length,
-        sinMarca: todos.filter((el) => !el.hasAttribute("data-dentro")).length,
-        cuales: todos.filter((el) => !el.hasAttribute("data-dentro")).map((el) => el.tagName + "." + String(el.className).slice(0, 46)),
-      };
+      const b = [...document.querySelectorAll("nav button")].find((x) => /^planes$/i.test(x.innerText.trim()));
+      if (!b) return false;
+      b.click();
+      return true;
     })()`,
   );
-  console.log("apariciones:", JSON.stringify(reveals));
-  check("hay bloques que aparecen al bajar", (reveals?.total ?? 0) > 5, `${reveals?.total}`);
-  check("todos quedan marcados al pasar por ellos", reveals?.sinMarca === 0, `sinMarca=${reveals?.sinMarca}`);
-  check("y todos terminan visibles", reveals?.ocultos === 0, `ocultos=${reveals?.ocultos}`);
+  check("el menú del celular navega a Planes", navego === true);
+  await esperar(ses, `document.querySelector('[data-vista="planes"]')?.getAttribute('aria-hidden') === 'false'`, {
+    nombre: "la pantalla de Planes entra",
+  });
+  const planes = await revelar('[data-vista="planes"]');
+  console.log("apariciones (planes):", JSON.stringify(planes));
+  check("en Planes también hay bloques que aparecen", (planes?.total ?? 0) > 0, `${planes?.total}`);
+  check("en Planes ninguno queda oculto", planes?.ocultos === 0, JSON.stringify(planes?.cuales));
+
+  // Vuelta a Inicio para el resto de las pruebas.
+  await js(
+    ses,
+    `[...document.querySelectorAll("header button")]
+      .find((b) => /abrir menú|open menu/i.test(b.getAttribute("aria-label") || ""))?.click()`,
+  );
+  await dormir(300);
+  await js(
+    ses,
+    `[...document.querySelectorAll("nav button")].find((x) => /^inicio$/i.test(x.innerText.trim()))?.click()`,
+  );
+  await dormir(600);
 
   // ── 7. Scroll real con la CPU recortada ──
   // Tres pasadas y se conserva la mejor: el ruido (una tarea del sistema, el
@@ -258,58 +308,68 @@ try {
   const foto = await ses.ev("Page.captureScreenshot", { format: "png", fromSurface: true });
   fs.writeFileSync(path.join(SALIDA, "movil.png"), Buffer.from(foto.data, "base64"));
 
-  // ── 8. La sección de opiniones se monta y valida el formulario sola ──
-  // (No se envía nada: eso escribiría en la base.)
+  // ── 8. El formulario de opiniones del modal (no se envía nada) ──
+  await js(ses, `document.querySelector('button[aria-label="Comentarios"]')?.click()`);
+  await esperar(ses, `document.querySelector('[role="dialog"][aria-modal="true"]')`, {
+    nombre: "el modal de comentarios abrió",
+  });
+  await js(
+    ses,
+    `(() => {
+      const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+      [...d.querySelectorAll("button")]
+        .find((b) => /dejá tu opinión|leave your review/i.test(b.innerText))?.click();
+    })()`,
+  );
+  await esperar(ses, `document.querySelector('[role="dialog"] form [role="radiogroup"]')`, {
+    nombre: "el formulario de opiniones se abrió",
+  });
   const forma = await js(
     ses,
     `(() => {
-      const s = document.querySelector("#opiniones");
-      if (!s) return null;
-      const grupo = s.querySelector('[role="radiogroup"]');
-      const boton = s.querySelector('button[type="submit"]');
+      const form = document.querySelector('[role="dialog"] form');
+      const radios = [...form.querySelectorAll('[role="radio"]')];
+      const boton = form.querySelector('button[type="submit"]');
       return {
-        estrellas: grupo ? grupo.querySelectorAll('[role="radio"]').length : 0,
-        tieneNombre: !!s.querySelector("input"),
-        tieneComentario: !!s.querySelector("textarea"),
+        estrellas: radios.length,
+        tabulables: radios.filter((r) => r.tabIndex === 0).length,
+        campos: form.querySelectorAll("input").length,
         enviarBloqueado: boton ? boton.disabled : null,
       };
     })()`,
   );
   console.log("opiniones:", JSON.stringify(forma));
-  check("la sección de opiniones está en la página", forma !== null);
-  check("tiene las 5 estrellas", forma?.estrellas === 5, `estrellas=${forma?.estrellas}`);
-  check("tiene nombre y comentario", forma?.tieneNombre === true && forma?.tieneComentario === true);
+  check("tiene las 5 estrellas como radiogroup", forma?.estrellas === 5, `estrellas=${forma?.estrellas}`);
+  check("tiene nombre y comentario", forma?.campos === 2, `campos=${forma?.campos}`);
   check("con el formulario vacío no se puede enviar", forma?.enviarBloqueado === true);
+  check("la nota tiene un solo punto de tabulación", forma?.tabulables === 1, `tabulables=${forma?.tabulables}`);
 
   await js(
     ses,
     `(() => {
-      const s = document.querySelector("#opiniones");
-      s.querySelectorAll('[role="radio"]')[4].click();
-      const setI = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      const nombre = s.querySelector("input");
-      setI.call(nombre, "Pablo");
+      const form = document.querySelector('[role="dialog"] form');
+      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const [nombre, texto] = [...form.querySelectorAll("input")];
+      form.querySelectorAll('[role="radio"]')[4].click();
+      set.call(nombre, "Pablo");
       nombre.dispatchEvent(new Event("input", { bubbles: true }));
-      const setT = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-      const texto = s.querySelector("textarea");
-      setT.call(texto, "Muy buena la demo, bajó en FLAC de una.");
+      set.call(texto, "Muy buena la demo, bajó en FLAC de una.");
       texto.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     })()`,
   );
   await dormir(250);
-  const habilitado = await js(ses, `document.querySelector("#opiniones button[type=submit]").disabled`);
+  const habilitado = await js(ses, `document.querySelector('[role="dialog"] form button[type=submit]').disabled`);
   check("con datos válidos el botón se habilita", habilitado === false, `bloqueado=${habilitado}`);
 
-  // La calificación tiene que poder recorrerse con el teclado: flechas, Inicio
-  // y Fin, con un solo punto de tabulación (el patrón de un radiogroup).
+  // La calificación se recorre con el teclado: flechas, Inicio y Fin, con un
+  // solo punto de tabulación (el patrón de un radiogroup).
   const teclado = await js(
     ses,
     `(async () => {
       const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
-      const s = document.querySelector("#opiniones");
-      const radios = [...s.querySelectorAll('[role="radio"]')];
-      const tabulables = radios.filter((r) => r.tabIndex === 0).length;
+      const form = document.querySelector('[role="dialog"] form');
+      const radios = [...form.querySelectorAll('[role="radio"]')];
       const marcado = () => radios.map((r) => r.getAttribute("aria-checked")).join(",");
       const tecla = (key) =>
         radios.find((r) => r.getAttribute("aria-checked") === "true")
@@ -323,21 +383,29 @@ try {
       tecla("End");
       await esperar(120);
       const trasFin = marcado();
-      return { tabulables, trasFlecha, trasFin, foco: document.activeElement === radios[4] };
+      return { trasFlecha, trasFin, foco: document.activeElement === radios[4] };
     })()`,
   );
   console.log("estrellas con teclado:", JSON.stringify(teclado));
-  check("la calificación tiene un solo punto de tabulación", teclado?.tabulables === 1, `tabulables=${teclado?.tabulables}`);
   check("la flecha derecha sube la nota", teclado?.trasFlecha === "false,true,false,false,false", teclado?.trasFlecha);
   check("Fin salta a 5 estrellas", teclado?.trasFin === "false,false,false,false,true", teclado?.trasFin);
   check("el foco acompaña a la nota elegida", teclado?.foco === true);
+
+  // Se cierra sin enviar: publicar escribiría en la base.
+  await js(ses, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await dormir(500);
+  check(
+    "Escape cierra el modal de comentarios",
+    (await js(ses, `document.querySelectorAll('[role="dialog"][aria-modal="true"]').length`)) === 0,
+  );
 
   // ── 9. Los modales son diálogos de verdad, no sólo un recuadro ──
   // Escape, foco adentro, nombre accesible y la página de atrás sin arrastrarse.
   const disparo = await js(
     ses,
     `(() => {
-      const b = [...document.querySelectorAll("button")].find((x) => /bitly m[o\u00f3]vil/i.test(x.innerText || ""));
+      // El botón "Ver" del hero abre el modal de descargas (un diálogo real).
+      const b = [...document.querySelectorAll("button")].find((x) => /^ver$/i.test((x.innerText || "").trim()));
       if (!b) return "sin-boton";
       b.click();
       return "ok";
@@ -381,20 +449,23 @@ try {
 
   // Dos diálogos a la vez: cerrar el primero NO puede soltar el fondo mientras
   // el segundo sigue abierto (y el último en cerrarse es el que suelta).
+  // Busca por texto visible o por aria-label: los botones del header son de
+  // sólo ícono y su texto accesible está en el aria-label.
   const abrir = (re) =>
     js(
       ses,
       `(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => ${re}.test(x.innerText || ""));
+        const textos = (x) => [(x.innerText || "").trim(), (x.getAttribute("aria-label") || "").trim()];
+        const b = [...document.querySelectorAll("button")].find((x) => textos(x).some((t) => ${re}.test(t)));
         if (!b) return false;
         b.click();
         return true;
       })()`,
     );
-  check("abre el primero de los dos diálogos", (await abrir(/bitly m[o\u00f3]vil/i)) === true);
-  await dormir(250);
-  check("abre el segundo con el primero todavía abierto", (await abrir(/preguntas frecuentes/i)) === true);
-  await dormir(250);
+  check("abre el primero de los dos diálogos", (await abrir(/^ver$/i)) === true);
+  await dormir(700);
+  check("abre el segundo con el primero todavía abierto", (await abrir(/preguntas frecuentes|faq/i)) === true);
+  await dormir(900);
   const dosAbiertos = await js(ses, `document.querySelectorAll('[role="dialog"][aria-modal="true"]').length`);
   check("hay dos diálogos abiertos a la vez", dosAbiertos === 2, `abiertos=${dosAbiertos}`);
 
@@ -430,20 +501,22 @@ try {
   );
   check("cerrar el último sí suelta el fondo", trasDos?.abiertos === 0 && trasDos?.libre === true, JSON.stringify(trasDos));
 
-  // ── 10. Las opiniones no quedan girando para siempre ──
-  // Con la migración sin aplicar, la base contesta error: la sección tiene que
-  // decirlo, no quedarse con el spinner ni quedar en blanco.
+  // ── 10. Las opiniones cargan y no quedan girando para siempre ──
   await dormir(1500);
   const estadoOpiniones = await js(
     ses,
     `(() => {
-      const s = document.querySelector("#opiniones");
-      return { girando: !!s.querySelector(".animate-spin"), texto: (s.innerText || "").trim().length };
+      const vista = document.querySelector('[data-vista="inicio"]');
+      const pie = vista ? vista.querySelector("footer") : null;
+      return {
+        girando: !!vista?.querySelector(".animate-spin"),
+        pie: (pie?.innerText || "").replace(/\s+/g, " ").slice(0, 80),
+      };
     })()`,
   );
   console.log("estado de opiniones:", JSON.stringify(estadoOpiniones));
   check("las opiniones no quedan girando para siempre", estadoOpiniones?.girando === false, JSON.stringify(estadoOpiniones));
-  check("la sección dice algo", (estadoOpiniones?.texto ?? 0) > 80, `largo=${estadoOpiniones?.texto}`);
+  check("el pie dice cuántas opiniones hay", /opinion/i.test(estadoOpiniones?.pie ?? ""), estadoOpiniones?.pie);
 
   // ── 11. Con "menos movimiento" nada se esconde y nada se anima ──
   // Es el camino que más fácil se rompe: si la clase que oculta el contenido
@@ -470,14 +543,14 @@ try {
             return t && typeof t.duration === "number" && t.duration > 50;
           })
           .map((a) => a.animationName || a.transitionProperty || "?"),
-        particulas: (() => { const c = document.querySelector("canvas"); return c ? c.dataset.puntos ?? null : null; })(),
+        lienzos: document.querySelectorAll("canvas").length,
       };
     })()`,
   );
   console.log("sin movimiento:", JSON.stringify(quieto));
   check("sin movimiento no se esconde nada", (quieto?.total ?? 1) > 0 && quieto?.invisibles === 0, JSON.stringify(quieto));
   check("sin movimiento no queda nada animándose", (quieto?.animando?.length ?? 1) === 0, `animando=${JSON.stringify(quieto?.animando)}`);
-  check("sin movimiento no se dibuja el canvas", quieto?.particulas == null, `puntos=${quieto?.particulas}`);
+  check("sin movimiento no hay ningún canvas", quieto?.lienzos === 0, `canvas=${quieto?.lienzos}`);
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);
   if (fallos > 0) process.exitCode = 1;

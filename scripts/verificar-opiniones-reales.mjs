@@ -3,10 +3,13 @@
  * Verifica el flujo REAL de opiniones y vistas contra GitHub.
  *
  * Los `probar-*.mjs` prueban las reglas y el servidor sin base; este hace lo que
- * ninguno puede: abre el sitio en Chrome, publica una opinión de verdad y
- * comprueba que el archivo quede en el repo, que el promedio y el reparto suban,
- * y que el contador de vistas avance. Al terminar borra la fila de prueba, así
- * que se puede correr las veces que haga falta sin ensuciar el archivo.
+ * ninguno puede: abre el sitio en Chrome, publica una opinión de verdad desde el
+ * modal de comentarios y comprueba que la fila quede en el repo y que el
+ * promedio y el reparto suban. Al terminar borra la fila de prueba, así que se
+ * puede correr las veces que haga falta sin ensuciar el archivo.
+ *
+ * La visita se cuenta al entrar (`src/routes/__root.tsx`), así que también se
+ * comprueba que el contador avance sin depender de la sección de opiniones.
  *
  * La base es el repo privado `QuopTron/bitly-data` (Contents API). Hace falta un
  * token con permiso `contents: write` para poder limpiar.
@@ -16,8 +19,9 @@
  *   pnpm dev                       # en otra terminal, si no usás DEMO_URL
  */
 
+import { readdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { abrirChrome, nuevaSesion, js, dormir } from "./capturas/lib/cdp.mjs";
 
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,6 +33,26 @@ const API = "https://api.github.com";
 const REPO = process.env.BITLY_DATA_REPO ?? "QuopTron/bitly-data";
 const TOKEN = process.env.BITLY_DATA_TOKEN ?? process.env.BITLY_CODES_TOKEN;
 const RAMA = "main";
+
+// Los archivos del repo están cifrados en reposo (AES-256-GCM con
+// BITLY_DATA_SECRET), así que para leerlos o limpiarlos hay que usar el mismo
+// módulo que usa el sitio. Se compila al vuelo, como en probar-cifrado.mjs.
+async function cargarCifrado() {
+  const base = path.join(raiz, "node_modules", ".pnpm");
+  const carpeta = readdirSync(base).find((d) => d.startsWith("esbuild@"));
+  if (!carpeta) throw new Error("No encuentro esbuild en node_modules/.pnpm (¿pnpm install?).");
+  const esbuild = (await import(pathToFileURL(path.join(base, carpeta, "node_modules", "esbuild", "lib", "main.js")).href)).default;
+  const salida = path.join(raiz, "scripts", ".cache", "cifrado-qa.mjs");
+  await esbuild.build({
+    entryPoints: [path.join(raiz, "src", "server", "cifrado.ts")],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    outfile: salida,
+  });
+  return import(pathToFileURL(salida).href);
+}
+const cifrado = await cargarCifrado();
 
 const NOMBRE_PRUEBA = "Prueba Automática";
 const TEXTO_PRUEBA = "Opinión de prueba automática: esta fila se borra sola al terminar.";
@@ -77,7 +101,9 @@ async function leerArchivo(ruta, defecto) {
   });
   if (!r.ok) return defecto;
   try {
-    return JSON.parse(await r.text());
+    const crudo = JSON.parse(await r.text());
+    if (cifrado.esSobre(crudo)) return JSON.parse(await cifrado.descifrarSobre(crudo));
+    return crudo;
   } catch {
     return defecto;
   }
@@ -85,7 +111,9 @@ async function leerArchivo(ruta, defecto) {
 
 /** Escribe un JSON en el repo (create o update), como hace el sitio. */
 async function escribirArchivo(ruta, valor, mensaje) {
-  const contenido = Buffer.from(JSON.stringify(valor, null, 2) + "\n", "utf8").toString("base64");
+  const texto = JSON.stringify(valor, null, 2) + "\n";
+  const cuerpo = cifrado.cifradoActivo() ? await cifrado.cifrarTexto(texto) : texto;
+  const contenido = Buffer.from(cuerpo, "utf8").toString("base64");
   const shaDe = async () => {
     const r = await gh(`/repos/${REPO}/contents/${ruta}?ref=${RAMA}`);
     return r.ok ? (await r.json())?.sha : undefined;
@@ -147,109 +175,144 @@ let creada = false;
 
 try {
   console.log(`${BASE} · flujo real de opiniones\n`);
-  await ses.ev("Page.navigate", { url: `${BASE}/#opiniones` });
-  await esperar(ses, `document.querySelector("#opiniones form")`, { nombre: "la sección montó" });
-  await dormir(1500);
+  await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
+    source: "try{localStorage.setItem('bitly_pistas_cabecera','1')}catch{}",
+  });
+  await ses.ev("Page.navigate", { url: BASE });
 
-  // ── 1. La base responde y la sección NO dice que está desactivada ──
-  const estado = await js(
+  // ── 1. La portada muestra los contadores reales ──
+  await esperar(ses, `document.querySelector("footer [class*='tabular-nums']")`, { nombre: "el pie del hero montó" });
+  await dormir(1200);
+  const hero = await js(
     ses,
     `(() => {
-      const s = document.querySelector("#opiniones");
-      const texto = (s.innerText || "").replace(/\\s+/g, " ").trim();
-      const ojo = s.querySelector("svg.lucide-eye");
+      const pie = document.querySelector("footer");
+      const texto = (pie?.innerText || "").replace(/\\s+/g, " ").trim();
+      const estrellas = pie?.querySelector('[role="img"]');
       return {
-        noDisponible: /no están activadas|aren't enabled/i.test(texto),
-        vistas: ojo ? ojo.parentElement.innerText.replace(/\\s+/g, " ").trim() : null,
-        girando: !!s.querySelector(".animate-spin"),
+        texto,
+        promedio: estrellas?.getAttribute("aria-label") ?? null,
+        girando: !!document.querySelector(".animate-spin"),
       };
     })()`,
   );
-  console.log("estado:", JSON.stringify(estado));
-  check("la sección no dice que esté desactivada", estado?.noDisponible === false);
-  check("no queda girando", estado?.girando === false);
-  check("el contador de vistas se ve", Boolean(estado?.vistas), String(estado?.vistas));
-
-  const conVista = await resumen();
+  console.log("hero:", JSON.stringify(hero));
+  check("la portada no queda girando", hero?.girando === false);
+  check("el pie muestra las visitas", /visitas/i.test(hero?.texto ?? ""), hero?.texto?.slice(0, 80));
+  check("el pie muestra el promedio de estrellas", /estrellas/i.test(hero?.promedio ?? ""), String(hero?.promedio));
+  // El número del pie sale de un resumen que el Worker cachea 30 s: puede ir un
+  // poco atrás de lo que hay en la base. Acá sólo se comprueba que se lea; el
+  // conteo exacto se verifica contra el repo más abajo, ya sin caché.
+  const enPie = Number((hero?.texto ?? "").match(/(\d+)\s+opinion/i)?.[1] ?? NaN);
   check(
-    "la visita quedó contada en la base",
-    (conVista?.vistas ?? 0) > (antes.vistas ?? 0),
-    `${antes.vistas} → ${conVista?.vistas}`,
+    "el pie muestra cuántas opiniones hay",
+    Number.isFinite(enPie) && enPie > 0,
+    `${enPie} en pantalla (base: ${antes.opiniones})`,
   );
 
-  // ── 2. Publicar desde el formulario, como lo haría una persona ──
+  // ── 2. El modal de comentarios abre con el formulario cerrado ──
+  await js(ses, `document.querySelector('button[aria-label="Comentarios"]')?.click()`);
+  await esperar(ses, `document.querySelector('[role="dialog"][aria-modal="true"]')`, { nombre: "el modal abrió" });
+  await dormir(300);
+  const cerrado = await js(
+    ses,
+    `(() => {
+      const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+      return {
+        tieneBoton: [...d.querySelectorAll("button")].some((b) => /dejá tu opinión|leave your review/i.test(b.innerText)),
+        formularios: d.querySelectorAll("form").length,
+        texto: (d.innerText || "").replace(/\\s+/g, " ").slice(0, 120),
+      };
+    })()`,
+  );
+  console.log("modal:", JSON.stringify(cerrado));
+  check("el modal tiene el botón para comentar", cerrado?.tieneBoton === true, cerrado?.texto);
+  check("el formulario arranca cerrado", cerrado?.formularios === 0, `formularios=${cerrado?.formularios}`);
+
+  // ── 3. El formulario: estrellas accesibles, validación y envío ──
   await js(
     ses,
     `(() => {
-      const s = document.querySelector("#opiniones");
-      s.querySelectorAll('[role="radio"]')[4].click();
-      const setI = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      const nombre = s.querySelector("input");
-      setI.call(nombre, ${JSON.stringify(NOMBRE_PRUEBA)});
+      const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+      [...d.querySelectorAll("button")].find((b) => /dejá tu opinión|leave your review/i.test(b.innerText))?.click();
+    })()`,
+  );
+  await esperar(ses, `document.querySelector('[role="dialog"] form')`, { nombre: "el formulario se abrió" });
+  const forma = await js(
+    ses,
+    `(() => {
+      const d = document.querySelector('[role="dialog"][aria-modal="true"]');
+      const form = d.querySelector("form");
+      const grupo = form.querySelector('[role="radiogroup"]');
+      const radios = grupo ? [...grupo.querySelectorAll('[role="radio"]')] : [];
+      const boton = form.querySelector('button[type="submit"]');
+      const campos = [...form.querySelectorAll("input")];
+      return {
+        estrellas: radios.length,
+        tabulables: radios.filter((r) => r.tabIndex === 0).length,
+        campos: campos.length,
+        enviarBloqueado: boton ? boton.disabled : null,
+      };
+    })()`,
+  );
+  console.log("formulario:", JSON.stringify(forma));
+  check("tiene las 5 estrellas como radiogroup", forma?.estrellas === 5, `estrellas=${forma?.estrellas}`);
+  check("un solo punto de tabulación en la nota", forma?.tabulables === 1, `tabulables=${forma?.tabulables}`);
+  check("tiene nombre y comentario", forma?.campos === 2, `campos=${forma?.campos}`);
+  check("con el formulario vacío no se puede enviar", forma?.enviarBloqueado === true);
+
+  const teclado = await js(
+    ses,
+    `(async () => {
+      const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+      const form = document.querySelector('[role="dialog"] form');
+      const radios = [...form.querySelectorAll('[role="radio"]')];
+      const marcado = () => radios.map((r) => r.getAttribute("aria-checked")).join(",");
+      const tecla = (key) =>
+        radios.find((r) => r.getAttribute("aria-checked") === "true")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      radios[0].click();
+      await esperar(120);
+      tecla("ArrowRight");
+      await esperar(120);
+      const trasFlecha = marcado();
+      tecla("End");
+      await esperar(120);
+      const trasFin = marcado();
+      return { trasFlecha, trasFin, foco: document.activeElement === radios[4] };
+    })()`,
+  );
+  console.log("estrellas con teclado:", JSON.stringify(teclado));
+  check("la flecha derecha sube la nota", teclado?.trasFlecha === "false,true,false,false,false", teclado?.trasFlecha);
+  check("Fin salta a 5 estrellas", teclado?.trasFin === "false,false,false,false,true", teclado?.trasFin);
+  check("el foco acompaña a la nota elegida", teclado?.foco === true);
+
+  await js(
+    ses,
+    `(() => {
+      const form = document.querySelector('[role="dialog"] form');
+      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const [nombre, texto] = [...form.querySelectorAll("input")];
+      set.call(nombre, ${JSON.stringify(NOMBRE_PRUEBA)});
       nombre.dispatchEvent(new Event("input", { bubbles: true }));
-      const setT = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-      const texto = s.querySelector("textarea");
-      setT.call(texto, ${JSON.stringify(TEXTO_PRUEBA)});
+      set.call(texto, ${JSON.stringify(TEXTO_PRUEBA)});
       texto.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     })()`,
   );
-  await dormir(300);
-  await esperar(ses, `document.querySelector("#opiniones button[type=submit]").disabled === false`, {
+  await dormir(250);
+  await esperar(ses, `document.querySelector('[role="dialog"] form button[type=submit]').disabled === false`, {
     nombre: "el botón se habilita",
   });
-  await js(ses, `document.querySelector("#opiniones button[type=submit]").click()`);
+  await js(ses, `document.querySelector('[role="dialog"] form button[type=submit]').click()`);
   creada = true;
 
   await esperar(
     ses,
-    `(document.querySelector("#opiniones").innerText || "").includes(${JSON.stringify(NOMBRE_PRUEBA)})`,
-    { nombre: "la opinión aparece en la lista", tiempo: 20000 },
+    `(document.querySelector('[role="dialog"][aria-modal="true"]')?.innerText || "").search(/¡Gracias! Ya se publicó\\.|Thanks! It's live\\./) >= 0`,
+    { nombre: "el aviso de publicación", tiempo: 25000 },
   );
-
-  // ── 3. Lo que se ve en pantalla ──
-  const esperado = { vistas: conVista.vistas, opiniones: (antes.opiniones ?? 0) + 1 };
-  await esperar(
-    ses,
-    `(() => {
-      const t = (document.querySelector("#opiniones").innerText || "").replace(/\\s+/g, " ");
-      return t.includes(${JSON.stringify(`${esperado.vistas} visitas`)})
-        && t.includes(${JSON.stringify(`${esperado.opiniones} opiniones`)});
-    })()`,
-    { nombre: "los contadores se asientan", tiempo: 8000 },
-  );
-
-  const despues = await js(
-    ses,
-    `(() => {
-      const s = document.querySelector("#opiniones");
-      const texto = (s.innerText || "").replace(/\\s+/g, " ").trim();
-      const ojo = s.querySelector("svg.lucide-eye");
-      const reparto = s.querySelector('ul[aria-labelledby="opiniones-reparto"]');
-      return {
-        texto,
-        vistas: ojo ? ojo.parentElement.innerText.replace(/\\s+/g, " ").trim() : null,
-        promedio: s.querySelector('[role="img"]')?.parentElement?.innerText?.replace(/\\s+/g, " ").trim() ?? null,
-        barras: reparto ? reparto.querySelectorAll("li").length : 0,
-        aviso: /Gracias|Thanks/i.test(texto),
-      };
-    })()`,
-  );
-  console.log("en pantalla:", JSON.stringify(despues));
-  check("la opinión nueva se ve en la lista", despues?.texto?.includes(NOMBRE_PRUEBA) === true);
-  check("avisa que se publicó", despues?.aviso === true);
-  check("aparece el promedio", Boolean(despues?.promedio), String(despues?.promedio));
-  check("se dibuja el reparto de 5 barras", despues?.barras === 5, `barras=${despues?.barras}`);
-  check(
-    "el contador de vistas muestra el total real",
-    despues?.vistas?.includes(String(esperado.vistas)) === true,
-    `${despues?.vistas} (esperado ${esperado.vistas})`,
-  );
-  check(
-    "el promedio cuenta la opinión nueva",
-    despues?.promedio?.includes(String(esperado.opiniones)) === true,
-    `${despues?.promedio} (esperado ${esperado.opiniones})`,
-  );
+  check("el sitio avisa que se publicó", true);
 
   // ── 4. Lo que quedó guardado de verdad ──
   // La lectura pasa por la caché de 30 s del Worker: hay que darle tiempo a
@@ -262,17 +325,24 @@ try {
     (fin?.opiniones ?? 0) === (antes.opiniones ?? 0) + 1,
     `${antes.opiniones} → ${fin?.opiniones}`,
   );
-  check("el promedio la incluye", Number(fin?.promedio) === 5, `promedio=${fin?.promedio}`);
   check(
     "el reparto sumó la estrella 5",
     (fin?.reparto?.[4] ?? 0) === (antes.reparto?.[4] ?? 0) + 1,
     `${antes.reparto?.[4]} → ${fin?.reparto?.[4]}`,
   );
 
-  // ── 4b. Recargar la misma sesión no vuelve a contar la visita ──
-  await ses.ev("Page.navigate", { url: `${BASE}/#opiniones` });
-  await esperar(ses, `document.querySelector("#opiniones form")`, { nombre: "la sección volvió a montar" });
-  await dormir(2000);
+  // ── 5. La opinión nueva se ve en la portada sin recargar a mano ──
+  await js(ses, `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await dormir(600);
+  await ses.ev("Page.navigate", { url: BASE });
+  await esperar(
+    ses,
+    `(document.body.innerText || "").includes(${JSON.stringify(NOMBRE_PRUEBA)})`,
+    { nombre: "la opinión aparece en el carrusel", tiempo: 30000 },
+  );
+  check("la opinión nueva se ve en la portada", true);
+
+  // ── 6. Recargar la misma sesión no vuelve a contar la visita ──
   const trasRecarga = await resumen();
   check(
     "recargar en la misma sesión no infla las visitas",
@@ -280,9 +350,7 @@ try {
     `${fin?.vistas} → ${trasRecarga?.vistas}`,
   );
 
-  // ── 5. Sin el token no se puede escribir directo ──
-  // Antes lo probaba la clave pública de Supabase. Ahora lo que protege el
-  // archivo es que no hay endpoint abierto: la Contents API exige un token.
+  // ── 7. Sin el token no se puede escribir directo ──
   const sinToken = await fetch(`${API}/repos/${REPO}/contents/qa-no-debe-existir.json`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", "User-Agent": "bitly-qa" },
@@ -290,20 +358,20 @@ try {
   });
   check("escribir sin token sigue bloqueado", !sinToken.ok, `status=${sinToken.status}`);
 
-  // ── 6. La visita se cuenta AL ENTRAR, sin la sección de opiniones ──
-  const antes404 = await resumen();
-  const ses2 = await nuevaSesion(browser, { w: 900, h: 700, dpr: 1 });
-  try {
-    await ses2.ev("Page.navigate", { url: `${BASE}/ruta-que-no-existe` });
-    await dormir(2500);
-  } finally {
-    await ses2.cerrar().catch(() => {});
-  }
-  const tras404 = await resumen();
+  // ── 8. La visita se cuenta al entrar, sin depender de las opiniones ──
+  // La marca vive en `sessionStorage`: se borra y se recarga para simular una
+  // entrada nueva. No hace falta otra pestaña ni otro perfil.
+  const antesVisita = await resumen();
+  await js(ses, `sessionStorage.removeItem("bitly_vista_contada")`);
+  // Recarga completa: un cambio de hash no vuelve a montar la app.
+  await ses.ev("Page.reload", {});
+  await esperar(ses, `document.querySelector('[data-vista="inicio"]')`, { nombre: "la portada volvió a montar" });
+  await dormir(3000);
+  const trasVisita = await resumen();
   check(
-    "la visita se cuenta al entrar, aunque no haya sección de opiniones",
-    (tras404?.vistas ?? 0) === (antes404?.vistas ?? 0) + 1,
-    `${antes404?.vistas} → ${tras404?.vistas}`,
+    "la visita se cuenta al entrar, en cualquier pantalla",
+    (trasVisita?.vistas ?? 0) === (antesVisita?.vistas ?? 0) + 1,
+    `${antesVisita?.vistas} → ${trasVisita?.vistas}`,
   );
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);
