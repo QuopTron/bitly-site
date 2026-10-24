@@ -231,6 +231,12 @@ try {
   const pedidos = await texto();
   check(!/No pudimos cargar/.test(pedidos), "la lista de pedidos carga");
   check(!/undefined/.test(pedidos), "la lista de pedidos no muestra undefined");
+  // La firma de códigos: sin clave el panel avisa en ámbar y emite del registro.
+  check(
+    /Firma de códigos lista/.test(pedidos),
+    "el panel confirma la clave de firma",
+    /Sin clave de firma/.test(pedidos) ? "falta BITLY_CODIGOS_CLAVE" : "ok",
+  );
 } catch (e) {
   if (!e?.saltar) throw e;
   console.log("  (se salta: falta BITLY_ADMIN_EMAIL y/o BITLY_ADMIN_CLAVE)");

@@ -63,10 +63,15 @@ function b64url(bytes: Uint8Array): string {
 /**
  * Importa la clave privada del secreto `BITLY_CODIGOS_CLAVE`.
  *
- * Acepta las tres formas en que uno pega una clave en `wrangler secret put`:
+ * Acepta las formas en que uno pega una clave en `wrangler secret put`:
  *   · PEM PKCS#8 (`-----BEGIN PRIVATE KEY-----`), con \n reales o escapados;
  *   · base64/base64url de la semilla de 32 bytes;
  *   · base64 de la clave de 64 bytes (semilla + pública, como la imprime libsodium).
+ *
+ * La semilla se envuelve en un PKCS#8 antes de importarla: WebCrypto trata
+ * `raw` como clave PÚBLICA, así que `importKey("raw", semilla, …, ["sign"])`
+ * falla en el runtime del Worker (y en Node). Envolviéndola funciona igual que
+ * el PEM.
  *
  * Devuelve `null` si no hay secreto o si no se puede importar: el que llama
  * decide qué hacer, y así un secreto mal pegado no rompe la compra entera.
@@ -89,13 +94,13 @@ async function clavePrivada(): Promise<CryptoKey | null> {
     const semilla = deB64url(crudo);
     if (semilla.length < 32) return null;
     // Con 64 bytes el primero es la semilla; el resto es la pública (se ignora).
-    return await crypto.subtle.importKey(
-      "raw",
-      semilla.slice(0, 32) as BufferSource,
-      { name: "Ed25519" },
-      false,
-      ["sign"],
-    );
+    // PKCS#8 de una Ed25519: 30 2e 02 01 00 30 05 06 03 2b 65 70 04 22 04 20 + semilla.
+    const sobre = new Uint8Array(16 + 32);
+    sobre.set(deB64("MC4CAQAwBQYDK2VwBCIEIA=="), 0);
+    sobre.set(semilla.slice(0, 32), 16);
+    return await crypto.subtle.importKey("pkcs8", sobre as BufferSource, { name: "Ed25519" }, false, [
+      "sign",
+    ]);
   } catch (e) {
     console.error("[codigos] la clave de firma no se pudo importar:", e instanceof Error ? e.message : e);
     return null;

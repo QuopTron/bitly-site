@@ -111,7 +111,7 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_ADMIN_CLAVE` | **Obligatoria**: clave del panel del dueño (`/admin`). El panel pide correo + clave y devuelve un token firmado que vence a los 7 días. Sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CLAVE». Usá 16+ caracteres aleatorios. |
 | `BITLY_ADMIN_EMAIL`, `BITLY_ADMIN_SECRET` | Correo del dueño (por defecto `floxdev2024@gmail.com`) y, opcional, secreto propio para firmar el token del panel. Si falta el secreto se deriva de `BITLY_SESSION_SECRET`/el token de GitHub. |
 | `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
-| `BITLY_CODIGOS_CLAVE` | **Opcional pero clave para el flujo nuevo**: clave privada Ed25519 (PEM PKCS#8 o semilla de 32 bytes en base64) con la que el sitio firma los códigos Premium que emite al validar un pedido. Es la misma de `scripts/keys/private_key.pem` en el repo de la app: sin ella no se pueden fabricar códigos que la app acepte, y el panel cae al registro `bitly_codes_premium`. |
+| `BITLY_CODIGOS_CLAVE` | Clave privada Ed25519 con la que el sitio firma los códigos Premium que emite al validar un pedido. Acepta el PEM PKCS#8 o la semilla de 32 bytes en base64 (se envuelve en PKCS#8 al importarla). **Tiene que ser el par de la clave pública que verifica la app**: con una clave nueva los códigos se firman bien pero la app los rechaza hasta que actualice su pública. Sin ella, el panel cae al registro `bitly_codes_premium`. |
 | `BITLY_VENTANA_PEDIDO_MIN` | Opcional: minutos para anular una compra recién hecha (por defecto 10 en producción y 1 en local). |
 | `BITLY_SESSION_SECRET` | **Cargada en producción**: secreto para firmar las sesiones de las cuentas del sitio. Si falta (por ejemplo en local), se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN` y el Worker lo avisa en el log. Cambiarlo cierra todas las sesiones. |
 | `BITLY_SMTP_HOST`, `BITLY_SMTP_PORT`, `BITLY_SMTP_USER`, `BITLY_SMTP_PASS` | SMTP para los correos de pedidos. En Gmail: `smtp.gmail.com`, puerto `465` y una **contraseña de aplicación**. |
@@ -384,6 +384,13 @@ PROD_URL=https://<hash>.bitly-site.pages.dev BITLY_ADMIN_EMAIL='<correo>' \
 
 Termina con `PRODUCCIÓN: TODO OK` y código 0, o con la lista de `FALLA` y
 código 1. Conviene correrla después de cada deploy.
+
+**Si el build falla, no despliegues.** El prerender levanta un servidor local y en
+Windows a veces se cae (`ETIMEDOUT`/`ECONNREFUSED` contra `127.0.0.1:puerto`);
+cuando pasa, `vite build` termina pero `scripts/cloudflare-worker.mjs` no corre y
+`dist/client` queda **sin `_worker.js`**: todo el sitio pasa a estáticos y las
+server functions responden 405. Volvé a compilar (`rm -rf dist .output && pnpm
+build`) y confirmá que exista `dist/client/_worker.js` antes de publicar.
 
 Si el punto 2 devuelve **405**, el build volvió a publicar sólo estáticos: falta
 el `_worker.js` (¿se rompió el `build`?).
