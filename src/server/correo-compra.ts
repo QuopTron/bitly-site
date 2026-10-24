@@ -42,7 +42,7 @@ function escaparHtml(valor: string): string {
 }
 
 /** Contenedor de marca: fondo negro, tarjeta plata, mismo en los dos correos. */
-function marco(contenido: string, ancho = 560): string {
+export function marco(contenido: string, ancho = 560): string {
   return `<div style="margin:0;padding:26px 12px;background:#08080a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:${ancho}px;margin:0 auto;border:1px solid #232327;border-radius:22px;background:#0d0d10;">
 ${contenido}
@@ -50,7 +50,7 @@ ${contenido}
 </div>`;
 }
 
-function pie(nota: string): string {
+export function pie(nota: string): string {
   return `    <tr><td style="padding:24px 26px 26px;">
       <div style="height:1px;background:#222226;margin-bottom:14px;"></div>
       <div style="font-size:11px;line-height:1.75;color:#6f6f78;">${nota}<br>Bitly · música sin pérdida</div>

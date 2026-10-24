@@ -14,21 +14,18 @@ type Props = {
   onNavegar: (id: VistaId) => void;
   onComentarios: () => void;
   onFaq: () => void;
-  onAdmin: () => void;
   onCuenta: () => void;
   pwaDisponible?: boolean;
   onInstalarPwa?: () => void;
 };
 
-export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin, onCuenta, pwaDisponible, onInstalarPwa }: Props) {
+export default function Header({ vista, onNavegar, onComentarios, onFaq, onCuenta, pwaDisponible, onInstalarPwa }: Props) {
   const t = useI18n();
   const [lang, setLang] = useLanguage();
   const [theme, setTheme] = useState<Tema>("dark");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [altoMenu, setAltoMenu] = useState<number>();
   const menuRef = useRef<HTMLDivElement>(null);
-  const clicsLogo = useRef(0);
-  const esperaLogo = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enInicio = vista === "inicio";
 
   useEffect(() => {
@@ -95,20 +92,8 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
     onCuenta();
   };
 
-  /** Un clic vuelve al inicio; tres seguidos abren el acceso privado. */
-  const alLogo = () => {
-    clicsLogo.current += 1;
-    if (esperaLogo.current) clearTimeout(esperaLogo.current);
-    if (clicsLogo.current >= 3) {
-      clicsLogo.current = 0;
-      onAdmin();
-      return;
-    }
-    esperaLogo.current = setTimeout(() => {
-      clicsLogo.current = 0;
-    }, 700);
-    irA("inicio");
-  };
+  // El acceso privado ya no vive escondido en el logo: es la página /admin.
+  const alLogo = () => irA("inicio");
 
   return (
     <header className="relative z-40 shrink-0 px-3 pb-2 pt-2 sm:px-4 sm:pt-3">

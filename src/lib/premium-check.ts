@@ -21,6 +21,7 @@
 
 import { createServerFn } from "@tanstack/react-start";
 import type { EstadoCodigo } from "@/lib/demo-cuota";
+import { codigoEmitidoActivo } from "@/server/codigos-emitidos";
 
 /** Mismo repo que usa la app, para que ambos lean la misma fuente. */
 const REGISTRO = "https://api.github.com/repos/QuopTron/bitly_codes_premium/contents/codes.json";
@@ -131,6 +132,12 @@ export async function esCodigoPremiumActivo(codigo: string | null | undefined): 
   const limpio = (codigo ?? "").trim();
   if (limpio.length < 20) return false;
 
+  // Los códigos firmados por el sitio no están en el registro de la app: se
+  // acreditan por la lista de emitidos, que se consulta PRIMERO y sin la caché
+  // del registro. Si se revoca un código, tiene que dejar de servir en el acto
+  // (esa lista se actualiza cuando se libera).
+  if (await codigoEmitidoActivo(limpio).catch(() => false)) return true;
+
   const ahora = Date.now();
   const previo = acreditados.get(limpio);
   if (previo && previo.expira > ahora) return previo.ok;
@@ -185,11 +192,16 @@ export const canjearCodigo = createServerFn({ method: "POST" })
       registro = await leerRegistroCodigos();
     } catch (e) {
       console.error("[Bitly] No se pudo leer el registro de códigos:", e);
+      // Un código firmado acá sigue siendo válido aunque el registro de la app
+      // no responda: la lista de emitidos vive en el repo del sitio.
+      if (await codigoEmitidoActivo(codigo)) return { estado: "ok" };
       return { estado: "desconocido", aviso: "registro" };
     }
 
     const estadoCrudo = registro.get(codigo);
-    if (!estadoCrudo) return { estado: "no_encontrado" };
+    if (!estadoCrudo) {
+      return { estado: (await codigoEmitidoActivo(codigo)) ? "ok" : "no_encontrado" };
+    }
 
     const estado = traducir(estadoCrudo);
     if (estado !== "ok") return { estado };
@@ -232,8 +244,9 @@ export const revalidarPremium = createServerFn({ method: "POST" })
     try {
       const registro = await leerRegistroCodigos();
       const estado = registro.get(codigo);
-      return { estado: estado ? traducir(estado) : "no_encontrado" };
+      if (estado) return { estado: traducir(estado) };
+      return { estado: (await codigoEmitidoActivo(codigo)) ? "ok" : "no_encontrado" };
     } catch {
-      return { estado: "desconocido" };
+      return { estado: (await codigoEmitidoActivo(codigo)) ? "ok" : "desconocido" };
     }
   });

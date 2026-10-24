@@ -19,6 +19,7 @@
  */
 
 import { leerRegistroCodigos } from "@/lib/premium-check";
+import { registrarEmitidos } from "@/server/codigos-emitidos";
 
 /** Prefijo del formato firmado; la app lo usa para decidir el validador. */
 const PREFIJO = "BITLY2.";
@@ -191,6 +192,9 @@ export async function emitirCodigos(
         codigos.push(codigo);
         enUso.add(codigo);
       }
+      // La demo acredita Premium consultando esta lista: un código firmado no
+      // está en el registro de la app y sin este paso sonaría estándar.
+      await registrarEmitidos(codigos, folio);
       return { ok: true, codigos, origen: "firma" };
     }
   } catch (e) {

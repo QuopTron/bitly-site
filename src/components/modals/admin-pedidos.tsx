@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
+import { asignarCodigos } from "@/server/asignaciones";
 import {
   actualizarPedido,
   adminPedidos,
@@ -81,6 +82,47 @@ function FilaPedido({
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [copiado, setCopiado] = useState(false);
+  const [correoAsignar, setCorreoAsignar] = useState("");
+  const [repartiendo, setRepartiendo] = useState(false);
+  const [avisoReparto, setAvisoReparto] = useState<Aviso>(null);
+
+  const repartir = async () => {
+    if (repartiendo || !correoAsignar.trim()) return;
+    setRepartiendo(true);
+    setAvisoReparto(null);
+    try {
+      const r = await asignarCodigos({
+        data: { admin: codigoAdmin, folio: pedido.folio, correos: [correoAsignar.trim()] },
+      });
+      if (!r.ok) {
+        setAvisoReparto({
+          tipo: "error",
+          texto: t(r.motivo === "sin_codigos" ? "cuentaAsignarSinCodigos" : "cuentaAsignarError"),
+        });
+        return;
+      }
+      const asignada = r.asignadas[0];
+      if (!asignada) {
+        setAvisoReparto({ tipo: "error", texto: t("cuentaAsignarError") });
+        return;
+      }
+      setAvisoReparto({
+        tipo: "ok",
+        texto: asignada.enviado
+          ? t("cuentaAsignarListo").replace("{correo}", asignada.correo)
+          : asignada.motivo === "ya_tenia_cuenta"
+            ? t("cuentaAsignarYaTenia").replace("{correo}", asignada.correo)
+            : `${t("cuentaAsignarSinCorreo")} ${t("cuentaAsignarCredenciales")
+                .replace("{usuario}", asignada.usuario)
+                .replace("{clave}", asignada.clave ?? "")}`,
+      });
+      setCorreoAsignar("");
+    } catch {
+      setAvisoReparto({ tipo: "error", texto: t("cuentaAsignarError") });
+    } finally {
+      setRepartiendo(false);
+    }
+  };
 
   const guardar = async () => {
     if (guardando) return;
@@ -296,6 +338,39 @@ function FilaPedido({
             <p className="rounded-xl bg-muted/40 px-3 py-2 text-[10px] text-muted-foreground">
               {t("adminPedidoCodigosVacio")}
             </p>
+          )}
+
+          {(pedido.estado === "pagado" || pedido.estado === "enviado") && pedido.codigos.length > 0 && (
+            <div className="rounded-2xl border border-border bg-background/40 p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("adminPedidoRepartir")}
+              </p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">{t("adminPedidoRepartirAyuda")}</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <input
+                  type="email"
+                  value={correoAsignar}
+                  onChange={(e) => setCorreoAsignar(e.target.value)}
+                  aria-label={t("cuentaAsignarCorreo")}
+                  placeholder="persona@correo.com"
+                  className="min-h-9 min-w-0 flex-1 rounded-xl border border-border bg-background/60 px-2 text-xs text-foreground outline-none focus-visible:border-primary"
+                />
+                <button
+                  type="button"
+                  onClick={() => void repartir()}
+                  disabled={repartiendo || !correoAsignar.trim()}
+                  className="boton-spray min-h-9 shrink-0 gap-1.5 px-3 text-[11px] disabled:opacity-50"
+                >
+                  {repartiendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  {t("cuentaAsignarEnviar")}
+                </button>
+              </div>
+              {avisoReparto && (
+                <p className={`mt-1.5 text-[10px] ${avisoReparto.tipo === "ok" ? "text-primary" : "text-destructive"}`}>
+                  {avisoReparto.texto}
+                </p>
+              )}
+            </div>
           )}
 
           {vista && (

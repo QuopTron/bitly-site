@@ -28,11 +28,16 @@
  */
 
 import { createServerFn } from "@tanstack/react-start";
-import { adminValido } from "@/server/analytics";
+import { adminValido } from "@/server/admin";
 import { correoAdmin, correoConfigurado, enviarCorreo } from "@/server/correo";
 import { borrarArchivo, getArchivo, getJson, putArchivo, putJson } from "@/server/github-store";
 import { obtenerIPCliente } from "@/server/ip";
-import { banearCuenta, cuentaDeToken } from "@/server/cuentas";
+import {
+  asignarPremiumACuenta,
+  banearCuenta,
+  cuentaDeToken,
+  soltarPremiumDePedido,
+} from "@/server/cuentas";
 import { leerRegistroCodigos } from "@/lib/premium-check";
 import { getFaseActual } from "@/lib/pricing";
 import { MAX_CODIGOS, emitirCodigos, firmaConfigurada } from "@/server/codigos";
@@ -829,6 +834,25 @@ export const actualizarPedido = createServerFn({ method: "POST" })
           `pedido ${folio}: ${actualizado.estado}`,
         );
         if (!ok) return { ok: false, motivo: "servidor" };
+
+        // El Premium vive en la CUENTA: al validar, el primer código va al
+        // comprador, así la demo y «Mi cuenta» lo detectan sin pegar nada. Si
+        // el pedido vuelve atrás o se cancela, se suelta (los códigos ya
+        // viajaron por correo, pero dejan de acreditar).
+        if (actualizado.cuentaId) {
+          try {
+            if (
+              (nuevoEstado === "pagado" || nuevoEstado === "enviado") &&
+              actualizado.codigo
+            ) {
+              await asignarPremiumACuenta(actualizado.cuentaId, actualizado.codigo, folio);
+            } else if (nuevoEstado !== "pagado" && nuevoEstado !== "enviado") {
+              await soltarPremiumDePedido(folio);
+            }
+          } catch (e) {
+            console.error("[pedidos] no se pudo mover el premium:", e instanceof Error ? e.message : e);
+          }
+        }
 
         // Aviso automático al comprador: antes había que acordarse de apretar
         // «Enviar por correo». Un fallo de correo no revierte el guardado, sólo

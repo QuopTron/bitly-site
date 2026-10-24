@@ -118,8 +118,9 @@ function escribirCache(llave: string, valor: unknown) {
   cache.set(llave, { valor, expira: Date.now() + TTL_LECTURA_MS });
 }
 
-export function olvidar(ruta: string) {
-  cache.delete(ruta);
+/** Tira el valor cacheado de un archivo (la clave lleva el repo por delante). */
+export function olvidar(clave: RepoClave, ruta: string) {
+  cache.delete(`${repoDe(clave)}/${ruta}`);
 }
 
 /** Serializa escrituras al mismo archivo dentro de este isolado. */

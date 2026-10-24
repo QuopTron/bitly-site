@@ -108,7 +108,8 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_CODES_TOKEN` | **Obligatoria** para el canje de códigos Premium: token de GitHub con lectura al repo privado `QuopTron/bitly_codes_premium`. Sin ella el canje responde "no pudimos verificar". |
 | `BITLY_DATA_TOKEN` | **Obligatoria** para la base de datos del sitio: token de GitHub con `contents: write` sobre `QuopTron/bitly-data` (opiniones, vistas y contadores de descargas). Si falta, se usa `BITLY_CODES_TOKEN` como respaldo. |
 | `BITLY_DATA_REPO`, `BITLY_CHATS_REPO` | Opcionales: cambian el repo de datos o el de chats (`QuopTron/bitly-data` y `QuopTron/bitly-chats` por defecto). |
-| `BITLY_ADMIN_CODE` | **Obligatoria**: código del panel admin (tres clics en el logo). No hay valor por defecto: sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CODE». Usá 16+ caracteres aleatorios. |
+| `BITLY_ADMIN_CLAVE` | **Obligatoria**: clave del panel del dueño (`/admin`). El panel pide correo + clave y devuelve un token firmado que vence a los 7 días. Sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CLAVE». Usá 16+ caracteres aleatorios. |
+| `BITLY_ADMIN_EMAIL`, `BITLY_ADMIN_SECRET` | Correo del dueño (por defecto `floxdev2024@gmail.com`) y, opcional, secreto propio para firmar el token del panel. Si falta el secreto se deriva de `BITLY_SESSION_SECRET`/el token de GitHub. |
 | `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
 | `BITLY_CODIGOS_CLAVE` | **Opcional pero clave para el flujo nuevo**: clave privada Ed25519 (PEM PKCS#8 o semilla de 32 bytes en base64) con la que el sitio firma los códigos Premium que emite al validar un pedido. Es la misma de `scripts/keys/private_key.pem` en el repo de la app: sin ella no se pueden fabricar códigos que la app acepte, y el panel cae al registro `bitly_codes_premium`. |
 | `BITLY_VENTANA_PEDIDO_MIN` | Opcional: minutos para anular una compra recién hecha (por defecto 10 en producción y 1 en local). |
@@ -122,6 +123,11 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
 `BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).
+
+**Cuentas del sitio**: con el correo configurado, el alta pide un código de 6
+dígitos y las invitaciones mandan usuario + contraseña por defecto a la persona.
+Sin correo configurado (por ejemplo en local) el alta se confirma sola, para no
+trabar las pruebas: en producción conviene tener SMTP o Resend cargado.
 
 ### Correo de pedidos (SMTP Gmail)
 
@@ -142,7 +148,8 @@ npx wrangler pages secret put BITLY_SMTP_USER --project-name bitly-site
 npx wrangler pages secret put BITLY_SMTP_PASS --project-name bitly-site
 npx wrangler pages secret put BITLY_EMAIL_FROM --project-name bitly-site
 npx wrangler pages secret put BITLY_ADMIN_EMAIL --project-name bitly-site
-npx wrangler pages secret put BITLY_ADMIN_CODE --project-name bitly-site
+npx wrangler pages secret put BITLY_ADMIN_CLAVE --project-name bitly-site
+npx wrangler pages secret put BITLY_ADMIN_SECRET --project-name bitly-site
 ```
 
 Después de cargarlos hay que **redesplegar** (push a `master`) para que el
@@ -157,7 +164,7 @@ guardan igual.
   `data/comprobantes/`; los pedidos en `data/pedidos.json`.
 - Las cuentas del sitio viven en `data/cuentas.json` (contraseñas con PBKDF2,
   nunca en claro) y las sesiones se firman con `BITLY_SESSION_SECRET`. El botón
-  **Sincronizar códigos** del panel admin espeja en `data/codigos.json` los
+  **Sincronizar códigos** de la pestaña Pedidos espeja en `data/codigos.json` los
   conteos del registro de `bitly_codes_premium` (activos/usados/cancelados),
   nunca la lista de códigos: duplicar códigos válidos en otro repo sólo agranda
   el daño de una filtración.
@@ -178,9 +185,11 @@ Lo que el sitio hace solo:
   y los archivos ocultos responden 404 desde el propio worker.
 - **Datos cifrados en reposo** con `BITLY_DATA_SECRET` (AES-256-GCM): pedidos,
   cuentas, comprobantes, contadores.
-- **Panel privado cerrado por defecto**: `BITLY_ADMIN_CODE` es obligatoria y la
-  comparación es en tiempo constante, con 10 fallos por IP cada 10 minutos.
-  No hay código por defecto escrito en el repo.
+- **Panel del dueño cerrado por defecto**: vive en `/admin`, pide correo y clave
+  (`BITLY_ADMIN_CLAVE`) y entrega un token firmado con vencimiento en lugar de
+  la clave. La comparación es en tiempo constante, con 5 fallos por IP cada 10
+  minutos. No hay clave por defecto escrita en el repo y ya no existe el acceso
+  por tres clics en el logo. Cambiar la clave invalida los tokens emitidos.
 - **Contraseñas** con PBKDF2-SHA256 (100.000 iteraciones, el tope del runtime) y
   sal por cuenta; el login tarda lo mismo exista o no el correo.
 - **Cupos por IP y globales** en pedidos, opiniones, chats, cuentas, canje de
@@ -207,7 +216,7 @@ código):
    token y la firma sean claves distintas. En local, si falta, se sigue
    derivando del token y el Worker lo avisa en el log.
 4. **Retención de comprobantes**: los archivos de `data/comprobantes/` no se
-   borran solos. Desde la pestaña **Pedidos** del panel privado, **Eliminar
+   borran solos. Desde `/admin` → **Pedidos**, **Eliminar
    pedido** borra la fila y su comprobante del repo (con confirmación; no se
    puede deshacer). Conviene purgar los pedidos cerrados de vez en cuando: el
    repo es privado y está cifrado, pero un comprobante no necesita vivir para

@@ -3,9 +3,9 @@
  * privado. No se guarda IP ni nada que identifique a una persona: sólo un id
  * aleatorio por navegador, tiempo acumulado y secciones visitadas.
  *
- * El panel que las muestra está detrás de un código y la verificación ocurre
- * acá, en el servidor: el navegador nunca recibe los datos si el código no es
- * correcto.
+ * El panel que las muestra está detrás del acceso de `/admin` y la verificación
+ * ocurre acá, en el servidor: el navegador nunca recibe los datos si el token no
+ * es válido.
  */
 
 import { createServerFn } from "@tanstack/react-start";
@@ -47,64 +47,9 @@ export type Estadisticas = {
   ultimas: SesionPublica[];
 };
 
-export function codigoAdminValido(codigo: unknown): boolean {
-  // Sin valor por defecto A PROPÓSITO: este repositorio es público, así que un
-  // código escrito acá es un código que todo el mundo conoce. Si la variable
-  // falta, el panel queda cerrado (fail closed) y el error queda en el log del
-  // Worker; nunca se abre con una contraseña compartida.
-  const esperado = (process.env.BITLY_ADMIN_CODE ?? "").trim();
-  if (!esperado) {
-    console.error("[admin] falta BITLY_ADMIN_CODE: el panel privado queda deshabilitado");
-    return false;
-  }
-  const dado = String(codigo ?? "").trim();
-  if (dado.length !== esperado.length) return false;
-  let diferencia = 0;
-  for (let i = 0; i < esperado.length; i++) diferencia |= esperado.charCodeAt(i) ^ dado.charCodeAt(i);
-  return diferencia === 0;
-}
-
-/**
- * Verificación del código admin con contador de FALLOS por IP.
- *
- * Comparar el código en tiempo constante evita filtrar cuántos caracteres
- * acertó, pero no frena a quien prueba miles de combinaciones. Acá se cuentan
- * sólo los intentos equivocados (así el dueño puede abrir el panel las veces que
- * quiera) y se corta tras `MAX_FALLOS` en la ventana.
- *
- * El contador vive en memoria del isolate: no es una barrera global, pero sí
- * convierte una ráfaga de fuerza bruta en unos pocos intentos útiles. La defensa
- * de verdad contra fuerza bruta distribuida es una regla de rate limiting en
- * Cloudflare, delante del sitio.
- */
-const FALLOS_ADMIN = new Map<string, { n: number; t: number }>();
-const VENTANA_ADMIN_MS = 10 * 60 * 1000;
-const MAX_FALLOS_ADMIN = 10;
-
-export async function adminValido(codigo: unknown): Promise<boolean> {
-  let ip = "anonima";
-  try {
-    const { obtenerIPCliente } = await import("@/server/ip");
-    ip = await obtenerIPCliente();
-  } catch {
-    /* fuera de una petición HTTP */
-  }
-
-  const ahora = Date.now();
-  const previo = FALLOS_ADMIN.get(ip);
-  const vigente = previo && ahora - previo.t <= VENTANA_ADMIN_MS ? previo : null;
-  if (vigente && vigente.n >= MAX_FALLOS_ADMIN) return false;
-
-  if (codigoAdminValido(codigo)) {
-    FALLOS_ADMIN.delete(ip);
-    return true;
-  }
-
-  if (vigente) vigente.n++;
-  else FALLOS_ADMIN.set(ip, { n: 1, t: ahora });
-  if (FALLOS_ADMIN.size > 2000) FALLOS_ADMIN.clear();
-  return false;
-}
+// El panel se abre con una cuenta propia y un token firmado: la validación vive
+// en `@/server/admin`.
+import { adminValido } from "./admin";
 
 function idValido(id: unknown): string | null {
   const texto = String(id ?? "").trim();
@@ -236,10 +181,6 @@ export const latidoSesion = createServerFn({ method: "POST" })
       return false;
     }
   });
-
-export const verificarCodigo = createServerFn({ method: "POST" })
-  .validator((d: { codigo?: unknown }) => d)
-  .handler(async ({ data }): Promise<boolean> => adminValido(data?.codigo));
 
 export const leerEstadisticas = createServerFn({ method: "POST" })
   .validator((d: { codigo?: unknown }) => d)

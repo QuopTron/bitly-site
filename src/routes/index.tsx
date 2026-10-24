@@ -28,8 +28,6 @@ import { INFO_POR_DEFECTO, leerDatosSitio, registrarDescarga, type InfoApp, type
 const ReleaseModal = lazy(() => import("@/components/modals/release-modal"));
 const FaqModal = lazy(() => import("@/components/modals/faq-modal"));
 const ComentariosModal = lazy(() => import("@/components/modals/comentarios-modal"));
-const CodigoModal = lazy(() => import("@/components/modals/codigo-modal"));
-const AdminModal = lazy(() => import("@/components/modals/admin-modal"));
 const CuentaModal = lazy(() => import("@/components/modals/cuenta-modal"));
 
 type Datos = { info: InfoApp; stats: StatsSitio; vistas: number; release: ReleaseIndex | null };
@@ -73,9 +71,7 @@ export default function Index() {
   const [showComentarios, setShowComentarios] = useState(false);
   const [valoracion, setValoracion] = useState({ promedio: 0, opiniones: 0 });
   const [showFaq, setShowFaq] = useState(false);
-  const [showCodigo, setShowCodigo] = useState(false);
   const [showCuenta, setShowCuenta] = useState(false);
-  const [adminCodigo, setAdminCodigo] = useState("");
   const descargasConfirmadas = useRef(new Set<string>());
   const [vista, setVista] = useState<VistaId>("inicio");
   const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
@@ -260,7 +256,6 @@ export default function Index() {
         onNavegar={cambiarVista}
         onComentarios={abrirComentarios}
         onFaq={() => setShowFaq(true)}
-        onAdmin={() => setShowCodigo(true)}
         onCuenta={() => setShowCuenta(true)}
         pwaDisponible={pwaDisponible}
         onInstalarPwa={() => void instalarAplicacion()}
@@ -292,24 +287,8 @@ export default function Index() {
       <Suspense fallback={null}>
         {showFaq && <FaqModal open onClose={() => setShowFaq(false)} />}
         {showComentarios && <ComentariosModal open onClose={() => setShowComentarios(false)} />}
-        {showCodigo && (
-          <CodigoModal
-            open
-            onClose={() => setShowCodigo(false)}
-            onOk={(codigo) => {
-              setAdminCodigo(codigo);
-              setShowCodigo(false);
-            }}
-          />
-        )}
         {showCuenta && <CuentaModal open onClose={() => setShowCuenta(false)} />}
       </Suspense>
-
-      {adminCodigo && (
-        <Suspense fallback={null}>
-          <AdminModal open onClose={() => setAdminCodigo("")} codigo={adminCodigo} />
-        </Suspense>
-      )}
 
       <Suspense fallback={null}>
         {showRelease && (
