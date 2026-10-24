@@ -119,7 +119,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
           <button
             type="button"
             onClick={alLogo}
-            aria-label="Bitly - inicio"
+            aria-label={`Bitly, ${t("poweredBy")} FloX — ${t("navInicio")}`}
             className="group flex min-w-0 shrink items-center gap-2 sm:gap-2.5"
           >
             <span
@@ -146,12 +146,11 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
               >
                 Bitly
               </span>
-              {/* Marca decorativa: queda fuera del árbol accesible para que el
-                  nombre del botón («Bitly - inicio») coincida con el texto
-                  visible. Si se anuncia, el lector diría «Bitly powered by FloX»
-                  y el enlace de inicio perdía su propósito. */}
+              {/* La marca visible («Bitly powered by FloX») va también en el
+                  aria-label del botón: si no, el nombre accesible no coincide
+                  con el texto que se ve y los lectores de pantalla y axe lo
+                  marcan como inconsistencia. */}
               <span
-                aria-hidden
                 className={`overflow-hidden whitespace-nowrap text-[9px] uppercase tracking-[0.1em] text-muted-foreground transition-all duration-300 sm:text-xs sm:tracking-[0.22em] ${
                   enInicio ? "mt-0.5 max-h-4 translate-y-0 opacity-100" : "mt-0 max-h-0 -translate-y-1 opacity-0"
                 }`}
