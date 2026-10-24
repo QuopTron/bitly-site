@@ -13,12 +13,17 @@
  * lectura (el sitio nunca marca códigos), y "ya fue usado" sólo se puede
  * responder si el servidor efectivamente descargó el registro.
  *
+ * Con `CODIGO_ACTIVO` (opcional) además se prueba el camino feliz: el canje
+ * activa Premium en el navegador y la demo deja de ofrecer el código.
+ *
  *   DEMO_URL=https://bitly-site.pages.dev \
  *   CODIGO_USADO=<un código con estado "usado"> \
+ *   CODIGO_ACTIVO=<uno con estado "activo"> \
  *   node scripts/probar-premium.mjs
  *
- * El código se pasa por variable de entorno para no embeber credenciales en el
- * repo. Se puede sacar de `scripts/.cache/codes.json` si está descargado.
+ * Los códigos se pasan por variable de entorno para no embeber credenciales en
+ * el repo. Se pueden sacar de `scripts/.cache/codes.json` (descargado a mano,
+ * está en .gitignore) sin imprimirlos en la salida.
  */
 
 import path from "node:path";
@@ -30,6 +35,8 @@ const BASE = process.env.DEMO_URL ?? "http://localhost:3000";
 const PUERTO = Number(process.env.CDP_PORT ?? 9346);
 const PERFIL = path.join(raiz, ".capturas-perfil-premium");
 const CODIGO = process.env.CODIGO_USADO;
+/** Opcional: un código con estado `activo`, para probar el camino feliz. */
+const CODIGO_ACTIVO = process.env.CODIGO_ACTIVO;
 
 let ok = 0;
 let fallos = 0;
@@ -108,27 +115,64 @@ if (!CODIGO) {
 const { browser, cerrar } = await abrirChrome({ puerto: PUERTO, perfil: PERFIL });
 const ses = await nuevaSesion(browser, { w: 1100, h: 1000, dpr: 2 });
 
+// El tutorial de la cabecera abre solo la primera vez y su capa tapa los
+// controles de la demo: en la prueba se marca como visto antes de navegar.
+await ses.ev("Page.addScriptToEvaluateOnNewDocument", {
+  source: "try{localStorage.setItem('bitly_pistas_cabecera','1')}catch{}",
+});
+
 try {
   console.log(`${BASE} · canje de código Premium\n`);
   await ses.ev("Page.navigate", { url: `${BASE}/#demo` });
   await esperar(ses, `document.querySelector("#demo form")`, { nombre: "buscador montado" });
-  await dormir(600);
+  await esperar(
+    ses,
+    `document.querySelector('[data-vista="demo"]')?.getAttribute('aria-hidden') === 'false'`,
+    { nombre: "la pestaña de la demo activa" },
+  );
+  // Si el tutorial llegó a abrirse (perfil con el aviso ya consumido a medias),
+  // se cierra con Escape antes de tocar nada.
+  await ses.ev("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await ses.ev("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  // El buscador viene del HTML prerenderizado: existe ANTES de que React
+  // hidrate, y un clic real en ese momento no abre nada porque el botón todavía
+  // no tiene el onClick. Se espera a que el botón tenga el fiber de React.
+  await esperar(
+    ses,
+    `[...document.querySelectorAll("#demo button")].some((b) => /código premium|premium code/i.test(b.innerText) && Object.keys(b).some((k) => k.startsWith("__react")))`,
+    { nombre: "la demo hidratada" },
+  );
+  await dormir(400);
 
   // 1. Abrir el modal de canje.
-  const abierto = await marcar(
-    ses,
-    `[...document.querySelectorAll("#demo button")].find((b) => /código premium|premium code/i.test(b.innerText))`,
-    "canjear",
-  );
+  // El botón se re-renderiza mientras la cuota se hidrata, así que el clic real
+  // se reintenta: el chunk del modal es perezoso y un clic sobre el nodo viejo
+  // no dispara nada.
+  const HAY_INPUT = `[...document.querySelectorAll("input")].some((i) => /pegá tu código|paste your code/i.test(i.getAttribute("aria-label") || ""))`;
+  let abierto = false;
+  for (let intento = 1; intento <= 3 && !abierto; intento++) {
+    abierto = await marcar(
+      ses,
+      `[...document.querySelectorAll("#demo button")].find((b) => /código premium|premium code/i.test(b.innerText))`,
+      "canjear",
+    );
+    if (!abierto) break;
+    await clic(ses, `[data-harness="canjear"]`);
+    // El modal va en su propio chunk (lazy): tarda en montarse.
+    try {
+      await esperar(ses, HAY_INPUT, { nombre: "input del modal", tiempo: 10_000 });
+    } catch (e) {
+      if (intento === 3) throw e;
+      await dormir(500);
+    }
+  }
   check("está el botón para canjear", abierto === true);
-  await clic(ses, `[data-harness="canjear"]`);
-
+  await esperar(ses, HAY_INPUT, { nombre: "input del modal" });
   const hayInput = await marcar(
     ses,
     `[...document.querySelectorAll("input")].find((i) => /pegá tu código|paste your code/i.test(i.getAttribute("aria-label") || ""))`,
     "codigo",
   );
-  await esperar(ses, `document.querySelector('[data-harness="codigo"]')`, { nombre: "input del modal" });
   check("se abrió el modal con el input", hayInput === true);
 
   // 2. Pegar el código y verificar.
@@ -173,6 +217,38 @@ try {
     respuesta?.estado,
   );
   check("no aparece el aviso de registro caído", (respuesta?.notas ?? []).length === 0, respuesta?.notas?.join(" | "));
+
+  // 4. Un código usado no puede acreditar Premium: el servidor lo dice y el
+  //    cliente no guarda nada (el canje es la única fuente del estado Premium).
+  check(
+    "un código usado no guarda Premium en el navegador",
+    (await js(ses, `localStorage.getItem("bitly_demo_premium")`)) === null,
+  );
+
+  // 5. Opcional: el camino feliz, con un código ACTIVO (el sitio no lo marca).
+  if (CODIGO_ACTIVO) {
+    await escribir(ses, `[data-harness="codigo"]`, CODIGO_ACTIVO);
+    await clic(ses, `[data-harness="verificar"]`);
+    await esperar(
+      ses,
+      `localStorage.getItem("bitly_demo_premium") === ${JSON.stringify(CODIGO_ACTIVO)}`,
+      { nombre: "el canje se guardó", tiempo: 30000 },
+    );
+    check("un código activo activa Premium y se guarda", true);
+    // Tras el canje el modal ofrece crear cuenta (o se cierra con cuenta).
+    await ses.ev("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+    await ses.ev("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+    await dormir(400);
+    check(
+      "la demo deja de ofrecer el canje (ya es Premium)",
+      !(await js(
+        ses,
+        `[...document.querySelectorAll("#demo button")].some((b) => /tengo un código premium|have a premium code/i.test(b.innerText))`,
+      )),
+    );
+    // Limpieza: no dejar un código válido guardado en el perfil de la prueba.
+    await js(ses, `localStorage.removeItem("bitly_demo_premium")`);
+  }
 
   console.log(`\n${ok}/${ok + fallos} aserciones OK`);
   if (fallos > 0) process.exitCode = 1;

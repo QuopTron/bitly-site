@@ -224,10 +224,18 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
 DEMO_URL=https://bitly-site.pages.dev node scripts/verificar-demo.mjs
 
 # 4. El canje Premium contra el registro real. Necesita un código con estado
-#    "usado" (sólo lectura: el sitio nunca marca códigos).
+#    "usado" y, para probar el camino feliz, uno con estado "activo" (sólo
+#    lectura: el sitio nunca marca códigos, así que el activo sigue activo).
+#    Se sacan de scripts/.cache/codes.json, que está en .gitignore, y se pasan
+#    por entorno: nunca se imprimen ni se guardan en el repo.
 DEMO_URL=https://bitly-site.pages.dev CODIGO_USADO=<código> \
-  node scripts/probar-premium.mjs
+  CODIGO_ACTIVO=<código> node scripts/probar-premium.mjs
 ```
+
+El punto 4 son 9 aserciones: las server functions responden 200 (no 500), el
+estado que devuelve el servidor es el real del registro, un código usado **no**
+deja Premium guardado y un código activo sí lo activa (después se limpia del
+perfil de prueba).
 
 Si el punto 2 devuelve **405**, el build volvió a publicar sólo estáticos: falta
 el `_worker.js` (¿se rompió el `build`?).
