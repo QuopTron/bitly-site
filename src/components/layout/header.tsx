@@ -116,10 +116,13 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
         {/* Alto fijo por vista: el logo cambia de tamaño entre inicio y el resto,
             y sin este mínimo la cabecera encogía y corría todo el contenido. */}
         <div className="flex min-h-11 items-center gap-2 sm:min-h-12 sm:gap-2.5">
+          {/* El nombre accesible tiene que CONTENER el texto visible tal cual
+              («Bitly Powered by FloX»): con una coma en el medio, axe lo sigue
+              marcando como inconsistencia. */}
           <button
             type="button"
             onClick={alLogo}
-            aria-label={`Bitly, ${t("poweredBy")} FloX — ${t("navInicio")}`}
+            aria-label={`Bitly ${t("poweredBy")} FloX — ${t("navInicio")}`}
             className="group flex min-w-0 shrink items-center gap-2 sm:gap-2.5"
           >
             <span
