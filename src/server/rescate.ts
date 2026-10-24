@@ -36,15 +36,14 @@
  *      "ocupado" no es "no tengo esa pista".
  *   3. YOUTUBE. Si el catálogo o el relay no consiguen el FLAC, se le pide el
  *      audio COMPLETO a un backend de yt-dlp, elegido por env:
- *        · `YT_DLP_BACKEND_URL`: el backend de yt-dlp
- *          (`scripts/backend-yt-dlp.mjs`, el mismo que publica `render.yaml`).
- *          Va PRIMERO para el audio: resuelve el material de nicho en ~7 s;
- *        · `YATTEE_URL` (+ `YATTEE_AUTH` "user:pass"): yattee-server, el
- *          backend del servidor de producción: busca (`/api/v1/search`),
- *          extrae con `player-client=web_embedded` y devuelve un stream
- *          FIRMADO de su relay (`/proxy/relay`, con Range y vencimiento).
- *          Queda como respaldo del canal de audio (y como único canal cuando
- *          no hay backend propio).
+ *        · `YT_DLP_BACKEND_URL`: el backend local de desarrollo
+ *          (`scripts/backend-yt-dlp.mjs`, `pnpm yt-dlp`). Va PRIMERO para el
+ *          audio cuando está configurado: en la misma máquina resuelve en ~7 s;
+ *        · `YATTEE_URL` (+ `YATTEE_AUTH` "user:pass"): yattee-server, el canal
+ *          que usa PRODUCCIÓN (medido: búsqueda 3 s, extracción 2 s con caché y
+ *          ~25 s la primera vez, relay con Range y vencimiento). Busca
+ *          (`/api/v1/search`), extrae con `player-client=web_embedded` y
+ *          devuelve un stream FIRMADO de su relay (`/proxy/relay`).
  *      Ambos proxyan el stream de googlevideo —el navegador nunca ve ese
  *      dominio, y el backend elude el binding de IP—. Sin backend configurado
  *      (o si falla), la pista queda SIN audio y la interfaz lo avisa: nunca se
@@ -961,11 +960,11 @@ async function rescatarEnBackendPropio(
 }
 
 /**
- * Pide el audio al canal de YouTube. El backend propio va PRIMERO cuando está
- * configurado: es el que resuelve bien el material de nicho y tarda ~7 s, contra
- * los ~30 s que tarda yattee en rendirse con esos mismos videos (su extractor
- * no pasa el reto de YouTube y devuelve 0 formatos). yattee queda como
- * respaldo, que es justo lo que necesita un backend propio caído.
+ * Pide el audio al canal de YouTube. El backend local va PRIMERO cuando está
+ * configurado (desarrollo: `pnpm yt-dlp` resuelve en ~7 s en la misma máquina);
+ * en producción no hay backend propio publicado y el canal es yattee, que
+ * resuelve el material de nicho en ~25 s la primera vez y ~2 s con la caché de
+ * su extractor.
  */
 async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
   const cfg = configYouTube();

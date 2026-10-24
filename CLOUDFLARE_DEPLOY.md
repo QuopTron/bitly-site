@@ -115,7 +115,8 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_EMAIL_FROM`, `BITLY_ADMIN_EMAIL` | Remitente y destinatario de avisos (`floxdev2024@gmail.com`). |
 | `RESEND_API_KEY` | Alternativa a SMTP: API key de Resend. |
 | `BITLY_EMAIL_WEBHOOK` | Opcional: URL que recibe los correos por HTTP. |
-| `YATTEE_URL`, `YATTEE_AUTH`, `YT_DLP_BACKEND_URL` | Rescate de búsqueda en YouTube de nicho. Sin ellas la demo funciona, pero ese respaldo no. |
+| `YATTEE_URL`, `YATTEE_AUTH` | Canal de YouTube de la demo (**producción**): yattee-server con yt-dlp y auth básica "usuario:contraseña". Sin ellas la demo funciona, pero el folklore de nicho queda sin audio. Ver 5.2. |
+| `YT_DLP_BACKEND_URL`, `YT_DLP_TOKEN` | Sólo desarrollo: backend local `pnpm yt-dlp`. No hay imagen publicada y no se cargan en Pages. |
 
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
 `BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).
@@ -232,75 +233,64 @@ peticiones por día, 10 ms de CPU por petición). Lo que lo hace entrar cómodo:
   los catálogos; el canal de YouTube sólo hace falta para folklore de nicho y
   re-subidos.
 
-## 5.2 Canal de YouTube en un host free (que se apaga solo)
+## 5.2 Canal de YouTube (Yattee)
 
-El canal de YouTube puede ser **Yattee** (lo que usa producción hoy: `YATTEE_URL`
-+ `YATTEE_AUTH`) o el **backend propio de yt-dlp** (`YT_DLP_BACKEND_URL`). Los dos
-pueden vivir en un plan gratuito de Render/Fly/Koyeb, que apaga la instancia por
-inactividad: la primera petición después del apagado tarda en arrancar y, con el
-timeout de búsqueda, se perdía (el visitante veía «sin resultados»).
+El folklore de nicho y lo re-subido no está en los catálogos: para eso la demo
+pide audio a **yattee-server**, un servidor propio con yt-dlp que corre en Render
+free (`YATTEE_URL` + `YATTEE_AUTH` con formato "usuario:contraseña" para su auth
+básica). Es el canal de producción; sin esas dos variables la demo sigue andando
+con los catálogos y esas pistas quedan sin audio.
 
-Lo que hace el sitio, para cualquiera de los dos:
+Medido contra el servicio real (octubre 2026):
+
+| Paso | Tiempo |
+| --- | --- |
+| `/health` (despierto) | 0,8 s |
+| `/api/v1/search` | 3 s |
+| `/api/v1/videos/:id` con el extractor en frío | ~25 s |
+| el mismo video con la caché del extractor | ~2 s |
+| el relay (`/proxy/relay` con `Range`) | 206, 0,6 s |
+
+Con eso, el primer tema de nicho tarda ~25 s en sonar, y la demo **precalienta
+el audio del primer resultado** mientras el visitante mira la lista: ese trabajo
+se paga antes del clic. Un enlace del relay vence a las 6 h, así que no se guarda
+más de una hora.
+
+Lo que hace el sitio para que un host free no se note:
 
 - **Despertador al abrir la demo.** El reproductor llama a `demoDespertar` al
-  montar; el servidor despierta el canal configurado con hasta 40 s de
-  paciencia: a Yattee le pega `GET /` (cualquier respuesta HTTP —200, 401, 404—
-  significa que el proceso está arriba) y al backend propio `GET /salud`. El
-  arranque se paga mientras el visitante busca, no cuando toca *play*, y la
-  respuesta no se espera en el cliente. Queda marcado como despierto 10 minutos
-  (por isolate), así que no se repite el ping canción por canción.
-- **Cupo del despertador**: 5 pings por IP cada 10 minutos. `/salud` es barato,
-  pero un endpoint sin freno es una forma de martillar el host.- **Búsqueda tolerante**: antes de `/buscar` (o del search de Yattee) se le dan
-  hasta 6 s al arranque; si aun así no contesta, la demo sigue con los catálogos
-  y no se bloquea.
+  montar y el servidor le pega `GET /` a Yattee con hasta 40 s de paciencia:
+  cualquier respuesta HTTP (200, 401, 404) significa que el proceso está arriba.
+  El arranque se paga mientras el visitante escribe, no cuando toca *play*.
+  Queda marcado como despierto 10 minutos por isolate.
+- **Cupo del despertador**: 5 pings por IP cada 10 minutos. El endpoint es
+  barato, pero un ping sin freno es una forma de martillar el host.
+- **Búsqueda tolerante**: antes del search se le dan hasta 6 s al arranque; si no
+  contesta, la demo sigue con los catálogos y no se bloquea.
 - **Audio con más margen**: el pedido de audio espera el arranque completo (40 s)
-  y después tiene sus 30 s de resolución. Es el momento en que el visitante ya
-  eligió la canción y vale más que suene que responder rápido con «sin audio».
+  y después tiene sus 30 s de resolución.
 
-Para conectarlo, cargá en Pages:
+Para comprobarlo de punta a punta:
 
 ```bash
-npx wrangler pages secret put YT_DLP_BACKEND_URL --project-name bitly-site  # https://mi-backend.onrender.com
-npx wrangler pages secret put YT_DLP_TOKEN        --project-name bitly-site  # el mismo del backend
+YATTEE_URL=https://yattee-server-2j61.onrender.com \
+YATTEE_AUTH='admin:<la-contraseña>' \
+  node scripts/verificar-yattee.mjs "Los Thuthanaka"
 ```
 
-`/salud` queda abierto (es el ping de arranque) y `/buscar` y `/resolver` exigen
-`Authorization: Bearer $YT_DLP_TOKEN`: un backend con URL pública no puede quedar
-de proxy abierto. Sin `YT_DLP_BACKEND_URL`, la demo funciona igual con los
-catálogos y el canal de YouTube simplemente no existe.
+Son 10 comprobaciones: salud, ajustes del servidor (PO token, proxy de salida,
+timeout de yt-dlp), búsqueda, formatos de audio del extractor y bytes reales del
+relay con `Range`. `ACTIVAR_POT=1` enciende el proveedor de PO token en caliente
+si algún día YouTube aprieta (hoy está apagado y el extractor funciona igual).
 
-## 5.3 Publicar el backend de yt-dlp (Render free)
+### Backend propio, sólo para desarrollo
 
-El backend es `scripts/backend-yt-dlp.mjs`: un proceso con `yt-dlp` que busca en
-YouTube, resuelve la URL de audio y la streamea por su propio proxy (el navegador
-nunca habla con googlevideo). No escribe en disco, así que entra en un free sin
-disco persistente.
-
-1. **Imagen**: ya está `Dockerfile.backend` (Node 22 + `yt-dlp` + `ffmpeg`,
-   escucha en `0.0.0.0:$PORT`).
-2. **Servicio**: Render → **New → Blueprint** → elegí este repo. Toma
-   `render.yaml`: plan free, Docker, health check en `/salud`.
-3. **Secreto**: cargá `YT_DLP_TOKEN` con un valor largo y aleatorio
-   (`node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`).
-4. **Conectar el sitio**:
-   ```bash
-   npx wrangler pages secret put YT_DLP_BACKEND_URL --project-name bitly-site  # https://bitly-yt-dlp.onrender.com
-   npx wrangler pages secret put YT_DLP_TOKEN        --project-name bitly-site  # el MISMO valor
-   ```
-5. **Comprobar** el backend de verdad (salud, 401 sin token, búsqueda,
-   resolución y bytes de audio):
-   ```bash
-   BACKEND_URL=https://bitly-yt-dlp.onrender.com YT_DLP_TOKEN=<el token> \
-     node scripts/verificar-backend.mjs
-   ```
-   En una máquina normal da 11/11. Contra Render free mirá el primer número: si
-   `/salud` tarda 30-50 s, es el arranque en frío y es exactamente lo que el
-   despertador del sitio tapa (sección 5.2).
-
-Qué esperar en el plan free: ~15 minutos de inactividad y la instancia se apaga;
-el primer visitante que abra la demo la despierta, el arranque se paga mientras
-busca y el audio espera lo que haga falta. Sin backend, la demo funciona igual
-con los catálogos; el canal de YouTube es sólo para folklore y re-subidos.
+`scripts/backend-yt-dlp.mjs` (`pnpm yt-dlp`) sigue disponible para probar el
+canal de YouTube sin depender de Yattee: levanta un proceso con `yt-dlp` en
+`http://127.0.0.1:8787` y el sitio lo usa si `YT_DLP_BACKEND_URL` apunta ahí (y
+`YT_DLP_TOKEN` coincide). **No hay imagen publicada**: se quitaron
+`Dockerfile.backend` y el blueprint de Render porque el canal de producción es
+Yattee y no hace falta un segundo servicio.
 
 ## 6. Comprobar que quedó bien
 
