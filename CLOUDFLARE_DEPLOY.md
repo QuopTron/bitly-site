@@ -110,7 +110,7 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_DATA_REPO`, `BITLY_CHATS_REPO` | Opcionales: cambian el repo de datos o el de chats (`QuopTron/bitly-data` y `QuopTron/bitly-chats` por defecto). |
 | `BITLY_ADMIN_CODE` | **Obligatoria**: código del panel admin (tres clics en el logo). No hay valor por defecto: sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CODE». Usá 16+ caracteres aleatorios. |
 | `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
-| `BITLY_SESSION_SECRET` | Opcional: secreto para firmar las sesiones de las cuentas del sitio. Si falta, se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN`. Cambiarlo cierra todas las sesiones. |
+| `BITLY_SESSION_SECRET` | **Cargada en producción**: secreto para firmar las sesiones de las cuentas del sitio. Si falta (por ejemplo en local), se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN` y el Worker lo avisa en el log. Cambiarlo cierra todas las sesiones. |
 | `BITLY_SMTP_HOST`, `BITLY_SMTP_PORT`, `BITLY_SMTP_USER`, `BITLY_SMTP_PASS` | SMTP para los correos de pedidos. En Gmail: `smtp.gmail.com`, puerto `465` y una **contraseña de aplicación**. |
 | `BITLY_EMAIL_FROM`, `BITLY_ADMIN_EMAIL` | Remitente y destinatario de avisos (`floxdev2024@gmail.com`). |
 | `RESEND_API_KEY` | Alternativa a SMTP: API key de Resend. |
@@ -198,9 +198,11 @@ código):
    token *fine-grained* con `contents: write` sólo sobre `bitly-data` y
    `bitly-chats`, cargalo como `BITLY_DATA_TOKEN` y dejá el de códigos con
    lectura de `bitly_codes_premium`.
-3. **`BITLY_SESSION_SECRET` propio** (16+ caracteres): sin él las sesiones se
-   firman con el token de GitHub, así que rotar el token cierra todas las
-   sesiones. Cambiarlo ahora no rompe nada (hay 0 cuentas).
+3. **`BITLY_SESSION_SECRET` propio**: ya está cargado en producción (64 hex
+   aleatorios), así que las sesiones no dependen del token de GitHub. Si algún
+   día se rota, todas las sesiones abiertas se cierran: es el precio de que el
+   token y la firma sean claves distintas. En local, si falta, se sigue
+   derivando del token y el Worker lo avisa en el log.
 4. **Retención de comprobantes**: los archivos de `data/comprobantes/` no se
    borran solos. Desde la pestaña **Pedidos** del panel privado, **Eliminar
    pedido** borra la fila y su comprobante del repo (con confirmación; no se
