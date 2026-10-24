@@ -283,6 +283,30 @@ timeout de yt-dlp), búsqueda, formatos de audio del extractor y bytes reales de
 relay con `Range`. `ACTIVAR_POT=1` enciende el proveedor de PO token en caliente
 si algún día YouTube aprieta (hoy está apagado y el extractor funciona igual).
 
+### Mantenimiento: cuando el audio de nicho deja de resolver
+
+El extractor de YouTube se rompe cada tanto (YouTube cambia el reto JS o el
+cliente `web_embedded`). El síntoma es siempre el mismo: la búsqueda encuentra
+el tema, pero `/api/v1/videos/:id` contesta **200 con `adaptiveFormats` vacío** y
+a los ~25 s la pista queda sin audio. `node scripts/verificar-yattee.mjs "<tema>"`
+lo dice en una corrida (comprueba "formatos de audio de <id>").
+
+Ese servicio construye su imagen con `requirements.txt`, que pide
+`yt-dlp>=2026.08.19`, pero **Docker cachea la capa de `pip install`**: un
+redeploy normal reusa la capa y sigue con el yt-dlp viejo. Cuando pase, en el
+dashboard de Render del servicio:
+
+1. **Manual Deploy → Clear build cache & deploy** (no alcanza con el redeploy
+   común ni con el `autoDeploy` del push).
+2. Esperar el build (~3-5 min) y volver a correr el verificador.
+3. Si aun así falla, el bloqueo es de IP o de PO token: probar
+   `ACTIVAR_POT=1` (enciende el proveedor sin reiniciar) y, si mejora,
+   `YT_POT_ENABLED=true` en el entorno del servicio para que sobreviva a los
+   reinicios.
+
+El sitio no necesita ningún cambio en esos casos: apunta a la misma URL y el
+mismo token.
+
 ### Backend propio, sólo para desarrollo
 
 `scripts/backend-yt-dlp.mjs` (`pnpm yt-dlp`) sigue disponible para probar el
@@ -304,6 +328,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
 
 # 3. La demo entera, en un Chrome de verdad
 DEMO_URL=https://bitly-site.pages.dev node scripts/verificar-demo.mjs
+
+# 3b. El audio de nicho de punta a punta: búsqueda → clic real → suena (el
+#     canal de YouTube; falla si el extractor deja de devolver formatos)
+YATTEE_URL=https://yattee-server-2j61.onrender.com \
+  node scripts/verificar-audio-nicho.mjs
 
 # 4. El canje Premium contra el registro real. Necesita un código con estado
 #    "usado" y, para probar el camino feliz, uno con estado "activo" (sólo

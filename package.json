@@ -15,6 +15,8 @@
     "imagenes": "node scripts/optimize-images.mjs",
     "auditar": "node scripts/auditar.mjs",
     "verificar:html": "node scripts/verificar-html.mjs",
+    "verificar:yattee": "node scripts/verificar-yattee.mjs",
+    "verificar:audio": "node scripts/verificar-audio-nicho.mjs",
     "probar:cuota": "node scripts/probar-cuota.mjs",
     "probar:opiniones": "node scripts/probar-opiniones.mjs",
     "probar:correo": "node scripts/probar-correo.mjs",
