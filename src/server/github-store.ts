@@ -21,6 +21,7 @@
  */
 
 import {
+  aBase64,
   cifradoActivo,
   cifrarBase64,
   cifrarTexto,
@@ -314,10 +315,26 @@ export async function getArchivo(clave: RepoClave, ruta: string): Promise<string
     const r = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`);
     if (!r || !r.ok) return null;
     const datos = (await r.json()) as { content?: unknown; encoding?: unknown };
-    if (typeof datos.content !== "string" || datos.encoding !== "base64") return null;
-    // Si el archivo está cifrado se abre acá; si es viejo y está en claro,
-    // `descifrarBase64` lo devuelve tal cual.
-    return await descifrarBase64(datos.content.replace(/\s+/g, ""));
+    if (typeof datos.content === "string" && datos.encoding === "base64" && datos.content.length > 0) {
+      // Si el archivo está cifrado se abre acá; si es viejo y está en claro,
+      // `descifrarBase64` lo devuelve tal cual.
+      return await descifrarBase64(datos.content.replace(/\s+/g, ""));
+    }
+
+    // Los archivos de MÁS DE 1 MB llegan con `content` vacío: la Contents API
+    // se niega a devolver blobs grandes en JSON («This API returns blobs up to
+    // 1 MB in size»). Un comprobante escaneado pasa ese límite sin esfuerzo, y
+    // el panel se quedaba diciendo que el pedido no tenía archivo.
+    // Con el media type `raw` sí vienen hasta 100 MB: el cuerpo son los BYTES
+    // del archivo (el sobre `BLY1`), así que se pasan a base64 para que el
+    // descifrado sea el mismo camino que con los archivos chicos.
+    const crudo = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`, {
+      headers: { Accept: "application/vnd.github.raw" },
+    });
+    if (!crudo || !crudo.ok) return null;
+    const bytes = new Uint8Array(await crudo.arrayBuffer());
+    if (bytes.length === 0) return null;
+    return await descifrarBase64(aBase64(bytes));
   } catch (e) {
     console.error(`[datos] no se pudo abrir ${ruta}:`, e instanceof Error ? e.message : e);
     return null;
