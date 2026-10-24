@@ -62,6 +62,13 @@ function FilaPedido({
 }) {
   const t = useI18n();
   const [abierto, setAbierto] = useState(false);
+  /** Comprobante ya cargado: se muestra inline y se libera al cerrar. */
+  const [vista, setVista] = useState<{ url: string; tipo: string } | null>(null);
+  const [cargandoVista, setCargandoVista] = useState(false);
+
+  useEffect(() => () => {
+    if (vista) URL.revokeObjectURL(vista.url);
+  }, [vista]);
   const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [borrando, setBorrando] = useState(false);
   const [estado, setEstado] = useState<EstadoPedido>(pedido.estado);
@@ -134,23 +141,32 @@ function FilaPedido({
     }
   };
 
+  /**
+   * Abre el comprobante DENTRO del panel.
+   *
+   * Antes se abría en una pestaña nueva con un clic sintético sobre un enlace
+   * `blob:`: si el navegador tiene bloqueo de ventanas emergentes (o el
+   * comprobante pasa el minuto de vida del blob), el pedido «no tenía» archivo.
+   * Acá se ve sin salir de la lista y queda botón para descargarlo.
+   */
   const ver = async () => {
+    if (vista) {
+      setVista(null);
+      return;
+    }
     setAviso(null);
+    setCargandoVista(true);
     try {
       const r = await leerComprobante({ data: { admin: codigoAdmin, folio: pedido.folio } });
       if (!r) {
         setAviso({ tipo: "error", texto: t("adminPedidoSinArchivo") });
         return;
       }
-      const url = URL.createObjectURL(base64ABlob(r.base64, r.tipo));
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setVista({ url: URL.createObjectURL(base64ABlob(r.base64, r.tipo)), tipo: r.tipo });
     } catch {
       setAviso({ tipo: "error", texto: t("adminPedidoError_servidor") });
+    } finally {
+      setCargandoVista(false);
     }
   };
 
@@ -199,8 +215,14 @@ function FilaPedido({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => void ver()} className="boton-fantasma min-h-9 gap-1.5 px-3 text-[11px]">
-              <Eye className="h-3.5 w-3.5" aria-hidden /> {t("adminPedidoVer")}
+            <button
+              type="button"
+              onClick={() => void ver()}
+              disabled={cargandoVista}
+              className="boton-fantasma min-h-9 gap-1.5 px-3 text-[11px]"
+            >
+              {cargandoVista ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Eye className="h-3.5 w-3.5" aria-hidden />}
+              {vista ? t("adminPedidoOcultar") : t("adminPedidoVer")}
             </button>
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <FileText className="h-3 w-3" aria-hidden />
@@ -215,6 +237,28 @@ function FilaPedido({
               {copiado ? t("adminPedidoCopiado") : t("adminPedidoCopiarFolio")}
             </button>
           </div>
+
+          {vista && (
+            <div className="rounded-2xl border border-border bg-background/60 p-2">
+              {vista.tipo.startsWith("image/") ? (
+                <img
+                  src={vista.url}
+                  alt={`${t("adminPedidoComprobante")} ${pedido.folio}`}
+                  className="max-h-[60vh] w-full rounded-xl bg-white object-contain"
+                />
+              ) : (
+                <p className="px-1 py-2 text-[11px] text-muted-foreground">{t("adminPedidoAbrirPdf")}</p>
+              )}
+              <div className="mt-1.5 flex items-center gap-3 px-1 text-[10px]">
+                <a href={vista.url} download={pedido.folio} className="font-semibold text-primary hover:underline">
+                  {t("adminPedidoDescargar")}
+                </a>
+                <a href={vista.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:underline">
+                  {t("adminPedidoAbrirPdf")}
+                </a>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="text-[10px] text-muted-foreground">

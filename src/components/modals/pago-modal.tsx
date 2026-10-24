@@ -79,6 +79,8 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
   const [celular, setCelular] = useState("");
   const [web, setWeb] = useState("");
   const [archivo, setArchivo] = useState<File | null>(null);
+  /** Object URL de la imagen elegida, para verla antes de enviarla. */
+  const [vista, setVista] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listo, setListo] = useState<{ folio: string; estado: string } | null>(null);
@@ -102,11 +104,18 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
     };
   }, [open]);
 
+  // El object URL se libera solo cuando deja de usarse: si no, cada archivo
+  // elegido deja el blob anterior retenido mientras el modal esté abierto.
+  useEffect(() => () => {
+    if (vista) URL.revokeObjectURL(vista);
+  }, [vista]);
+
   const cerrar = () => {
     if (enviando) return;
     setError(null);
     setListo(null);
     setArchivo(null);
+    setVista(null);
     onClose();
   };
 
@@ -115,6 +124,7 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
     setError(null);
     if (!f) {
       setArchivo(null);
+      setVista(null);
       return;
     }
     if (!TIPOS.includes(f.type)) {
@@ -128,6 +138,9 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
       return;
     }
     setArchivo(f);
+    // Sólo las imágenes se pueden previsualizar: un PDF mostrado como imagen
+    // sería un recuadro roto, así que para esos queda el nombre y el tamaño.
+    setVista(f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
   };
 
   const enviar = async (e: React.FormEvent) => {
@@ -161,6 +174,7 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
       setCelular("");
       setWeb("");
       setArchivo(null);
+      setVista(null);
     } catch {
       setError(t("pagoErrorServidor"));
     } finally {
@@ -316,6 +330,34 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
                   className="sr-only"
                 />
               </label>
+
+              {/* Lo que va a enviar, a la vista: evita subir la foto equivocada
+                  y tener que esperar a que el equipo la revise para notarlo. */}
+              {archivo && (
+                <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-background/40">
+                  {vista ? (
+                    <img
+                      src={vista}
+                      alt={t("pagoVistaPrevia")}
+                      className="max-h-60 w-full bg-white object-contain"
+                    />
+                  ) : null}
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+                    <span className="truncate">{archivo.name}</span>
+                    <span className="shrink-0">{Math.max(1, Math.round(archivo.size / 1024))} KB</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setArchivo(null);
+                        setVista(null);
+                      }}
+                      className="ml-auto shrink-0 font-semibold text-primary hover:underline"
+                    >
+                      {t("pagoQuitar")}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && <p className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
