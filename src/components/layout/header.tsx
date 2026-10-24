@@ -282,7 +282,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
                 <button
                   type="button"
                   onClick={abrirComentarios}
-                  className="texto-tag flex min-h-9 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  className="texto-tag flex min-h-11 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
                 >
                   <span className="inline-flex items-center gap-2">
                     <MessageCircle aria-hidden className="h-3 w-3" />
@@ -293,7 +293,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
                 <button
                   type="button"
                   onClick={abrirCuenta}
-                  className="texto-tag flex min-h-9 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  className="texto-tag flex min-h-11 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
                 >
                   <span className="inline-flex items-center gap-2">
                     <User aria-hidden className="h-3 w-3" />
