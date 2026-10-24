@@ -39,6 +39,7 @@ import {
 } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
 import { buscarYouTubeBackend, resolverAudio, type PeticionAudio } from "@/server/rescate";
+import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
@@ -513,7 +514,7 @@ export async function abrirContenidoImpl(carga: Carga): Promise<Cifrado> {
 type RespuestaAudio = {
   url: string;
   duracion: number;
-  canal: "stash-relay" | "youtube";
+  canal: "monochrome" | "stash-relay" | "youtube";
   proveedor: string;
   id: string | null;
   isrc: string | null;
@@ -536,6 +537,22 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
   }
   if (!peticion?.titulo) return null;
   if (!dentroDeCupoRescate(await quienSolicita())) return null;
+
+  // La calidad la decide ACÁ, no el navegador: se verifica el código Premium
+  // que mandó el cliente contra el registro (con caché corta). Sin código
+  // activo —cuenta gratis, invitado o un código caducado— va calidad estándar;
+  // así cambiar el JSON de la petición no sirve para llevarse el FLAC.
+  const premium = await esCodigoPremiumActivo(peticion.codigo);
+
+  // En YouTube Music el id del item ES el videoId de YouTube. Se marca acá para
+  // que el rescate vaya derecho a ese video: en artistas de nicho (bandcamp,
+  // huayño, re-subidos) buscar por nombre no siempre lo encuentra.
+  const idFuente = typeof peticion.id === "string" ? peticion.id.trim() : "";
+  const videoId =
+    peticion.ext === "ytmusic-spotiflac" && /^[A-Za-z0-9_-]{11}$/.test(idFuente) ? idFuente : null;
+
+  peticion = { ...peticion, calidad: premium ? "flac" : "estandar", videoId };
+
   try {
     return await resolverAudio(peticion);
   } catch {

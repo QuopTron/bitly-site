@@ -24,6 +24,14 @@ export default defineConfig(({ mode }) => {
     // con las devtools abiertas, así que no pesan para el visitante.
     build: {
       sourcemap: true,
+      rolldownOptions: {
+        // Módulo nativo de Cloudflare: existe en producción pero no en el
+        // build local, así que se deja como import externo.
+        // `node:tls` lo importa el cliente SMTP de desarrollo (`correo.ts`) sólo
+        // cuando worker-mailer no existe, o sea en Node. En el worker nunca se
+        // ejecuta, pero el bundler no tiene que intentar resolverlo.
+        external: ["cloudflare:sockets", "node:tls"],
+      },
     },
     plugins: [
       tailwindcss(),
@@ -36,6 +44,13 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       tsconfigPaths: true,
+    },
+    ssr: {
+      // `worker-mailer` importa `cloudflare:sockets`, que sólo existe en el
+      // runtime de Cloudflare. Hay que inlinearlo en el bundle del worker:
+      // si queda como import dinámico externo, en producción no se resuelve
+      // (no hay node_modules en Pages).
+      noExternal: ["worker-mailer"],
     },
     server: {
       // Los harness de `scripts/` (y las capturas) escriben sus bundles y fotos

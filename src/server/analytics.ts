@@ -47,7 +47,7 @@ export type Estadisticas = {
   ultimas: SesionPublica[];
 };
 
-function codigoValido(codigo: unknown): boolean {
+export function codigoAdminValido(codigo: unknown): boolean {
   const esperado = (process.env.BITLY_ADMIN_CODE || "flox flox2026").trim();
   const dado = String(codigo ?? "").trim();
   if (dado.length !== esperado.length) return false;
@@ -157,12 +157,12 @@ export const latidoSesion = createServerFn({ method: "POST" })
 
 export const verificarCodigo = createServerFn({ method: "POST" })
   .validator((d: { codigo?: unknown }) => d)
-  .handler(async ({ data }): Promise<boolean> => codigoValido(data?.codigo));
+  .handler(async ({ data }): Promise<boolean> => codigoAdminValido(data?.codigo));
 
 export const leerEstadisticas = createServerFn({ method: "POST" })
   .validator((d: { codigo?: unknown }) => d)
   .handler(async ({ data }): Promise<Estadisticas | null> => {
-    if (!codigoValido(data?.codigo)) return null;
+    if (!codigoAdminValido(data?.codigo)) return null;
     try {
       const [archivo, stats, vistas, opiniones] = await Promise.all([
         leerArchivo(),

@@ -11,9 +11,17 @@
  * El canje de Premium sí se revalida contra el servidor antes de confiar en él:
  * si el código pasa a "usado" o "cancelado" después, el desbloqueo local deja
  * de servir y hay que volver a meter otro código.
+ *
+ * DOS formas de escuchar sin límite, con calidades distintas:
+ *   · cuenta gratis  → ilimitado en la web, calidad estándar (AAC ~128 kbps).
+ *   · código Premium → ilimitado y FLAC sin pérdida.
+ * La calidad no se decide acá: el servidor verifica el código y sirve una u otra
+ * (ver `src/server/demo-proxy.ts`). La sesión de cuenta también se verifica
+ * contra el servidor: un token viejo o inventado no da reproducciones.
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { leerTokenCuenta } from "@/lib/cuentas-cliente";
 
 const CLAVE = "bitly_demo_cuota";
 const CLAVE_PREMIUM = "bitly_demo_premium";
@@ -37,6 +45,10 @@ export type Cuota = {
   restantes: number;
   sinCuota: boolean;
   premium: boolean;
+  /** Sesión de cuenta verificada contra el servidor. */
+  cuenta: boolean;
+  /** Premium o cuenta: la cuota no manda (sí la calidad). */
+  ilimitado: boolean;
   /** Ventana de promoción activa: sin límite y sin gastar la cuota. */
   libre: boolean;
   /** Milisegundos hasta que la próxima reproducción se libere (0 si hay lugar). */
@@ -51,6 +63,11 @@ export type Cuota = {
 };
 
 type Guardado = { veces: number[] };
+
+/** Código Premium guardado; el servidor lo verifica para servir FLAC. */
+export function codigoPremiumGuardado(): string | null {
+  return leerPremium();
+}
 
 function leerVeces(): number[] {
   if (typeof window === "undefined") return [];
@@ -124,6 +141,9 @@ export function useCuota(): Cuota {
   // `true` (nada que revalidar) hasta que el efecto cargue un código.
   const [revalidado, setRevalidado] = useState(true);
 
+  // Sesión de cuenta (gratis): ilimitado, pero en calidad estándar.
+  const [cuenta, setCuenta] = useState(false);
+
   // Lo guardado se aplica después de hidratar: un setState en el montaje no
   // es un mismatch, es el camino normal de corregir el primer render.
   useEffect(() => {
@@ -156,9 +176,50 @@ export function useCuota(): Cuota {
     };
   }, [codigo, revalidado]);
 
+  // Se verifica contra el servidor: si el token venció o el storage trae basura,
+  // la cuota vuelve a mandar en vez de regalar reproducciones.
+  useEffect(() => {
+    let vivo = true;
+    const revisar = () => {
+      const token = leerTokenCuenta();
+      if (!token) {
+        if (vivo) setCuenta(false);
+        return;
+      }
+      import("@/server/cuentas")
+        .then((m) => m.miCuenta({ data: { token } }))
+        .then((r) => {
+          if (!vivo) return;
+          setCuenta(r.ok);
+          // Si la cuenta ya tiene un código asignado, la demo lo adopta sola:
+          // el comprador no tiene que pegarlo a mano. No regala nada — el
+          // servidor vuelve a validarlo contra el registro al resolver cada
+          // audio (ver `demo-proxy`).
+          if (r.ok && r.premium && !leerPremium()) {
+            try {
+              localStorage.setItem(CLAVE_PREMIUM, r.premium.codigo);
+            } catch {
+              // sin storage queda sólo en memoria
+            }
+            setCodigo(r.premium.codigo);
+            setRevalidado(true);
+          }
+        })
+        .catch(() => undefined);
+    };
+    revisar();
+    // El modal de cuenta avisa cuando se entra o se sale (ver cuentas-cliente).
+    window.addEventListener("bitly-cuenta", revisar);
+    return () => {
+      vivo = false;
+      window.removeEventListener("bitly-cuenta", revisar);
+    };
+  }, []);
+
+  const ilimitado = premium || cuenta;
   const { gastadas, restantes, reiniciaEnMs } = calcularCuota(veces, ahora);
   const libre = ahora < LIBRE_HASTA;
-  const sinCuota = !libre && restantes === 0;
+  const sinCuota = !libre && !ilimitado && restantes === 0;
 
   // Al vencer la ventana libre, el reloj despierta y se vuelve a la cuota normal.
   useEffect(() => {
@@ -169,16 +230,17 @@ export function useCuota(): Cuota {
 
   // Con la cuota agotada, un reloj despierta justo cuando se libera la próxima.
   useEffect(() => {
-    if (premium || !sinCuota) return;
+    if (ilimitado || !sinCuota) return;
     const reloj = setTimeout(() => setAhora(Date.now()), Math.max(500, reiniciaEnMs + 250));
     return () => clearTimeout(reloj);
-  }, [premium, sinCuota, reiniciaEnMs]);
+  }, [ilimitado, sinCuota, reiniciaEnMs]);
 
   const gastar = useCallback(() => {
     const momento = Date.now();
-    // En la ventana libre no se gasta nada y las marcas viejas se limpian:
-    // al vencer, la cuota vuelve con las 4 completas.
-    if (libre) {
+    // En la ventana libre (o con Premium, o con cuenta) no se gasta nada y las
+    // marcas viejas se limpian: si el Premium caduca o la sesión se cierra, la
+    // cuota vuelve con las 4 completas en vez de aparecer agotada.
+    if (libre || premium || cuenta) {
       guardarVeces([]);
       setVeces([]);
       setAhora(momento);
@@ -186,13 +248,13 @@ export function useCuota(): Cuota {
     }
     // Se limpia lo vencido al gastar para que el arreglo no crezca sin fin.
     const vivas = dentroDeVentana(veces, momento);
-    if (vivas.length >= REPRODUCCIONES || premium) return false;
+    if (vivas.length >= REPRODUCCIONES) return false;
     const siguiente = [...vivas, momento];
     guardarVeces(siguiente);
     setVeces(siguiente);
     setAhora(momento);
     return true;
-  }, [veces, premium, libre]);
+  }, [veces, premium, cuenta, libre]);
 
   const activarPremium = useCallback((nuevo: string) => {
     try {
@@ -214,6 +276,17 @@ export function useCuota(): Cuota {
     setRevalidado(false);
   }, []);
 
+  // El modal de cuenta ya conoce el código del pedido: cuando lo activa avisa
+  // por acá y se guarda como un canje normal (con su revalidación pendiente).
+  useEffect(() => {
+    const alActivar = (e: Event) => {
+      const nuevo = (e as CustomEvent<unknown>).detail;
+      if (typeof nuevo === "string" && nuevo.trim().length >= 20) activarPremium(nuevo.trim());
+    };
+    window.addEventListener("bitly-premium", alActivar);
+    return () => window.removeEventListener("bitly-premium", alActivar);
+  }, [activarPremium]);
+
   const reiniciar = useCallback(() => {
     guardarVeces([]);
     setVeces([]);
@@ -224,6 +297,8 @@ export function useCuota(): Cuota {
     restantes,
     sinCuota,
     premium,
+    cuenta,
+    ilimitado,
     libre,
     reiniciaEnMs,
     porRevalidar: premium && !revalidado,

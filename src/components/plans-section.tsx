@@ -7,24 +7,35 @@ import { retraso } from "@/lib/reveal";
 import { enlaceWhatsApp } from "@/lib/contacto";
 import SectionHeader from "@/components/ui/section-header";
 import ModalWrapper from "@/components/ui/modal-wrapper";
+import PagoModal from "@/components/modals/pago-modal";
+import EstadoPedidoModal from "@/components/modals/estado-pedido-modal";
+import { useHayCuenta } from "@/lib/cuentas-cliente";
 
 const freeFeatures = ["freeCompare1", "freeCompare2", "freeCompare3", "freeCompare4"];
 const freeBlocked = ["freeNoUnlimited", "freeNoFlac", "freeNoBatch"];
 const premFeatures = ["premiumCompare1", "premiumCompare2", "premiumCompare3", "premiumCompare4", "premiumCompare5", "premiumCompare6", "premiumCompare7", "premiumCompare8"];
 
-export default function PlansSection() {
+type Props = {
+  /** Abre el modal de cuenta. Comprar con comprobante y ver el pedido piden
+   *  sesión; WhatsApp no. */
+  onCuenta?: () => void;
+};
+
+export default function PlansSection({ onCuenta }: Props) {
   const t = useI18n();
+  const hayCuenta = useHayCuenta();
   const [currency] = useCurrency();
   const { precio, original, etiqueta, etiquetaEn, enOferta } = getFaseActual();
   const lang = getLanguage();
   const [infoHoras, setInfoHoras] = useState(false);
   const [comoObtener, setComoObtener] = useState(false);
   const [planMovil, setPlanMovil] = useState<"free" | "premium">("premium");
+  const [showPago, setShowPago] = useState(false);
+  const [showEstado, setShowEstado] = useState(false);
 
   return (
     <section id="planes" className="container mx-auto px-4 pb-4 pt-2 sm:px-6 sm:pb-5 sm:pt-2">
       <SectionHeader
-        numero="04"
         icono={Gem}
         badge={t("plansSubtitle")}
         titulo={t("plansTitle")}
@@ -155,26 +166,42 @@ export default function PlansSection() {
         <div className="min-w-0 text-center sm:text-left">
           <p className="texto-tag text-lg leading-none">{t("plansHowToGet")}</p>
           <p className="mt-1 hidden text-xs text-muted-foreground sm:block">{t("plansPremiumPrice")}</p>
-        </div>
-        <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-row">
           <button
             type="button"
             onClick={() => setComoObtener(true)}
-            className="boton-fantasma min-h-10 px-4 text-xs text-muted-foreground hover:text-foreground"
+            className="mt-1 text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
-            {t("plansHowToGet")}
+            {t("plansVerPasos")}
           </button>
+        </div>
+        <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:w-[22rem]">
+          <button
+            type="button"
+            onClick={() => (hayCuenta ? setShowPago(true) : onCuenta?.())}
+            className="boton-spray group col-span-2 min-h-11 justify-center gap-2 px-4 py-2 text-sm"
+          >
+            <Gem className="h-4 w-4" aria-hidden />
+            {hayCuenta ? t("plansComprar") : t("plansComprarCuenta")}
+          </button>
+          {/* El estado del pedido sólo existe dentro de una cuenta: sin sesión
+              no se muestra. WhatsApp queda siempre, para anónimos también. */}
+          {hayCuenta && (
+            <button
+              type="button"
+              onClick={() => setShowEstado(true)}
+              className="boton-fantasma min-h-10 justify-center px-3 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {t("plansVerPedido")}
+            </button>
+          )}
           <a
             href={enlaceWhatsApp(t("plansWaText"))}
             target="_blank"
             rel="noopener noreferrer"
-            className="boton-spray group min-h-10 gap-2.5 px-4 py-2 text-sm"
+            className="boton-fantasma group inline-flex min-h-10 items-center justify-center gap-1.5 px-3 text-xs text-muted-foreground hover:text-foreground"
           >
-            <MessageCircle className="h-4 w-4" aria-hidden />
-            <span className="text-left">
-              <span className="block text-[10px] font-normal opacity-80">{t("plansWhatsAppHint")}</span>
-              <span className="block text-xs">{t("plansWhatsAppLabel")}</span>
-            </span>
+            <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+            {t("plansWhatsAppLabel")}
           </a>
         </div>
       </div>
@@ -195,7 +222,37 @@ export default function PlansSection() {
           ))}
         </div>
         <p className="mt-4 text-center text-xs text-muted-foreground">{t("plansWhatsAppHint")}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setComoObtener(false);
+            if (hayCuenta) setShowPago(true);
+            else onCuenta?.();
+          }}
+          className="mt-3 w-full text-center text-xs font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {t("plansComprar")}
+        </button>
       </ModalWrapper>
+
+      <PagoModal
+        open={showPago}
+        onClose={() => setShowPago(false)}
+        onCuenta={onCuenta}
+        onVerEstado={() => {
+          setShowPago(false);
+          setShowEstado(true);
+        }}
+      />
+      <EstadoPedidoModal
+        open={showEstado}
+        onClose={() => setShowEstado(false)}
+        onCuenta={onCuenta}
+        onComprar={() => {
+          setShowEstado(false);
+          setShowPago(true);
+        }}
+      />
     </section>
   );
 }

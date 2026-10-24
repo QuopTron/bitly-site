@@ -106,9 +106,56 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_CODES_TOKEN` | **Obligatoria** para el canje de códigos Premium: token de GitHub con lectura al repo privado `QuopTron/bitly_codes_premium`. Sin ella el canje responde "no pudimos verificar". |
 | `BITLY_DATA_TOKEN` | **Obligatoria** para la base de datos del sitio: token de GitHub con `contents: write` sobre `QuopTron/bitly-data` (opiniones, vistas y contadores de descargas). Si falta, se usa `BITLY_CODES_TOKEN` como respaldo. |
 | `BITLY_DATA_REPO`, `BITLY_CHATS_REPO` | Opcionales: cambian el repo de datos o el de chats (`QuopTron/bitly-data` y `QuopTron/bitly-chats` por defecto). |
+| `BITLY_ADMIN_CODE` | Código del panel admin (tres clics en el logo). Si falta, se usa el valor por defecto del código. |
+| `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
+| `BITLY_SESSION_SECRET` | Opcional: secreto para firmar las sesiones de las cuentas del sitio. Si falta, se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN`. Cambiarlo cierra todas las sesiones. |
+| `BITLY_SMTP_HOST`, `BITLY_SMTP_PORT`, `BITLY_SMTP_USER`, `BITLY_SMTP_PASS` | SMTP para los correos de pedidos. En Gmail: `smtp.gmail.com`, puerto `465` y una **contraseña de aplicación**. |
+| `BITLY_EMAIL_FROM`, `BITLY_ADMIN_EMAIL` | Remitente y destinatario de avisos (`floxdev2024@gmail.com`). |
+| `RESEND_API_KEY` | Alternativa a SMTP: API key de Resend. |
+| `BITLY_EMAIL_WEBHOOK` | Opcional: URL que recibe los correos por HTTP. |
+| `YATTEE_URL`, `YATTEE_AUTH`, `YT_DLP_BACKEND_URL` | Rescate de búsqueda en YouTube de nicho. Sin ellas la demo funciona, pero ese respaldo no. |
 
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
 `BITLY_CODES_TOKEN` con `VITE_` (eso la mandaría al navegador).
+
+### Correo de pedidos (SMTP Gmail)
+
+En Cloudflare el envío usa `worker-mailer` con `cloudflare:sockets` (el build ya
+lo soporta y lo deja en `_ssr/`). En localhost (`pnpm dev`) ese módulo no existe,
+así que `correo.ts` cae a un cliente SMTP propio sobre `node:tls` (puerto 465):
+las mismas variables en `.env` alcanzan para probar una compra completa sin
+desplegar. `pnpm probar:correo <correo>` manda la plantilla real y deja una
+vista previa en `scripts/.cache/correo.html`.
+
+Para Gmail hay que generar una **contraseña de aplicación** (no la contraseña
+normal) y cargar los secretos:
+
+```bash
+npx wrangler pages secret put BITLY_SMTP_HOST --project-name bitly-site
+npx wrangler pages secret put BITLY_SMTP_PORT --project-name bitly-site
+npx wrangler pages secret put BITLY_SMTP_USER --project-name bitly-site
+npx wrangler pages secret put BITLY_SMTP_PASS --project-name bitly-site
+npx wrangler pages secret put BITLY_EMAIL_FROM --project-name bitly-site
+npx wrangler pages secret put BITLY_ADMIN_EMAIL --project-name bitly-site
+npx wrangler pages secret put BITLY_ADMIN_CODE --project-name bitly-site
+```
+
+Después de cargarlos hay que **redesplegar** (push a `master`) para que el
+worker nuevo los reciba. En el panel admin, pestaña **Pedidos**, el botón
+**Probar correo** envía un mensaje a `BITLY_ADMIN_EMAIL`. Si no hay ningún
+método configurado, el panel avisa "Correo sin configurar" y los pedidos se
+guardan igual.
+
+### Comprobantes y QR
+
+- Los comprobantes se guardan en el repo privado `QuopTron/bitly-data`, carpeta
+  `data/comprobantes/`; los pedidos en `data/pedidos.json`.
+- Las cuentas del sitio viven en `data/cuentas.json` (contraseñas con PBKDF2,
+  nunca en claro) y las sesiones se firman con `BITLY_SESSION_SECRET`. El botón
+  **Sincronizar códigos** del panel admin espeja el registro de
+  `bitly_codes_premium` en `data/codigos.json`.
+- El QR de pago se sirve desde `public/qr.png` (o `.jpg`/`.jpeg`/`.webp`). Si no
+  existe, el modal muestra un aviso y el enlace de WhatsApp en su lugar.
 
 Para probar el canje en local alcanza con tenerla en `.env` y correr el server
 de desarrollo (`pnpm dev`): ahí las server functions corren en Node y leen

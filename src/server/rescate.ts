@@ -78,13 +78,35 @@ export type PeticionAudio = {
   isrc?: string | null;
   /** Extensión de origen: decide si su ISRC es autoritativo. */
   ext?: string | null;
+  /**
+   * Id del item en la fuente de origen. En YouTube Music ES el videoId de
+   * YouTube: cuando viene, el rescate resuelve ESE video en vez de adivinar
+   * por nombre (lo que falla justo en artistas de nicho).
+   */
+  id?: string | null;
+  /** VideoId de YouTube ya normalizado por `demo-proxy` (11 caracteres). */
+  videoId?: string | null;
+  /**
+   * Calidad a servir. La decide el SERVIDOR (`demo-proxy`): "flac" sólo para
+   * quien acredita Premium, "estandar" para el resto. "estandar" manda primero
+   * por YouTube (AAC ~128 kbps) y sólo cae al canal sin pérdida si ese backend
+   * no está disponible o no encuentra la pista, para que la demo nunca quede
+   * muda por un canal caído.
+   */
+  calidad?: "flac" | "estandar";
+  /**
+   * Código Premium que mandó el navegador. Lo consume `demo-proxy` para
+   * acreditar la calidad; `resolverAudio` no lo mira (recibe `calidad` ya
+   * decidida) y no se cachea ni se guarda en ningún enlace.
+   */
+  codigo?: string | null;
 };
 
 export type AudioResuelto = {
   url: string;
   /** Segundos (se usa en la barra del reproductor). */
   duracion: number;
-  canal: "stash-relay" | "youtube";
+  canal: "monochrome" | "stash-relay" | "youtube";
   /** De dónde salió la identidad: "qobuz-web" o el catálogo del respaldo. */
   proveedor: string;
   /** Id de la pista en el catálogo que resolvió. */
@@ -96,7 +118,7 @@ export type AudioResuelto = {
 
 /* ── Caché de enlaces ────────────────────────────────────────────── */
 
-type Enlace = { url: string; duracion: number; canal: "stash-relay" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
+type Enlace = { url: string; duracion: number; canal: "monochrome" | "stash-relay" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
 
 const enlaces = new Map<string, Enlace>();
 const MAX_ENLACES = 400;
@@ -107,7 +129,17 @@ const MAX_ENLACES = 400;
 const enVuelo = new Map<string, Promise<AudioResuelto | null>>();
 
 function claveDe(p: PeticionAudio): string {
-  return [p.titulo, p.artista, p.album ?? "", p.duracionMs ?? 0, p.isrc ?? "", p.ext ?? ""]
+  // La calidad entra en la clave: el enlace FLAC de un Premium no puede
+  // reutilizarlo una cuenta gratis (ni al revés, que se quedaría en estándar).
+  return [
+    p.titulo,
+    p.artista,
+    p.album ?? "",
+    p.duracionMs ?? 0,
+    p.isrc ?? "",
+    p.ext ?? "",
+    p.calidad ?? "flac",
+  ]
     .join("|")
     .toLowerCase();
 }
@@ -377,6 +409,145 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
   return null;
 }
 
+/* ── Canal monochrome (provider/flacrescue/monochrome.go) ────────── */
+
+/**
+ * tracks.monochrome.st es el catálogo propio del proyecto Monochrome: expone
+ * `isrc:` en la búsqueda y sirve el audio completo con Range desde su propia
+ * infraestructura, sin cuenta ni captcha (según la pista: FLAC o AAC 320).
+ * Una sola búsqueda por ISRC y el
+ * enlace es determinista (`/track/<id>`), así que se puede cachear 30 minutos.
+ *
+ * Se intenta ANTES del stash-relay porque este último vive de un pool
+ * compartido que responde 503 "busy" cuando está saturado, mientras que
+ * monochrome no depende de credenciales de terceros. El match es EXACTO por
+ * ISRC: si el catálogo no lo indexa, se sigue con stash/YouTube en vez de
+ * servir otra grabación.
+ */
+const MONOCHROME_BASE = "https://tracks.monochrome.st";
+const TIMEOUT_MONOCHROME_MS = 4_000;
+const TTL_MONOCHROME_MS = 30 * 60 * 1000;
+
+type PistaMonochrome = {
+  id?: string;
+  trackId?: string;
+  title?: string;
+  artistNames?: string[];
+  duration?: number;
+  isrc?: string;
+  playable?: boolean;
+};
+
+function idMonochrome(p: PistaMonochrome): string {
+  for (const id of [p.id, p.trackId]) {
+    const limpio = String(id ?? "").trim();
+    if (limpio && /^\d+$/.test(limpio)) return limpio;
+  }
+  return "";
+}
+
+function mintMonochrome(pista: PistaMonochrome, isrc: string): Mint & { id: string; isrc: string; duracion: number } {
+  const id = idMonochrome(pista);
+  return {
+    url: `${MONOCHROME_BASE}/track/${id}`,
+    bitDepth: 16,
+    sampleRate: 44100,
+    ttl: TTL_MONOCHROME_MS,
+    id,
+    isrc,
+    duracion: Math.max(0, Math.round((pista.duration ?? 0) / 1000)),
+  };
+}
+
+async function buscarMonochrome(consulta: string, ms: number): Promise<PistaMonochrome[]> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), ms);
+  try {
+    const url = `${MONOCHROME_BASE}/search/tracks?${new URLSearchParams({ q: consulta })}`;
+    const res = await fetch(url, {
+      signal: control.signal,
+      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const datos = (await res.json()) as { tracks?: PistaMonochrome[] };
+    return (datos.tracks ?? []).filter((p) => p.playable !== false && idMonochrome(p));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+async function resolverMonochrome(
+  isrc: string,
+  ms = TIMEOUT_MONOCHROME_MS,
+): Promise<(Mint & { id: string; isrc: string; duracion: number }) | null> {
+  const clave = normalizarISRC(isrc);
+  if (!clave) return null;
+  const pistas = await buscarMonochrome(`isrc:${clave}`, ms);
+  const pista = pistas.find((p) => normalizarISRC(p.isrc ?? "") === clave);
+  if (!pista) return null;
+  return mintMonochrome(pista, clave);
+}
+
+/**
+ * Segunda pasada del catálogo: buscar por NOMBRE cuando el ISRC no está
+ * indexado. El mismo tema suele existir con OTRO ISRC en el catálogo (medido:
+ * "Bohemian Rhapsody" de Queen está con `GBATS0910183`, mientras Deezer publica
+ * `GBUM71029604`), y antes eso terminaba en "sin audio" aunque el FLAC estuviera
+ * servido por la misma infraestructura. La identidad NO se relaja: el ranking
+ * estricto del backend exige título fuerte, evidencia de artista y, si se
+ * conoce, duración (±25% o 20 s); si nada pasa el filtro, se sigue sin audio.
+ */
+async function resolverMonochromePorNombre(
+  p: PeticionAudio,
+  ms = TIMEOUT_MONOCHROME_MS,
+): Promise<(Mint & { id: string; isrc: string; duracion: number }) | null> {
+  const titulo = p.titulo.trim();
+  const artista = p.artista.trim();
+  if (!titulo) return null;
+
+  // Dos órdenes: el buscador del catálogo NO es simétrico (medido: "Queen
+  // Bohemian Rhapsody" devuelve a Queen y "Bohemian Rhapsody Queen" devuelve
+  // versiones de cuna). Se consultan los dos y se juntan sin duplicar.
+  const consultas = [
+    `${artista} ${titulo}`.replace(/\s+/g, " ").trim(),
+    `${titulo} ${artista}`.replace(/\s+/g, " ").trim(),
+  ].filter((c, i, todas) => c !== "" && todas.indexOf(c) === i);
+  const listas = await Promise.all(consultas.map((c) => buscarMonochrome(c, ms)));
+  const pistas = new Map<string, PistaMonochrome>();
+  for (const lista of listas) {
+    for (const pista of lista) {
+      const id = idMonochrome(pista);
+      if (id && !pistas.has(id)) pistas.set(id, pista);
+    }
+  }
+  if (pistas.size === 0) return null;
+
+  const porId = new Map<string, PistaMonochrome>();
+  const cands: TrackResult[] = [];
+  for (const [id, pista] of pistas) {
+    porId.set(id, pista);
+    cands.push({
+      id,
+      title: pista.title ?? "",
+      artist: (pista.artistNames ?? []).join(", "),
+      album: "",
+      coverUrl: "",
+      durationMs: Math.max(0, Math.round(pista.duration ?? 0)),
+      isrc: normalizarISRC(pista.isrc ?? ""),
+      provider: "monochrome",
+    });
+  }
+  if (cands.length === 0) return null;
+
+  const best = bestOriginalAlbumDuracion(titulo, artista, p.album ?? "", Math.max(0, Math.round(p.duracionMs ?? 0)), cands);
+  if (!best) return null;
+  const pista = porId.get(best.id);
+  if (!pista) return null;
+  return mintMonochrome(pista, best.isrc);
+}
+
 /* ── Canal YouTube (yattee-server o backend local de yt-dlp) ─────── */
 
 /**
@@ -394,6 +565,16 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
  * Sin ninguna de las dos el canal no existe: un despliegue sin backend no cambia
  * de comportamiento y las pistas que el FLAC no resuelve quedan sin audio.
  */
+/**
+ * Cabeceras hacia el backend propio. Si `YT_DLP_TOKEN` está definido, el backend
+ * publicado exige ese secreto en `/buscar` y `/resolver`; así un backend con URL
+ * pública no queda de proxy abierto para cualquiera.
+ */
+function cabecerasBackend(): Record<string, string> {
+  const token = (process.env.YT_DLP_TOKEN ?? "").trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 function configYouTube(): { yattee: string; auth: string; local: string } {
   return {
     yattee: (process.env.YATTEE_URL ?? "").replace(/\/+$/, ""),
@@ -407,6 +588,14 @@ function configYouTube(): { yattee: string; auth: string; local: string } {
 // aunque el backend iba a resolver. Las repeticiones entran en la caché del
 // backend y el segundo intento es instantáneo.
 const TIMEOUT_YT_RESOLVER_MS = 30_000;
+/**
+ * Cuánto espera la calidad estándar al canal de YouTube antes de seguir por la
+ * vía sin pérdida. Es corto a propósito: si el catálogo sin pérdida tiene la
+ * pista, suena en ~1 s y no hay razón para hacer esperar; y si el canal de
+ * YouTube está roto (los ~25 s que tarda yt-dlp en rendirse cuando el servidor
+ * no puede resolver el reto JS) el usuario no paga esa espera.
+ */
+const TOPE_ESTANDAR_YT_MS = 4_000;
 const TIMEOUT_YT_BUSQUEDA_MS = 15_000;
 /** El relay de yattee firma con 6 h de vida: 1 h de caché queda holgado. */
 const TTL_YT_ENLACE_MS = 60 * 60 * 1000;
@@ -529,6 +718,38 @@ async function rescatarEnYattee(
   if (candidatos.length === 0) return null;
 
   const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
+
+  /** Elige el formato reproducible del video y arma el stream del relay. */
+  const formatoDe = (video: VideoYattee | null): { stream: string; duracion: number } | null => {
+    const formatos = (video?.adaptiveFormats ?? []).filter(
+      (f) => f.url && (f.type ?? "").startsWith("audio/"),
+    );
+    if (formatos.length === 0) return null;
+    // `audio/m4a` (AAC) lo reproducen todos los navegadores; si no está, el
+    // mejor que haya (opus en webm).
+    const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
+    const mejor = (universales.length ? universales : formatos)
+      .slice()
+      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+    return {
+      stream: new URL(String(mejor.url), cfg.yattee).toString(),
+      duracion: Math.max(0, Math.round(Number(video?.lengthSeconds ?? 0))),
+    };
+  };
+
+  // Camino exacto: YouTube Music ya nos dio el videoId, así que no hay que
+  // buscar nada (y en folklore de nicho la búsqueda puede no encontrarlo).
+  const videoIdDirecto = (p.videoId ?? "").trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(videoIdDirecto)) {
+    const directo = await pedirYattee<VideoYattee>(
+      cfg,
+      `/api/v1/videos/${encodeURIComponent(videoIdDirecto)}?proxy=true&proxy_mode=relay`,
+      TIMEOUT_YT_RESOLVER_MS,
+    );
+    const elegido = formatoDe(directo);
+    if (elegido) return elegido;
+  }
+
   const ordenados = candidatos
     .map((c) => ({ c, punto: puntuarCandidatoYattee(c, p, objetivo) }))
     .sort((a, b) => b.punto - a.punto);
@@ -544,18 +765,8 @@ async function rescatarEnYattee(
       `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
       restante,
     );
-    const formatos = (video?.adaptiveFormats ?? []).filter(
-      (f) => f.url && (f.type ?? "").startsWith("audio/"),
-    );
-    if (formatos.length === 0) continue;
-    // `audio/m4a` (AAC) lo reproducen todos los navegadores; si no está, el
-    // mejor que haya (opus en webm).
-    const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
-    const mejor = (universales.length ? universales : formatos)
-      .slice()
-      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-    const duracion = Math.max(0, Math.round(Number(video?.lengthSeconds ?? elegida.lengthSeconds ?? 0)));
-    return { stream: new URL(String(mejor.url), cfg.yattee).toString(), duracion };
+    const elegido = formatoDe(video);
+    if (elegido) return elegido;
   }
   return null;
 }
@@ -577,6 +788,30 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
   const duracion = String(Math.max(0, Math.round((p.duracionMs ?? 0) / 1000)));
   const inicio = Date.now();
 
+  // Camino exacto (igual que en yattee): si la pista vino de YouTube Music, su
+  // id ES el videoId y el backend no tiene que buscarla por nombre.
+  const videoIdDirecto = (p.videoId ?? "").trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(videoIdDirecto)) {
+    try {
+      const res = await fetch(
+        `${YT_BACKEND_URL}/resolver?videoId=${encodeURIComponent(videoIdDirecto)}`,
+        { headers: cabecerasBackend(), signal: AbortSignal.timeout(TIMEOUT_YT_RESOLVER_MS) },
+      );
+      if (res.ok) {
+        const cuerpo = (await res.json()) as { stream?: string; duracion?: number };
+        const stream = String(cuerpo.stream ?? "");
+        if (stream.startsWith("/audio/")) {
+          return {
+            stream: new URL(stream, YT_BACKEND_URL).toString(),
+            duracion: Math.max(0, Math.round(Number(cuerpo.duracion ?? 0))),
+          };
+        }
+      }
+    } catch {
+      // Se cae a la búsqueda por título, que es el camino de siempre.
+    }
+  }
+
   // Segundo intento sin artista: en re-subidos el "artista" del catálogo es el
   // canal ("Canserbero - Topic") y ensucia la búsqueda de yt-dlp.
   const intentos = artista ? [{ titulo, artista }, { titulo, artista: "" }] : [{ titulo, artista: "" }];
@@ -587,7 +822,10 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), restante);
     try {
-      const res = await fetch(`${YT_BACKEND_URL}/resolver?${consulta}`, { signal: control.signal });
+      const res = await fetch(`${YT_BACKEND_URL}/resolver?${consulta}`, {
+        headers: cabecerasBackend(),
+        signal: control.signal,
+      });
       if (res.ok) {
         const cuerpo = (await res.json()) as { stream?: string; duracion?: number };
         const stream = String(cuerpo.stream ?? "");
@@ -655,7 +893,10 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), TIMEOUT_YT_BUSQUEDA_MS);
   try {
-    const res = await fetch(`${YT_BACKEND_URL}/buscar?${qs}`, { signal: control.signal });
+    const res = await fetch(`${YT_BACKEND_URL}/buscar?${qs}`, {
+      headers: cabecerasBackend(),
+      signal: control.signal,
+    });
     if (!res.ok) return null;
     const cuerpo = (await res.json()) as { items?: Item[] };
     return Array.isArray(cuerpo.items) ? cuerpo.items : null;
@@ -995,8 +1236,59 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   const isrcPista = bienFormado ? isrcPedido : null;
   const pedido = { ...p, titulo, artista, album, duracionMs };
 
+  /** Enlace del canal YouTube (completo, del propio backend), ya cacheado. */
+  const devolverYouTube = (yt: { stream: string; duracion: number }): AudioResuelto => {
+    const duracionYt =
+      yt.duracion > 0 ? yt.duracion : duracionMs > 0 ? Math.round(duracionMs / 1000) : 0;
+    const enlace: Enlace = {
+      url: yt.stream,
+      duracion: duracionYt,
+      canal: "youtube",
+      proveedor: "youtube",
+      id: null,
+      isrc: bienFormado ? isrcPedido : null,
+      expira: Date.now() + TTL_YT_ENLACE_MS,
+    };
+    guardarEnlace(claves, enlace);
+    return {
+      url: enlace.url,
+      duracion: enlace.duracion,
+      canal: "youtube",
+      proveedor: enlace.proveedor,
+      id: null,
+      isrc: enlace.isrc,
+    };
+  };
+
+  // Calidad estándar (cuenta gratis o sin sesión): YouTube entrega AAC ~128
+  // kbps, que es exactamente "una calidad menor que el FLAC" sin transcodificar
+  // nada en el servidor. Si ese backend no responde se sigue por el camino sin
+  // pérdida: la demo prefiere sonar a quedarse muda.
+  //
+  // TOPE: el canal de YouTube se espera sólo un momento. Una extracción que
+  // falla tarda ~25 s en decirlo (yt-dlp reintenta clientes) y antes de este
+  // tope el usuario gratis se quedaba 25 s mirando el spinner por una canción
+  // que el catálogo sin pérdida resuelve en ~1 s. Agotado el tope se sigue por
+  // la vía sin pérdida; si TAMBIÉN falla, el respaldo final vuelve a esperar a
+  // `ytParalelo` completo con su propio techo, así que el nicho no se pierde.
+  if (p.calidad === "estandar") {
+    const yt = await Promise.race([
+      ytParalelo,
+      new Promise<null>((listo) => setTimeout(() => listo(null), TOPE_ESTANDAR_YT_MS)),
+    ]);
+    if (yt) return devolverYouTube(yt);
+  }
+
   type Cand = { id: string; duracionMs: number; isrc: string | null; proveedor: string };
   const porIsrc = isrcConfiable ?? isrcPista;
+
+  // Monochrome corre en paralelo con la identidad de Qobuz: en cuanto hay un
+  // ISRC (el de la pista o el que publica Deezer) se le pregunta a su catálogo.
+  // Es la fuente sin pérdida más fiable cuando el relay de stash está ocupado.
+  const monoParalelo = (async () => {
+    const isrc = porIsrc ?? (await isrcDeRespaldo(pedido));
+    return { isrc, pista: isrc ? await resolverMonochrome(isrc) : null };
+  })();
 
   /**
    * Identidad de una pista: TRES rutas en PARALELO, empujadas en orden de
@@ -1061,7 +1353,40 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
     return resultados.filter((c): c is Cand => c !== null);
   };
 
-  let candidatos = await juntarCandidatos(pedido);
+  const devolverMonochrome = (mono: NonNullable<Awaited<ReturnType<typeof resolverMonochrome>>>): AudioResuelto => {
+    const duracion = mono.duracion > 0 ? mono.duracion : Math.round(duracionMs / 1000);
+    const enlace: Enlace = {
+      url: mono.url,
+      duracion,
+      canal: "monochrome",
+      proveedor: "monochrome",
+      id: mono.id,
+      isrc: mono.isrc,
+      expira: Date.now() + mono.ttl,
+    };
+    guardarEnlace(claves, enlace);
+    return {
+      url: enlace.url,
+      duracion: enlace.duracion,
+      canal: "monochrome",
+      proveedor: enlace.proveedor,
+      id: enlace.id,
+      isrc: enlace.isrc,
+      bitDepth: mono.bitDepth,
+      sampleRate: mono.sampleRate,
+    };
+  };
+
+  const candidatosPromise = juntarCandidatos(pedido);
+  const monoInicial = await monoParalelo;
+  if (monoInicial.pista) return devolverMonochrome(monoInicial.pista);
+
+  // El ISRC no está en el catálogo (o la fuente no trae uno): se busca por
+  // nombre MIENTRAS corre la identidad de Qobuz, así el fallback no suma espera
+  // cuando el ranking estricto acierta.
+  const monoNombre = titulo ? resolverMonochromePorNombre(pedido) : Promise.resolve(null);
+
+  let candidatos = await candidatosPromise;
 
   // El re-subido de YouTube/SoundCloud pone `ARTISTA - Canción` en el TÍTULO y
   // el canal en el campo artista ("Monsieur Blaya", "Maitre 80"), así que el
@@ -1076,6 +1401,23 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
       candidatos = await juntarCandidatos({ ...pedido, titulo: tituloTitulo, artista: artistaTitulo });
     }
   }
+
+  // Monochrome primero: su catálogo no depende del pool del relay. Si el ISRC
+  // de la pista no estaba, se busca por nombre (ver resolverMonochromePorNombre)
+  // y después se prueban los ISRC que acreditó Qobuz/Deezer.
+  const monoPorNombre = await monoNombre;
+  if (monoPorNombre) return devolverMonochrome(monoPorNombre);
+
+  let mono = null as Awaited<ReturnType<typeof resolverMonochrome>>;
+  const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
+  for (const c of candidatos) {
+    const isrc = normalizarISRC(c.isrc ?? "");
+    if (!isrc || isrcsMonochrome.has(isrc)) continue;
+    isrcsMonochrome.add(isrc);
+    mono = await resolverMonochrome(isrc, 2_500);
+    if (mono) break;
+  }
+  if (mono) return devolverMonochrome(mono);
 
   for (const c of candidatos) {
     const mint = await mintaStash(c.id);
@@ -1111,25 +1453,7 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // solo se espera el resultado, ya avanzado.
   const yt = await ytParalelo;
   if (!yt) return null;
-  const duracionYt = yt.duracion > 0 ? yt.duracion : duracionMs > 0 ? Math.round(duracionMs / 1000) : 0;
-  const enlace: Enlace = {
-    url: yt.stream,
-    duracion: duracionYt,
-    canal: "youtube",
-    proveedor: "youtube",
-    id: null,
-    isrc: bienFormado ? isrcPedido : null,
-    expira: Date.now() + TTL_YT_ENLACE_MS,
-  };
-  guardarEnlace(claves, enlace);
-  return {
-    url: enlace.url,
-    duracion: enlace.duracion,
-    canal: "youtube",
-    proveedor: enlace.proveedor,
-    id: null,
-    isrc: enlace.isrc,
-  };
+  return devolverYouTube(yt);
 }
 
 /**

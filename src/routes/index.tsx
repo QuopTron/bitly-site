@@ -11,6 +11,7 @@ import FaqModal from "@/components/modals/faq-modal";
 import ComentariosModal from "@/components/modals/comentarios-modal";
 import CodigoModal from "@/components/modals/codigo-modal";
 import AdminModal from "@/components/modals/admin-modal";
+import CuentaModal from "@/components/modals/cuenta-modal";
 import { useAnalitica } from "@/lib/analytics";
 import { useInstalacionPwa } from "@/lib/pwa";
 import { initRates } from "@/lib/currency";
@@ -64,6 +65,7 @@ export default function Index() {
   const [valoracion, setValoracion] = useState({ promedio: 0, opiniones: 0 });
   const [showFaq, setShowFaq] = useState(false);
   const [showCodigo, setShowCodigo] = useState(false);
+  const [showCuenta, setShowCuenta] = useState(false);
   const [adminCodigo, setAdminCodigo] = useState("");
   const descargasConfirmadas = useRef(new Set<string>());
   const [vista, setVista] = useState<VistaId>("inicio");
@@ -236,9 +238,9 @@ export default function Index() {
         </>
       );
     }
-    if (id === "demo") return <DemoPlayer />;
+    if (id === "demo") return <DemoPlayer onCuenta={() => setShowCuenta(true)} />;
     if (id === "instalar") return <InstallSection onDownload={(p) => handleDownload(p, null)} />;
-    return <PlansSection />;
+    return <PlansSection onCuenta={() => setShowCuenta(true)} />;
   };
 
   return (
@@ -250,6 +252,7 @@ export default function Index() {
         onComentarios={abrirComentarios}
         onFaq={() => setShowFaq(true)}
         onAdmin={() => setShowCodigo(true)}
+        onCuenta={() => setShowCuenta(true)}
         pwaDisponible={pwaDisponible}
         onInstalarPwa={() => void instalarAplicacion()}
       />
@@ -288,6 +291,7 @@ export default function Index() {
         }}
       />
       <AdminModal open={!!adminCodigo} onClose={() => setAdminCodigo("")} codigo={adminCodigo} />
+      <CuentaModal open={showCuenta} onClose={() => setShowCuenta(false)} />
 
       <Suspense fallback={null}>
         {showRelease && (

@@ -38,6 +38,12 @@ export type PistaParaAudio = {
   duracionMs?: number;
   isrc?: string | null;
   ext?: string | null;
+  /**
+   * Código Premium guardado en este navegador. NO decide nada por sí solo: el
+   * servidor lo verifica contra el registro y con eso elige FLAC o calidad
+   * estándar. Si falta o no acredita, suena estándar.
+   */
+  codigo?: string | null;
 };
 
 export type AudioRescatado = {
@@ -45,7 +51,7 @@ export type AudioRescatado = {
   /** Segundos. */
   duracion: number;
   /** "stash-relay" = FLAC completo; "youtube" = audio completo vía backend local. */
-  canal?: "stash-relay" | "youtube";
+  canal?: "monochrome" | "stash-relay" | "youtube";
   proveedor?: string;
   isrc?: string | null;
 };

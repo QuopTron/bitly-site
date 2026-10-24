@@ -17,6 +17,7 @@
  */
 
 import { abrirDemo, buscarDemo, letrasDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
+import { codigoPremiumGuardado } from "@/lib/demo-cuota";
 import type { Letras } from "@/server/letras";
 import { extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
@@ -40,7 +41,7 @@ export type Pista = {
    * "youtube" = audio completo vía el backend local de yt-dlp. Null hasta que
    * se pide reproducir.
    */
-  canal: "stash-relay" | "youtube" | null;
+  canal: "monochrome" | "stash-relay" | "youtube" | null;
   /** Vino del catálogo de respaldo (la extensión no pudo responder). */
   respaldada: boolean;
 };
@@ -108,6 +109,9 @@ export async function buscar(
  * URL del audio de una pista. Resuelta una vez, queda guardada en la propia
  * pista para no repetir la llamada al saltar de pista. Se envían título,
  * artista, álbum y duración porque el matching de la app desempata con ellos.
+ *
+ * Con `codigo` viaja el código Premium guardado: el servidor lo verifica y
+ * decide si esta pista viene en FLAC o en calidad estándar (ver `demo-proxy`).
  */
 export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
   if (p.audioUrl) {
@@ -120,6 +124,7 @@ export async function audioDe(p: Pista): Promise<AudioRescatado | null> {
     duracionMs: p.duracion > 0 ? p.duracion * 1000 : 0,
     isrc: p.isrc,
     ext: p.ext,
+    codigo: codigoPremiumGuardado(),
   });
   if (!audio) return null;
   p.audioUrl = audio.url;

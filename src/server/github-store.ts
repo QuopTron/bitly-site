@@ -13,7 +13,22 @@
  * Multi-repo: `REPOS` mapea una clave a un repo distinto, así el mismo motor
  * sirve la base de datos (`bitly-data`) y los chats (`bitly-chats`) sin
  * duplicar código. Para sumar otro repo basta con una línea en `REPOS`.
+ *
+ * CIFRADO: si `BITLY_DATA_SECRET` está definido, cada archivo se guarda cifrado
+ * (AES-256-GCM, ver `src/server/cifrado.ts`) y se descifra al leer. Los archivos
+ * viejos en claro se siguen leyendo sin migración manual: la próxima escritura
+ * los deja cifrados. Sin el secreto (por ejemplo en local) todo va en claro.
  */
+
+import {
+  cifradoActivo,
+  cifrarBase64,
+  cifrarTexto,
+  descifrarBase64,
+  descifrarSobre,
+  esSobre,
+  textoABase64,
+} from "@/server/cifrado";
 
 const API = "https://api.github.com";
 const RAMA = "main";
@@ -115,17 +130,6 @@ function cola<T>(llave: string, tarea: () => Promise<T>): Promise<T> {
   return mia;
 }
 
-function aB64(texto: string): string {
-  // Chunked: `String.fromCharCode(...bytes)` revienta el stack con archivos
-  // grandes, y opiniones.json crece con el tiempo.
-  const bytes = new TextEncoder().encode(texto);
-  let binario = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binario += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binario);
-}
-
 /**
  * Lee un JSON del repo. Devuelve `defecto` si no existe o si la red falla:
  * el sitio prefiere arrancar con valores por defecto a no arrancar.
@@ -142,8 +146,23 @@ export async function getJson<T>(clave: RepoClave, ruta: string, defecto: T): Pr
       { headers: { Accept: "application/vnd.github.raw+json" } },
     );
     if (r && r.ok) {
-      const texto = await r.text();
-      const valor = JSON.parse(texto) as T;
+      const crudo = JSON.parse(await r.text()) as unknown;
+      if (esSobre(crudo)) {
+        try {
+          const valor = JSON.parse(await descifrarSobre(crudo)) as T;
+          escribirCache(llave, valor);
+          return valor;
+        } catch (e) {
+          // Archivo cifrado con otro secreto (o sin `BITLY_DATA_SECRET`): se
+          // avisa en el log y se sigue con el valor por defecto, no se rompe.
+          console.error(
+            `[datos] ${ruta} está cifrado y no se pudo abrir (¿BITLY_DATA_SECRET?):`,
+            e instanceof Error ? e.message : e,
+          );
+          return defecto;
+        }
+      }
+      const valor = crudo as T;
       escribirCache(llave, valor);
       return valor;
     }
@@ -170,7 +189,8 @@ export async function putJson(
   const repo = repoDe(clave);
   const llave = `${repo}/${ruta}`;
   return cola(llave, async () => {
-    const contenido = aB64(JSON.stringify(valor, null, 2) + "\n");
+    const texto = JSON.stringify(valor, null, 2) + "\n";
+    const contenido = textoABase64(cifradoActivo() ? await cifrarTexto(texto) : texto);
 
     const buscarSha = async (): Promise<string | undefined> => {
       const r = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`);
@@ -201,6 +221,74 @@ export async function putJson(
     else console.error(`[datos] no se pudo escribir ${ruta}: ${r?.status ?? "sin respuesta"}`);
     return ok;
   });
+}
+
+// ── Archivos binarios ───────────────────────────────────────────────────────
+// Los comprobantes de pago se guardan como archivo (en base64) dentro del repo:
+// no tienen sentido metidos en un JSON. Con `BITLY_DATA_SECRET` van cifrados con
+// la marca "BLY1" delante, así GitHub no muestra la imagen/PDF en claro.
+
+/** Escribe un archivo binario (ya en base64) en el repo. */
+export async function putArchivo(
+  clave: RepoClave,
+  ruta: string,
+  contenidoB64: string,
+  mensaje: string,
+): Promise<boolean> {
+  const repo = repoDe(clave);
+  const llave = `${repo}/${ruta}`;
+  return cola(llave, async () => {
+    const contenido = cifradoActivo() ? await cifrarBase64(contenidoB64) : contenidoB64;
+
+    const buscarSha = async (): Promise<string | undefined> => {
+      const r = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`);
+      if (r && r.ok) {
+        const datos = (await r.json().catch(() => null)) as { sha?: string } | null;
+        return datos?.sha;
+      }
+      return undefined;
+    };
+
+    const mandar = async (sha?: string): Promise<Response | null> =>
+      conReintentos(`/repos/${repo}/contents/${ruta}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: mensaje,
+          content: contenido,
+          branch: RAMA,
+          ...(sha ? { sha } : {}),
+        }),
+      });
+
+    let sha = await buscarSha();
+    let r = await mandar(sha);
+    if (r && (r.status === 409 || (r.status === 422 && !sha))) {
+      sha = await buscarSha();
+      r = await mandar(sha);
+    }
+
+    const ok = Boolean(r?.ok);
+    if (!ok) console.error(`[datos] no se pudo escribir ${ruta}: ${r?.status ?? "sin respuesta"}`);
+    return ok;
+  });
+}
+
+/** Lee un archivo binario del repo y lo devuelve en base64 (sin data URL). */
+export async function getArchivo(clave: RepoClave, ruta: string): Promise<string | null> {
+  const repo = repoDe(clave);
+  try {
+    const r = await conReintentos(`/repos/${repo}/contents/${ruta}?ref=${RAMA}`);
+    if (!r || !r.ok) return null;
+    const datos = (await r.json()) as { content?: unknown; encoding?: unknown };
+    if (typeof datos.content !== "string" || datos.encoding !== "base64") return null;
+    // Si el archivo está cifrado se abre acá; si es viejo y está en claro,
+    // `descifrarBase64` lo devuelve tal cual.
+    return await descifrarBase64(datos.content.replace(/\s+/g, ""));
+  } catch (e) {
+    console.error(`[datos] no se pudo abrir ${ruta}:`, e instanceof Error ? e.message : e);
+    return null;
+  }
 }
 
 // ── API genérica ────────────────────────────────────────────────────────────

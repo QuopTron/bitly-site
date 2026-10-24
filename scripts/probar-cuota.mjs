@@ -53,6 +53,11 @@ try {
     target: "node20",
     outfile: salida,
     logLevel: "error",
+    // `demo-cuota` importa helpers del cliente (`@/lib/cuentas-cliente`) con el
+    // alias del tsconfig, que esbuild no conoce. Las server functions se cargan
+    // con import() dinámico y acá no se llaman: quedan externas.
+    alias: { "@": path.join(raiz, "src") },
+    external: ["@/server/cuentas", "@/lib/premium-check", "@tanstack/react-start"],
   });
   const m = await import(pathToFileURL(salida).href + `?v=${Date.now()}`);
   const { REPRODUCCIONES, VENTANA_MS, calcularCuota } = m;

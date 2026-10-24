@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Download, Eye, Loader2, MessageSquare, RefreshCw, Timer, Users } from "lucide-react";
+import { Download, Eye, LayoutDashboard, Loader2, MessageSquare, RefreshCw, ShoppingBag, Timer, Users } from "lucide-react";
 import { useI18n, useLanguage } from "@/lib/i18n";
 import { leerEstadisticas, type Estadisticas } from "@/server/analytics";
 import ModalWrapper from "@/components/ui/modal-wrapper";
+import AdminPedidos from "@/components/modals/admin-pedidos";
 
 const NOMBRE_SECCION: Record<string, string> = {
   inicio: "navInicio",
@@ -44,6 +45,7 @@ export default function AdminModal({ open, onClose, codigo }: { open: boolean; o
   const [datos, setDatos] = useState<Estadisticas | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(false);
+  const [tab, setTab] = useState<"stats" | "pedidos">("stats");
 
   const cargar = useCallback(async () => {
     if (!codigo) return;
@@ -61,8 +63,12 @@ export default function AdminModal({ open, onClose, codigo }: { open: boolean; o
   }, [codigo]);
 
   useEffect(() => {
-    if (open) void cargar();
-  }, [open, cargar]);
+    if (open && tab === "stats") void cargar();
+  }, [open, tab, cargar]);
+
+  useEffect(() => {
+    if (!open) setTab("stats");
+  }, [open]);
 
   const numero = new Intl.NumberFormat(es ? "es-ES" : "en-US");
   const tarjetas = datos
@@ -83,6 +89,31 @@ export default function AdminModal({ open, onClose, codigo }: { open: boolean; o
       icon={<Users className="h-6 w-6 text-primary" />}
       ancho="amplio"
     >
+      <div role="tablist" aria-label={t("adminTitulo")} className="mb-3 flex gap-1 rounded-full border border-border bg-background/40 p-1">
+        {([
+          { id: "stats", label: t("adminTabStats"), Icono: LayoutDashboard },
+          { id: "pedidos", label: t("adminTabPedidos"), Icono: ShoppingBag },
+        ] as const).map(({ id, label, Icono }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition-colors ${
+              tab === id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Icono className="h-3.5 w-3.5" aria-hidden />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "pedidos" ? (
+        <AdminPedidos codigo={codigo} />
+      ) : (
+        <>
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
           {datos && (
@@ -163,6 +194,8 @@ export default function AdminModal({ open, onClose, codigo }: { open: boolean; o
             )}
           </div>
         </div>
+      )}
+        </>
       )}
     </ModalWrapper>
   );

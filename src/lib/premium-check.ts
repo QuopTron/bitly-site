@@ -49,7 +49,7 @@ function sinIntentos(clave: string) {
   return previo.n <= MAX_INTENTOS;
 }
 
-async function descargarRegistro(): Promise<Map<string, string>> {
+export async function leerRegistroCodigos(): Promise<Map<string, string>> {
   const token = process.env.BITLY_CODES_TOKEN;
   if (!token) throw new Error("Falta BITLY_CODES_TOKEN en el servidor");
 
@@ -75,6 +75,38 @@ async function descargarRegistro(): Promise<Map<string, string>> {
     registro.set(codigo, estado);
   }
   return registro;
+}
+
+/**
+ * ¿El código acredita Premium AHORA? Lo usa el servidor de la demo para decidir
+ * si sirve FLAC o calidad estándar: el cliente manda el código que tenga y acá
+ * se verifica, así un `calidad: "flac"` inventado no abre nada.
+ *
+ * Se cachea unos minutos porque esto corre en CADA resolución de audio y leer el
+ * registro es una descarga entera de GitHub. Si el registro no responde se
+ * respeta lo último que se supo del código: un corte de red no debe degradar a
+ * quien ya estaba escuchando en FLAC (ni ascender a quien nunca acreditó).
+ */
+const CACHE_PREMIUM_MS = 5 * 60 * 1000;
+const acreditados = new Map<string, { ok: boolean; expira: number }>();
+
+export async function esCodigoPremiumActivo(codigo: string | null | undefined): Promise<boolean> {
+  const limpio = (codigo ?? "").trim();
+  if (limpio.length < 20) return false;
+
+  const ahora = Date.now();
+  const previo = acreditados.get(limpio);
+  if (previo && previo.expira > ahora) return previo.ok;
+
+  try {
+    const registro = await leerRegistroCodigos();
+    const ok = registro.get(limpio) === "activo";
+    if (acreditados.size > 500) acreditados.clear();
+    acreditados.set(limpio, { ok, expira: ahora + CACHE_PREMIUM_MS });
+    return ok;
+  } catch {
+    return previo?.ok ?? false;
+  }
 }
 
 /** Traduce el estado del registro al mismo vocabulario que usa la app. */
@@ -111,7 +143,7 @@ export const canjearCodigo = createServerFn({ method: "POST" })
 
     let registro: Map<string, string>;
     try {
-      registro = await descargarRegistro();
+      registro = await leerRegistroCodigos();
     } catch (e) {
       console.error("[Bitly] No se pudo leer el registro de códigos:", e);
       return { estado: "desconocido", aviso: "registro" };
@@ -156,7 +188,7 @@ export const revalidarPremium = createServerFn({ method: "POST" })
     const codigo = (data.codigo ?? "").trim();
     if (!codigo) return { estado: "no_encontrado" };
     try {
-      const registro = await descargarRegistro();
+      const registro = await leerRegistroCodigos();
       const estado = registro.get(codigo);
       return { estado: estado ? traducir(estado) : "no_encontrado" };
     } catch {

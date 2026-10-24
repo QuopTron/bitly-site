@@ -1,4 +1,4 @@
-import { Sun, Moon, Globe, Menu, X, ChevronRight, MessageCircle, HelpCircle, Download } from "lucide-react";
+import { Sun, Moon, Globe, Menu, X, ChevronRight, MessageCircle, HelpCircle, Download, User } from "lucide-react";
 import splashBlanco from "@/assets/splash-blanco-128.webp";
 import splashNegro from "@/assets/splash-negro-128.webp";
 import { useI18n, useLanguage } from "@/lib/i18n";
@@ -15,11 +15,12 @@ type Props = {
   onComentarios: () => void;
   onFaq: () => void;
   onAdmin: () => void;
+  onCuenta: () => void;
   pwaDisponible?: boolean;
   onInstalarPwa?: () => void;
 };
 
-export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin, pwaDisponible, onInstalarPwa }: Props) {
+export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin, onCuenta, pwaDisponible, onInstalarPwa }: Props) {
   const t = useI18n();
   const [lang, setLang] = useLanguage();
   const [theme, setTheme] = useState<Tema>("dark");
@@ -89,6 +90,11 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
     onComentarios();
   };
 
+  const abrirCuenta = () => {
+    setMobileOpen(false);
+    onCuenta();
+  };
+
   /** Un clic vuelve al inicio; tres seguidos abren el acceso privado. */
   const alLogo = () => {
     clicsLogo.current += 1;
@@ -107,17 +113,19 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
   return (
     <header className="relative z-40 shrink-0 px-3 pb-2 pt-2 sm:px-4 sm:pt-3">
       <div className="relative mx-auto max-w-7xl rounded-[2.2rem] border border-border bg-card/85 px-2.5 py-1.5 sombra-tag-suave backdrop-blur-xl sm:px-4 sm:py-2">
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        {/* Alto fijo por vista: el logo cambia de tamaño entre inicio y el resto,
+            y sin este mínimo la cabecera encogía y corría todo el contenido. */}
+        <div className="flex min-h-11 items-center gap-2 sm:min-h-12 sm:gap-2.5">
           <button
             type="button"
             onClick={alLogo}
             aria-label="Bitly - inicio"
-            className="group flex min-w-0 shrink-0 items-center gap-2.5"
+            className="group flex min-w-0 shrink items-center gap-2 sm:gap-2.5"
           >
             <span
               className={`mancha relative flex shrink-0 items-center justify-center p-1.5 transition-all duration-500 ease-out ${
                 enInicio
-                  ? "h-11 w-11 -rotate-6 bg-menta-suave sm:h-12 sm:w-12"
+                  ? "h-10 w-10 -rotate-6 bg-menta-suave sm:h-12 sm:w-12"
                   : "h-9 w-9 rotate-3 bg-primary/20 shadow-[0_0_26px_-6px_var(--menta)] sm:h-10 sm:w-10"
               }`}
             >
@@ -132,14 +140,14 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
             </span>
             <span className="flex min-w-0 flex-col text-left">
               <span
-                className={`texto-tag texto-aerosol leading-none transition-all duration-300 ${
-                  enInicio ? "text-2xl sm:text-[1.8rem]" : "text-xl sm:text-2xl"
+                className={`texto-tag texto-aerosol truncate leading-none transition-all duration-300 ${
+                  enInicio ? "text-xl sm:text-[1.8rem]" : "text-lg sm:text-2xl"
                 }`}
               >
                 Bitly
               </span>
               <span
-                className={`overflow-hidden text-[10px] uppercase tracking-[0.22em] text-muted-foreground transition-all duration-300 sm:text-xs ${
+                className={`overflow-hidden whitespace-nowrap text-[9px] uppercase tracking-[0.1em] text-muted-foreground transition-all duration-300 sm:text-xs sm:tracking-[0.22em] ${
                   enInicio ? "mt-0.5 max-h-4 translate-y-0 opacity-100" : "mt-0 max-h-0 -translate-y-1 opacity-0"
                 }`}
               >
@@ -156,7 +164,7 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
 
           <span aria-hidden className="hidden h-7 w-px shrink-0 bg-border/70 lg:block" />
 
-          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
             {pwaDisponible && (
               <button
                 type="button"
@@ -169,6 +177,16 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
                 <span className="hidden sm:inline">{t("pwaInstalar")}</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={abrirCuenta}
+              data-pista="cuenta"
+              aria-label={t("cuentaTitulo")}
+              title={t("cuentaTitulo")}
+              className="inline-flex items-center justify-center rounded-full border border-border bg-background/60 p-2 text-muted-foreground transition-all duration-200 hover:border-menta/60 hover:text-foreground active:scale-95"
+            >
+              <User aria-hidden className="h-3.5 w-3.5" />
+            </button>
             <button
               type="button"
               onClick={onFaq}
@@ -195,10 +213,10 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
               data-pista="menu"
               aria-expanded={mobileOpen}
               aria-label={mobileOpen ? t("headerMenuClose") : t("headerMenuOpen")}
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/60 px-3 py-2 text-muted-foreground transition-all duration-200 hover:bg-card hover:text-foreground active:scale-90 lg:hidden"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border bg-background/60 p-2 text-muted-foreground transition-all duration-200 hover:bg-card hover:text-foreground active:scale-90 sm:px-3 lg:hidden"
             >
               {mobileOpen ? <X aria-hidden className="h-4 w-4" /> : <Menu aria-hidden className="h-4 w-4" />}
-              <span className="texto-tag text-[0.68rem] uppercase leading-none">{t("headerMenuShort")}</span>
+              <span className="hidden texto-tag text-[0.68rem] uppercase leading-none sm:inline">{t("headerMenuShort")}</span>
             </button>
             <div className="hidden items-center gap-3 lg:flex">
               <span data-pista="moneda">
@@ -257,11 +275,22 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onAdmin
                 <button
                   type="button"
                   onClick={abrirComentarios}
-                  className="texto-tag col-span-2 flex min-h-9 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  className="texto-tag flex min-h-9 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
                 >
                   <span className="inline-flex items-center gap-2">
                     <MessageCircle aria-hidden className="h-3 w-3" />
                     {t("comentariosTitulo")}
+                  </span>
+                  <ChevronRight aria-hidden className="h-3 w-3 opacity-50" />
+                </button>
+                <button
+                  type="button"
+                  onClick={abrirCuenta}
+                  className="texto-tag flex min-h-9 items-center justify-between gap-2 rounded-full border border-border/60 bg-background/45 px-3 text-[0.72rem] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <User aria-hidden className="h-3 w-3" />
+                    {t("cuentaTitulo")}
                   </span>
                   <ChevronRight aria-hidden className="h-3 w-3 opacity-50" />
                 </button>

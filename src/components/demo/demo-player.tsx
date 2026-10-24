@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ChevronRight, Gem, KeyRound, Loader2, Lock, Pause, Play, Search, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, Gem, KeyRound, Loader2, Lock, MessageCircle, Pause, Play, Search, Shuffle, SkipBack, SkipForward, UserPlus, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { getFaseActual } from "@/lib/pricing";
@@ -12,6 +12,7 @@ import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-ext
 import { useCuota } from "@/lib/demo-cuota";
 import { retraso } from "@/lib/reveal";
 import { navegarA } from "@/lib/navegacion";
+import { enlaceWhatsApp } from "@/lib/contacto";
 
 import { useEsStandalone } from "@/lib/pwa";
 import ExtensionPicker from "@/components/demo/extension-picker";
@@ -78,13 +79,24 @@ type EstadoLista = {
  * 30 s). No se expone el pipeline de descarga, así que la landing no queda
  * sirviendo música con derechos.
  */
-export default function DemoPlayer() {
+type Props = {
+  /**
+   * Abre el modal de cuenta (lo maneja `index`). La cuenta GRATIS quita el
+   * límite de reproducciones —en calidad estándar—, así que la demo la ofrece
+   * justo donde aparece el tope y no escondida en el encabezado.
+   */
+  onCuenta?: () => void;
+};
+
+export default function DemoPlayer({ onCuenta }: Props) {
   const t = useI18n();
   // Instalada como PWA el audio no se puede guardar: la demo se oculta y se
   // invita a abrirla en el navegador, en vez de mostrar un reproductor a medias.
   const esApp = useEsStandalone();
   const [moneda] = useCurrency();
   const cuota = useCuota();
+  /** Premium o cuenta: no hay tope. La calidad la decide el servidor. */
+  const ilimitado = cuota.premium || cuota.cuenta;
 
   const [extension, setExtension] = useState<ExtensionId>("deezer");
   const [filtro, setFiltro] = useState<string | null>("track");
@@ -230,7 +242,7 @@ export default function DemoPlayer() {
 
   const reproducir = useCallback(
     async (p: Pista) => {
-      if (!cuota.premium && cuota.sinCuota) {
+      if (!ilimitado && cuota.sinCuota) {
         setTopeAbierto(true);
         return;
       }
@@ -263,7 +275,7 @@ export default function DemoPlayer() {
         return;
       }
 
-      if (!cuota.premium) cuota.gastar();
+      if (!ilimitado) cuota.gastar();
       el.src = audioResuelto.url;
       el.currentTime = 0;
       // Lo que suena se pinta ANTES de esperar al navegador: la barra y el
@@ -282,7 +294,7 @@ export default function DemoPlayer() {
         }
       });
     },
-    [arrancar, cuota, pista, t],
+    [arrancar, cuota, ilimitado, pista, t],
   );
 
   /** Posición de una pista dentro del listado (−1 si no está). */
@@ -463,7 +475,9 @@ export default function DemoPlayer() {
   const restantes = Math.max(0, cuota.restantes);
   const cuotaTexto = cuota.premium
     ? t("demoPremiumOn")
-    : cuota.libre
+    : cuota.cuenta
+      ? t("demoCuentaOn")
+      : cuota.libre
       ? t("demoFreeUnlimited")
       : cuota.sinCuota
         ? t("demoFreeNone")
@@ -576,7 +590,7 @@ export default function DemoPlayer() {
                       : "bg-primary/15 text-primary ring-primary/25"
                 }`}
               >
-                {cuota.premium && <Gem className="h-3 w-3" />}
+                {(cuota.premium || cuota.cuenta) && <Gem className="h-3 w-3" />}
                 {cuotaTexto}
               </span>
               {!cuota.premium && (
@@ -592,10 +606,23 @@ export default function DemoPlayer() {
             </div>
 
             {/* Con la cuota agotada se dice CUÁNDO vuelve: son 2 horas, no el fin. */}
-            {!cuota.premium && cuota.sinCuota && (
+            {cuota.sinCuota && (
               <p className="px-3 pt-1.5 text-xs font-medium text-primary sm:px-4">
                 {Plantilla(t("demoFreeRefill"), { tiempo: restante(cuota.reiniciaEnMs) })}
               </p>
+            )}
+
+            {/* La cuenta gratis es la salida más barata al tope de 4: se ofrece
+                acá, donde duele, y no como un enlace perdido del menú. */}
+            {!ilimitado && onCuenta && (
+              <button
+                type="button"
+                onClick={onCuenta}
+                className="mx-3 mt-1.5 flex items-center gap-1.5 self-start rounded-full bg-primary/10 px-2.5 py-1 text-left text-[11px] font-semibold text-primary ring-1 ring-primary/25 transition hover:bg-primary/20 sm:mx-4"
+              >
+                <UserPlus className="h-3 w-3 shrink-0" aria-hidden />
+                {t("demoCuentaCta")}
+              </button>
             )}
 
             {/* Resultados */}
@@ -798,7 +825,13 @@ export default function DemoPlayer() {
                     <span className="block truncate text-[11px] font-bold leading-tight">{pista.titulo}</span>
                     <span className="block truncate text-[10px] leading-tight text-muted-foreground">
                       {pista.artista || "\u00a0"}
-                      {pista.canal === "stash-relay" ? " · FLAC" : pista.canal === "youtube" ? " · YouTube" : ""}
+                      {pista.canal === "stash-relay"
+                       ? " · FLAC"
+                       : pista.canal === "monochrome"
+                         ? " · audio"
+                         : pista.canal === "youtube"
+                           ? ` · ${t("demoCalidadEstandar")}`
+                           : ""}
                     </span>
                   </span>
                   <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm">
@@ -1009,6 +1042,32 @@ export default function DemoPlayer() {
               >
                 {t("demoPaywallPlans")}
               </button>
+              {/* Sin sesión el camino más corto es comprar por WhatsApp: no hay
+                  que crear cuenta ni cargar nada para que lo atiendan. */}
+              {!cuota.cuenta && (
+                <a
+                  href={enlaceWhatsApp(t("plansWaText"))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-card px-4 py-3 text-sm font-bold text-muted-foreground ring-1 ring-border/60 transition hover:text-foreground"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  {t("demoPaywallWa")}
+                </a>
+              )}
+              {onCuenta && !cuota.premium && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTopeAbierto(false);
+                    onCuenta();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary/15 px-4 py-3 text-sm font-bold text-primary ring-1 ring-primary/30 transition hover:bg-primary/25 active:scale-[0.98]"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  {t("demoPaywallCuenta")}
+                </button>
+              )}
               {cuota.premium && (
                 <button
                   type="button"
@@ -1029,6 +1088,7 @@ export default function DemoPlayer() {
           <DemoCodigoModal
             open
             onClose={() => setCodigoAbierto(false)}
+            onCuenta={onCuenta}
             onActivado={cuota.activarPremium}
           />
         </Suspense>

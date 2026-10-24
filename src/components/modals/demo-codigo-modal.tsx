@@ -1,15 +1,19 @@
 import { useState } from "react";
-import { Gem, KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Gem, KeyRound, Loader2, ShieldCheck, UserPlus } from "lucide-react";
 import ModalWrapper from "@/components/ui/modal-wrapper";
 import { useI18n } from "@/lib/i18n";
 import { canjearCodigo } from "@/lib/premium-check";
 import type { EstadoCodigo } from "@/lib/demo-cuota";
+import { useHayCuenta } from "@/lib/cuentas-cliente";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   /** Se llama con el código ya validado contra el registro. */
   onActivado: (codigo: string) => void;
+  /** Abre el modal de cuenta: un Premium sin cuenta se pierde al cambiar de
+   *  equipo, así que se ofrece guardarlo. */
+  onCuenta?: () => void;
 };
 
 /**
@@ -19,8 +23,11 @@ type Props = {
  * `switch` local: así el sitio y la app cuentan lo mismo cuando un código ya
  * fue usado o está cancelado.
  */
-export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
+export default function DemoCodigoModal({ open, onClose, onActivado, onCuenta }: Props) {
   const t = useI18n();
+  const hayCuenta = useHayCuenta();
+  /** Código válido activado sin sesión: se ofrece crear la cuenta antes de irse. */
+  const [guardar, setGuardar] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [estado, setEstado] = useState<EstadoCodigo | null>(null);
   const [aviso, setAviso] = useState<"registro" | "intentos" | null>(null);
@@ -41,7 +48,10 @@ export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
       if (r.estado === "ok") {
         onActivado(limpio);
         setCodigo("");
-        onClose();
+        // Con cuenta el Premium queda guardado en el servidor y no hay nada
+        // más que pedir; sin cuenta, se ofrece crearla antes de cerrar.
+        if (hayCuenta || !onCuenta) onClose();
+        else setGuardar(true);
       }
     } catch {
       setEstado("desconocido");
@@ -61,6 +71,33 @@ export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
       subtitle={t("codigoSubtitle")}
       icon={<KeyRound className="h-5 w-5 text-primary" />}
     >
+      {guardar && !hayCuenta ? (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-primary/30 bg-primary/10 p-4 text-center">
+            <CheckCircle2 className="mx-auto h-9 w-9 text-primary" aria-hidden />
+            <p className="mt-2 text-sm font-semibold text-foreground">{t("codigoCuentaTitulo")}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t("codigoCuentaTexto")}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onCuenta?.();
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-primary to-accent px-4 py-3 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition hover:opacity-90 active:scale-[0.98]"
+          >
+            <UserPlus className="h-4 w-4" aria-hidden />
+            {t("codigoCuentaBoton")}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            {t("codigoSeguir")}
+          </button>
+        </div>
+      ) : (
       <form onSubmit={validar} className="space-y-3">
         <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/60 px-3 py-2.5 focus-within:border-primary/50">
           {cargando ? (
@@ -121,6 +158,7 @@ export default function DemoCodigoModal({ open, onClose, onActivado }: Props) {
           {t("codigoNota")}
         </p>
       </form>
+      )}
     </ModalWrapper>
   );
 }

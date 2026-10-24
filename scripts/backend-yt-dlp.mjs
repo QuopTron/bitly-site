@@ -18,11 +18,13 @@
  *       la canción (folklore de nicho, re-subidos): la demo la muestra igual y
  *       el audio se rescata con este mismo backend;
  *     · responde { items: [{ id, tipo, titulo, artista, caratula, duracionMs }] }.
- *   GET /resolver?titulo=&artista=&duracion=
+ *   GET /resolver?videoId= | ?titulo=&artista=&duracion=
  *                                  → JSON { videoId, titulo, duracion, stream }
- *     · busca `ytsearch3:título artista`, elige el primer resultado cuya
- *       duración coincide (±40 s) con la del catálogo; si ninguno coincide,
- *       usa el primero;
+ *     · con `videoId` resuelve ESE video directo (lo manda la demo cuando la
+ *       pista viene de YouTube Music, que conoce el id);
+ *     · sin `videoId`, busca `ytsearch3:título artista`, elige el primer
+ *       resultado cuya duración coincide (±40 s) con la del catálogo; si
+ *       ninguno coincide, usa el primero;
  *     · `stream` es la ruta del proxy (`/audio/<token>`), nunca la URL cruda.
  *   GET /audio/<token>             → el stream de googlevideo con Range
  *
@@ -38,9 +40,34 @@ import { Readable } from "node:stream";
 import { parseArgs } from "node:util";
 
 const { values } = parseArgs({
-  options: { puerto: { type: "string", default: "8787" } },
+  options: {
+    puerto: { type: "string", default: process.env.PORT ?? "8787" },
+    host: { type: "string", default: process.env.HOST ?? "127.0.0.1" },
+  },
 });
 const PUERTO = Number(values.puerto) || 8787;
+/**
+ * 127.0.0.1 de fábrica (herramienta de desarrollo). Para publicarlo —túnel o
+ * contenedor— se pasa `--host 0.0.0.0` o `HOST=0.0.0.0`.
+ */
+const HOST = values.host || "127.0.0.1";
+
+/**
+ * Secreto compartido con el sitio (`YT_DLP_TOKEN`). Si está, `/buscar` y
+ * `/resolver` exigen `Authorization: Bearer` o `?token=`.
+ *
+ * `/audio/<token>` queda abierto a propósito: lo pide el NAVEGADOR del
+ * visitante, no el servidor, y ese token es aleatorio, dura una hora y solo
+ * existe si este backend lo emitió. Ponerle el secreto rompería la
+ * reproducción sin aportar nada (el token ya es impredecible).
+ */
+const TOKEN_COMPARTIDO = (process.env.YT_DLP_TOKEN ?? "").trim();
+
+function autorizado(req, url) {
+  if (!TOKEN_COMPARTIDO) return true;
+  if (String(req.headers.authorization ?? "") === `Bearer ${TOKEN_COMPARTIDO}`) return true;
+  return url.searchParams.get("token") === TOKEN_COMPARTIDO;
+}
 
 /** Clientes de YouTube, en orden: `web_embedded` sirve audio COMPLETO sin PO. */
 const CLIENTES = ["web_embedded", "mweb"];
@@ -74,6 +101,41 @@ function ytDlp(args, ms) {
 
 function normalizar(s) {
   return (s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * URL de googlevideo de un videoId concreto, probando clientes de yt-dlp.
+ *
+ * Es el camino RÁPIDO: cuando la pista viene de YouTube Music ya sabemos el
+ * videoId, así que no hay que buscarla por nombre (y en folklore de nicho la
+ * búsqueda por nombre puede no encontrar nada o devolver otro video).
+ */
+async function resolverUrl(videoId) {
+  for (const cli of CLIENTES) {
+    try {
+      const url = (
+        await ytDlp(
+          [
+            // M4A/AAC primero: WebM/Opus no suena en Safari/iOS. Si no hay m4a
+            // para ese video, cae al mejor audio que haya.
+            "-f",
+            "bestaudio[ext=m4a]/bestaudio/best",
+            "--get-url",
+            `--extractor-args=youtube:player-client=${cli}`,
+            `https://www.youtube.com/watch?v=${videoId}`,
+          ],
+          TIMEOUT_URL_MS,
+        )
+      )
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.startsWith("https://"));
+      if (url) return url;
+    } catch (e) {
+      console.error(`[yt-dlp] -g con ${cli}: ${e.message}`);
+    }
+  }
+  return null;
 }
 
 /** Busca la pista y devuelve { videoId, titulo, duracion, url } o null. */
@@ -125,22 +187,8 @@ async function buscarPista(titulo, artista, duracionS) {
       );
     }
 
-    for (const cli of CLIENTES) {
-      try {
-        const url = (
-          await ytDlp(
-            ["-f", "bestaudio/best", "--get-url", `--extractor-args=youtube:player-client=${cli}`, `https://www.youtube.com/watch?v=${elegida.videoId}`],
-            TIMEOUT_URL_MS,
-          )
-        )
-          .split("\n")
-          .map((l) => l.trim())
-          .find((l) => l.startsWith("https://"));
-        if (url) return { ...elegida, url };
-      } catch (e) {
-        console.error(`[yt-dlp] -g con ${cli}: ${e.message}`);
-      }
-    }
+    const url = await resolverUrl(elegida.videoId);
+    if (url) return { ...elegida, url };
   }
   return null;
 }
@@ -233,10 +281,34 @@ async function manejarResolver(res, url) {
   const titulo = (url.searchParams.get("titulo") ?? "").trim();
   const artista = (url.searchParams.get("artista") ?? "").trim();
   const duracionS = Math.max(0, Number(url.searchParams.get("duracion") ?? 0) || 0);
-  if (!titulo) return json(res, 400, { error: "falta titulo" });
+  const videoIdPedido = (url.searchParams.get("videoId") ?? "").trim();
 
   const ahora = Date.now();
   podar(resoluciones, ahora);
+
+  // Camino exacto: el cliente ya sabe QUÉ video es (viene de YouTube Music).
+  if (videoIdPedido && /^[A-Za-z0-9_-]{11}$/.test(videoIdPedido)) {
+    const claveVideo = `vid:${videoIdPedido}`;
+    let video = resoluciones.get(claveVideo)?.valor ?? null;
+    if (!video) {
+      const streamUrl = await resolverUrl(videoIdPedido);
+      if (!streamUrl) return json(res, 404, { error: "no se pudo resolver el video" });
+      video = { videoId: videoIdPedido, tituloVideo: "", duracion: 0, url: streamUrl };
+      resoluciones.set(claveVideo, { valor: video, expira: ahora + TTL_RESOLUCION_MS });
+    }
+    const tokenVideo = randomBytes(9).toString("base64url");
+    podar(tokens, ahora);
+    tokens.set(tokenVideo, { url: video.url, expira: ahora + TTL_TOKEN_MS });
+    return json(res, 200, {
+      videoId: video.videoId,
+      titulo: video.tituloVideo,
+      duracion: video.duracion,
+      stream: `/audio/${tokenVideo}`,
+    });
+  }
+
+  if (!titulo) return json(res, 400, { error: "falta titulo" });
+
   const clave = `${normalizar(titulo)}|${normalizar(artista)}|${duracionS}`;
   let r = resoluciones.get(clave)?.valor ?? null;
   if (!r) {
@@ -303,6 +375,9 @@ const servidor = createServer(async (req, res) => {
       return res.end();
     }
     if (url.pathname === "/salud") return json(res, 200, { ok: true });
+    if (url.pathname === "/buscar" || url.pathname === "/resolver") {
+      if (!autorizado(req, url)) return json(res, 401, { error: "token inválido" });
+    }
     if (url.pathname === "/buscar") return await manejarBuscar(res, url);
     if (url.pathname === "/resolver") return await manejarResolver(res, url);
     const m = /^\/audio\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
@@ -313,8 +388,10 @@ const servidor = createServer(async (req, res) => {
   }
 });
 
-servidor.listen(PUERTO, "127.0.0.1", () => {
-  console.log(`backend yt-dlp en http://127.0.0.1:${PUERTO}`);
-  console.log(`  habilitar en la demo: YT_DLP_BACKEND_URL=http://127.0.0.1:${PUERTO}`);
+servidor.listen(PUERTO, HOST, () => {
+  const base = HOST === "127.0.0.1" ? `http://127.0.0.1:${PUERTO}` : `http://${HOST}:${PUERTO}`;
+  console.log(`backend yt-dlp en ${base}`);
+  console.log(`  habilitar en la demo: YT_DLP_BACKEND_URL=${base}`);
+  if (TOKEN_COMPARTIDO) console.log("  protegido con YT_DLP_TOKEN (el sitio tiene que mandar el mismo)");
   console.log("  (Ctrl+C para cerrar)");
 });
