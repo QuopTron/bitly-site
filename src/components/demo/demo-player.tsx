@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { Download, Gem, KeyRound, ListMusic, Loader2, Lock, MessageCircle, Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, UserPlus, Volume2, VolumeX, X } from "lucide-react";
+import { Download, Gem, KeyRound, ListMusic, Loader2, Lock, Maximize2, MessageCircle, Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, UserPlus, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { formatoCuenta, progresoOferta } from "@/lib/pricing";
@@ -25,6 +25,8 @@ import CategoriaChips from "@/components/demo/categoria-chips";
 import ModoAppOverlay from "@/components/demo/modo-app-overlay";
 import Karaoke from "@/components/demo/karaoke";
 import { CabeceraDetalle, FilaCancion, TarjetaColeccion } from "@/components/demo/catalogo-demo";
+import { ReproductorCompleto } from "@/components/demo/reproductor-completo";
+import { PaseTope } from "@/components/demo/pase-tope";
 
 // Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
 const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
@@ -210,6 +212,10 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const [repetir, setRepetir] = useState(false);
 
   const [topeAbierto, setTopeAbierto] = useState(false);
+  /** Reproductor a pantalla completa dentro del marco ("Ahora suena"). */
+  const [reproductorAbierto, setReproductorAbierto] = useState(false);
+  /** Cola como ventana emergente, encima del reproductor. */
+  const [colaAbierta, setColaAbierta] = useState(false);
   const [codigoAbierto, setCodigoAbierto] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
   const listaRef = useRef<HTMLDivElement>(null);
@@ -1114,6 +1120,13 @@ export default function DemoPlayer({ onCuenta }: Props) {
                           onReproducir={() => void reproducir(p, detalleCanciones)}
                           onDescargar={() => void descargar(p)}
                           onEncolar={() => alternarCola(p)}
+                          onAbrirCola={() => {
+                            // Sin pista actual el reproductor estaría vacío: se
+                            // arranca esta y se abre la cola encima.
+                            if (!pista) void reproducir(p);
+                            setReproductorAbierto(true);
+                            setColaAbierta(true);
+                          }}
                           enCola={cola.some((x) => x.id === p.id)}
                         />
                       ))}
@@ -1168,6 +1181,13 @@ export default function DemoPlayer({ onCuenta }: Props) {
                           onReproducir={() => void reproducir(p, cancionesResultados)}
                           onDescargar={() => void descargar(p)}
                           onEncolar={() => alternarCola(p)}
+                          onAbrirCola={() => {
+                            // Sin pista actual el reproductor estaría vacío: se
+                            // arranca esta y se abre la cola encima.
+                            if (!pista) void reproducir(p);
+                            setReproductorAbierto(true);
+                            setColaAbierta(true);
+                          }}
                           enCola={cola.some((x) => x.id === p.id)}
                         />
                       ))}
@@ -1222,6 +1242,39 @@ export default function DemoPlayer({ onCuenta }: Props) {
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* Reproductor a pantalla completa: el mini alcanza para confirmar
+                que suena; en la PWA hace falta el marco entero. */}
+            {reproductorAbierto && pista && (
+              <ReproductorCompleto
+                pista={pista}
+                sonando={sonando}
+                preparando={preparando === pista.id}
+                avance={avance}
+                aleatorio={aleatorio}
+                repetir={repetir}
+                cola={cola}
+                descargando={descargando}
+                colaAbierta={colaAbierta}
+                onCerrar={() => {
+                  setColaAbierta(false);
+                  setReproductorAbierto(false);
+                }}
+                onAlternar={alternar}
+                onMover={moverse}
+                onAleatorio={() => setAleatorio((a) => !a)}
+                onRepetir={() => setRepetir((r) => !r)}
+                onDescargar={(p) => void descargar(p)}
+                onReproducirCola={(p) => {
+                  setCola((actual) => actual.filter((x) => x.id !== p.id));
+                  void reproducir(p);
+                }}
+                onQuitarCola={(p) => setCola((actual) => actual.filter((x) => x.id !== p.id))}
+                onLimpiarCola={() => setCola([])}
+                onAbrirCola={() => setColaAbierta(true)}
+                onCerrarCola={() => setColaAbierta(false)}
+              />
             )}
 
             {/* Miniplayer */}
@@ -1294,6 +1347,15 @@ export default function DemoPlayer({ onCuenta }: Props) {
                            : ""}
                     </span>
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setReproductorAbierto(true)}
+                    aria-label={t("demoPlayerAbrir")}
+                    title={t("demoPlayerAbrir")}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-muted-foreground ring-1 ring-white/10 transition hover:text-primary"
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                  </button>
                   <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums backdrop-blur-sm">
                     <span className="text-foreground">{mmss(avance)}</span>
                     <span className="text-muted-foreground"> / {mmss(pista.duracion)}</span>
@@ -1520,6 +1582,8 @@ export default function DemoPlayer({ onCuenta }: Props) {
               <h2 className="text-lg font-bold sm:text-xl">{t("demoPaywallTitle")}</h2>
               <p className="mt-1 text-xs text-muted-foreground sm:text-sm">{t("demoPaywallBody")}</p>
             </div>
+
+            <PaseTope />
 
             <div className="space-y-2.5">
               <button

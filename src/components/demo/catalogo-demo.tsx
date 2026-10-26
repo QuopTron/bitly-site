@@ -59,9 +59,21 @@ export function TarjetaColeccion({
       type="button"
       onClick={onAbrir}
       title={Plantilla(t("demoAbrirItem"), { nombre: p.titulo })}
-      className="anim-entra group flex min-w-0 flex-col gap-2 rounded-2xl border border-border/60 bg-card/40 p-2 text-left transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card/70 active:scale-[0.98]"
+      className="anim-entra group relative flex min-w-0 flex-col gap-2 overflow-hidden rounded-2xl border border-white/10 bg-card/30 p-2 text-left shadow-lg shadow-black/20 backdrop-blur-xl transition duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-card/50 active:scale-[0.98]"
       style={{ animationDelay: `${Math.min(indice, 8) * 35}ms` }}
     >
+      {/* Vidrio sobre la portada: el color que domina la carátula tiñe la
+          tarjeta entera. Sin la imagen, el degradado de marca hace lo mismo. */}
+      {p.caratula ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 scale-125 opacity-40 blur-2xl"
+          style={{ backgroundImage: `url(${p.caratula})`, backgroundSize: "cover", backgroundPosition: "center" }}
+        />
+      ) : (
+        <span aria-hidden className="pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: "var(--gradiente-marca)" }} />
+      )}
+      <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.06] via-transparent to-black/30" />
       <span className="relative block aspect-square w-full overflow-hidden rounded-xl bg-muted shadow-sm">
         <Cover p={p} clase="h-full w-full" />
         <span className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-80" />
@@ -92,6 +104,7 @@ export function FilaCancion({
   onReproducir,
   onDescargar,
   onEncolar,
+  onAbrirCola,
   enCola = false,
   indice = 0,
 }: {
@@ -105,6 +118,8 @@ export function FilaCancion({
   onDescargar: () => void;
   /** Deslizar la tarjeta a la derecha: con esto nacen las colas. */
   onEncolar?: () => void;
+  /** Abre la cola como ventana emergente desde la propia tarjeta. */
+  onAbrirCola?: () => void;
   enCola?: boolean;
   indice?: number;
 }) {
@@ -159,16 +174,26 @@ export function FilaCancion({
         touchAction: "pan-y",
       }}
       aria-busy={preparando || undefined}
-      className={`anim-entra group relative flex items-center gap-2 rounded-2xl border p-2 pr-1.5 ${
+      className={`anim-entra group relative flex items-center gap-2 overflow-hidden rounded-2xl border p-2 pr-1.5 backdrop-blur-xl ${
         enMovimiento ? "transition-none" : "transition duration-200"
       } ${
         preparando
           ? "border-primary/40 bg-primary/10"
           : activa
             ? "border-primary/30 bg-primary/12"
-            : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-card/85"
+            : "border-white/10 bg-card/35 hover:border-border/70 hover:bg-card/55"
       }`}
     >
+      {/* El color de la portada tiñe la fila (vidrio esmerilado). */}
+      {p.caratula ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 -left-6 w-40 scale-125 opacity-30 blur-2xl"
+          style={{ backgroundImage: `url(${p.caratula})`, backgroundSize: "cover", backgroundPosition: "center" }}
+        />
+      ) : (
+        <span aria-hidden className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: "var(--gradiente-marca)" }} />
+      )}
       {/* Barra de espera: mientras se busca el audio no hay nada que oír, pero
           sí algo que ver. Sin esto, en el celular el toque parecía no hacer nada
           hasta que la pista arrancaba (o hasta que fallaba, en silencio). */}
@@ -221,6 +246,21 @@ export function FilaCancion({
         <span className="hidden shrink-0 text-[11px] font-semibold tabular-nums text-muted-foreground sm:block">
           {mmss(p.duracion)}
         </span>
+      )}
+      {onAbrirCola && (
+        <button
+          type="button"
+          onClick={onAbrirCola}
+          title={enCola ? t("demoColaAbrir") : t("demoEncolar")}
+          aria-label={enCola ? t("demoColaAbrir") : t("demoEncolar")}
+          className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 transition ${
+            enCola
+              ? "bg-primary/15 text-primary ring-primary/30"
+              : "text-muted-foreground ring-border/50 hover:bg-primary/10 hover:text-primary hover:ring-primary/30"
+          }`}
+        >
+          {enCola ? <Check className="h-3.5 w-3.5" /> : <ListPlus className="h-3.5 w-3.5" />}
+        </button>
       )}
       <button
         type="button"
