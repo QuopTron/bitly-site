@@ -746,8 +746,31 @@ async function buscarBandcamp(consulta: string): Promise<ResultadoBandcamp[]> {
   }
 }
 
-/** La página de la pista trae `data-tralbum` con el MP3 firmado y la duración. */
-async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
+/**
+ * Pide la página de la pista a la instancia de Yattee y devuelve su MP3.
+ *
+ * Bandcamp está detrás del reto anti-bot de Fastly: desde Cloudflare la página
+ * llega con 200 pero sin `data-tralbum` (3 KB de desafío), así que el audio es
+ * inalcanzable. La instancia sí la recibe completa y expone el MP3 firmado en
+ * `/api/v1/bandcamp/audio`, que es exactamente lo que devuelve cualquier
+ * visitante al darle play en la web de Bandcamp.
+ */
+async function audioPorInstanciaBandcamp(
+  url: string,
+): Promise<{ url: string; duracion: number } | null> {
+  const cfg = configYouTube();
+  if (!cfg.yattee) return null;
+  const datos = await pedirYattee<{ ok?: boolean; mp3?: string; duracion?: number }>(
+    cfg,
+    `/api/v1/bandcamp/audio?url=${encodeURIComponent(url)}`,
+    20_000,
+  );
+  if (!datos?.ok || !datos.mp3) return null;
+  return { url: datos.mp3, duracion: Math.max(0, Math.round(datos.duracion ?? 0)) };
+}
+
+/** Lectura directa de la página (funciona desde una IP residencial). */
+async function leerPaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
   try {
@@ -772,6 +795,20 @@ async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duraci
   } finally {
     clearTimeout(reloj);
   }
+}
+
+/**
+ * MP3 de una pista: primero se intenta la página directa y, si Bandcamp la
+ * entrega como reto anti-bot (lo normal desde el Worker), se le pide a la
+ * instancia de Yattee, que sí la recibe entera.
+ */
+async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
+  const propio = await leerPaginaBandcamp(url);
+  if (propio) return propio;
+  const porInstancia = await audioPorInstanciaBandcamp(url);
+  if (porInstancia) return porInstancia;
+  console.warn(`[bandcamp] sin audio: ni la página directa ni la instancia devolvieron MP3 (${url})`);
+  return null;
 }
 
 /**
