@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { estadoPresente } from "@/server/presente";
+import { presenciaImpl } from "@/server/presente";
 
 /**
  * Latido de presencia.
@@ -20,10 +20,12 @@ export const Route = createFileRoute("/api/presente")({
           // Sin cuerpo se cuenta sólo lo que ya había: no es un error.
         }
 
-        let estado: Awaited<ReturnType<typeof estadoPresente>> | null = null;
+        let estado: Awaited<ReturnType<typeof presenciaImpl>> | null = null;
         try {
-          estado = await estadoPresente({ data: datos });
-        } catch {
+          estado = await presenciaImpl(datos);
+        } catch (e) {
+          // El latido nunca rompe la página; se deja rastro para producción.
+          console.error("[api/presente] no se pudo contar:", e instanceof Error ? e.message : e);
           estado = null;
         }
 

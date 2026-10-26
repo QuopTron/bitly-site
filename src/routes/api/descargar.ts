@@ -33,6 +33,36 @@ function limpiarNombre(valor: string): string {
     .slice(0, 120);
 }
 
+type PeticionAudio = Parameters<typeof resolverAudio>[0];
+
+/**
+ * Resuelve el audio y abre el stream, sin decidir todavía si se entrega.
+ *
+ * Devuelve también el `audio` cuando el enlace existía pero el host no lo
+ * sirvió: con eso quien llama puede pedir OTRO canal en vez de contestar que la
+ * pista no tiene audio (429 del catálogo, 403 del relay, enlace vencido).
+ */
+async function traerAudio(peticion: PeticionAudio, signal: AbortSignal) {
+  const audio = await resolverAudio(peticion).catch(() => null);
+  if (!audio) return { audio: null, upstream: null, tipo: null };
+
+  const upstream = await fetch(audio.url, {
+    headers: {
+      Accept: "audio/*,*/*;q=0.8",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    },
+    signal,
+    redirect: "follow",
+  }).catch(() => null);
+  const tipo = upstream?.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? null;
+  if (!upstream?.ok || !upstream.body || (tipo && tipo.startsWith("text/"))) {
+    await upstream?.body?.cancel().catch(() => undefined);
+    return { audio, upstream: null, tipo };
+  }
+  return { audio, upstream, tipo };
+}
+
 function extensionDe(url: string, tipo: string | null, calidad: "flac" | "estandar"): string {
   try {
     const extension = new URL(url).pathname.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase();
@@ -63,7 +93,7 @@ export const Route = createFileRoute("/api/descargar")({
 
         const calidad = premium ? "flac" : "estandar";
 
-        const audio = await resolverAudio({
+        const peticion: PeticionAudio = {
           titulo,
           artista,
           album: url.searchParams.get("album") ?? undefined,
@@ -73,23 +103,25 @@ export const Route = createFileRoute("/api/descargar")({
           id: url.searchParams.get("id"),
           videoId: url.searchParams.get("videoId"),
           calidad,
-        }).catch(() => null);
-        if (!audio) return jsonError("sin_audio", 404);
+        };
 
-        const upstream = await fetch(audio.url, {
-          headers: {
-            Accept: "audio/*,*/*;q=0.8",
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-          },
-          signal: request.signal,
-          redirect: "follow",
-        }).catch(() => null);
-        const tipoCrudo = upstream?.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? null;
-        if (!upstream?.ok || !upstream.body || (tipoCrudo && tipoCrudo.startsWith("text/"))) {
-          await upstream?.body?.cancel().catch(() => undefined);
-          return jsonError("sin_audio", 502);
+        let traido = await traerAudio(peticion, request.signal);
+        // El enlace se resolvió pero el host no lo abrió: se pide otro canal.
+        // Sin esto, un 429 del catálogo hacía que la descarga contestara «no
+        // hay audio» aunque la misma pista estuviera en el relay o YouTube.
+        if (!traido.upstream && traido.audio && !request.signal.aborted) {
+          traido = await traerAudio(
+            { ...peticion, evitar: [traido.audio.canal] },
+            request.signal,
+          );
         }
+        if (!traido.audio || !traido.upstream) return jsonError("sin_audio", 404);
+
+        const audio = traido.audio;
+        const upstream = traido.upstream;
+        const cuerpo = upstream.body;
+        if (!cuerpo) return jsonError("sin_audio", 404);
+        const tipoCrudo = traido.tipo;
 
         let restantes: number | null = null;
         if (!premium) {
@@ -101,7 +133,7 @@ export const Route = createFileRoute("/api/descargar")({
             canal: audio.canal,
           });
           if (!consumo.ok) {
-            await upstream.body.cancel().catch(() => undefined);
+            await cuerpo.cancel().catch(() => undefined);
             if (consumo.motivo === "limite") {
               return jsonError("limite", 429, { "x-descargas-restantes": "0", "x-descargas-limite": String(LIMITE_DESCARGAS) });
             }
@@ -128,7 +160,7 @@ export const Route = createFileRoute("/api/descargar")({
         const largo = upstream.headers.get("content-length");
         if (largo) headers.set("content-length", largo);
 
-        return new Response(upstream.body, { status: 200, headers });
+        return new Response(cuerpo, { status: 200, headers });
       },
     },
   },

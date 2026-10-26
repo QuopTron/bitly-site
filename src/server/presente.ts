@@ -149,46 +149,54 @@ export async function contarAnonimos(): Promise<number> {
   return visitas.size;
 }
 
+export type DatosPresente = { visita?: unknown; token?: unknown };
+
 /**
  * Registra un latido y devuelve el estado.
  *
  * `visita` es el identificador aleatorio del navegador (anónimos) y `token` la
  * sesión, si la hay: así el panel ve en línea a quien está navegando aunque no
  * abra «Mi cuenta». Cualquiera de los dos puede faltar.
+ *
+ * Es una función normal (y no el handler de la server function) porque la ruta
+ * `/api/presente` la llama en el servidor: así el latido no depende del puente
+ * RPC, que en el worker de producción se arma para las peticiones del navegador.
  */
+export async function presenciaImpl(data: DatosPresente): Promise<EstadoPresente> {
+  const visita = limpiar(data?.visita, 80);
+  const token = limpiar(data?.token, 500);
+
+  await hidratar();
+  if (visita) {
+    try {
+      visitas.set(await huellaVisita(visita), Date.now());
+      podar();
+      persistir();
+    } catch {
+      // Sin crypto (raro) el latido se ignora: no es motivo para fallar.
+    }
+  }
+  if (token) {
+    try {
+      // Escribe como mucho cada 5 minutos (ver `latirCuenta`).
+      const { latirCuenta } = await import("@/server/cuentas");
+      await latirCuenta(token);
+    } catch {
+      // Un token vencido no rompe el latido anónimo.
+    }
+  }
+
+  const cuentas = await cuentasEnLinea();
+  const anonimos = visitas.size;
+  return {
+    ok: true,
+    anonimos,
+    cuentas,
+    total: anonimos + cuentas,
+    actualizado: new Date().toISOString(),
+  };
+}
+
 export const estadoPresente = createServerFn({ method: "POST" })
-  .validator((d: { visita?: unknown; token?: unknown }) => d)
-  .handler(async ({ data }): Promise<EstadoPresente> => {
-    const visita = limpiar(data?.visita, 80);
-    const token = limpiar(data?.token, 500);
-
-    await hidratar();
-    if (visita) {
-      try {
-        visitas.set(await huellaVisita(visita), Date.now());
-        podar();
-        persistir();
-      } catch {
-        // Sin crypto (raro) el latido se ignora: no es motivo para fallar.
-      }
-    }
-    if (token) {
-      try {
-        // Escribe como mucho cada 5 minutos (ver `latirCuenta`).
-        const { latirCuenta } = await import("@/server/cuentas");
-        await latirCuenta(token);
-      } catch {
-        // Un token vencido no rompe el latido anónimo.
-      }
-    }
-
-    const cuentas = await cuentasEnLinea();
-    const anonimos = visitas.size;
-    return {
-      ok: true,
-      anonimos,
-      cuentas,
-      total: anonimos + cuentas,
-      actualizado: new Date().toISOString(),
-    };
-  });
+  .validator((d: DatosPresente) => d)
+  .handler(async ({ data }): Promise<EstadoPresente> => presenciaImpl(data));
