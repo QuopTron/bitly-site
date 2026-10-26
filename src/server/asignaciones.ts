@@ -22,6 +22,7 @@ import { conCerrojo } from "@/server/cerrojo";
 import { correoConfigurado, enviarCorreo } from "@/server/correo";
 import { correoCredenciales } from "@/server/correo-cuenta";
 import { registrarEmitidos, soltarEmitido } from "@/server/codigos-emitidos";
+import { emitirCodigos } from "@/server/codigos";
 import {
   asignarPremiumACuenta,
   codigosAsignados,
@@ -376,6 +377,78 @@ export const asignarCodigos = createServerFn({ method: "POST" })
         };
       } catch (e) {
         console.error("[asignaciones] no se pudo repartir:", e instanceof Error ? e.message : e);
+        return { ok: false, motivo: "servidor" };
+      }
+    });
+  });
+
+/* ── Regalar Premium desde el panel ───────────────────────────────────── */
+
+export type ResultadoRegalo =
+  | { ok: true; codigo: string; usuario: string }
+  | {
+      ok: false;
+      motivo: "admin" | "datos" | "sin_cuenta" | "ya_premium" | "sin_codigos" | "servidor";
+    };
+
+/**
+ * Le da Premium a una cuenta que ya existe, sin compra de por medio.
+ *
+ * Lo usa el botón «Regalar Premium» del panel de usuarios. Emite UN código con
+ * la misma firma que una compra y se lo asigna a la cuenta; si la persona no
+ * tiene código, la demo y «Mi cuenta» lo ven en el acto. Los códigos ya
+ * repartidos (pedidos, invitaciones y cuentas) no se repiten.
+ */
+export const regalarPremium = createServerFn({ method: "POST" })
+  .validator((d: { admin?: unknown; correo?: unknown }) => d)
+  .handler(async ({ data }): Promise<ResultadoRegalo> => {
+    if (!(await adminValido(data?.admin))) return { ok: false, motivo: "admin" };
+    const correo = limpiar(data?.correo, 120).toLowerCase();
+    if (!correoValido(correo)) return { ok: false, motivo: "datos" };
+
+    // Dos regalos simultáneos a la misma persona emitirían dos códigos para una
+    // sola cuenta (y quedaría uno libre sin dueño): entran en fila.
+    return conCerrojo(`regalo:${correo}`, async () => {
+      try {
+        const cuenta = await cuentaPorCorreo(correo);
+        if (!cuenta) return { ok: false, motivo: "sin_cuenta" };
+        if (cuenta.codigo) return { ok: false, motivo: "ya_premium" };
+
+        const [pedidos, asignaciones, asignados] = await Promise.all([
+          leerPedidos(),
+          leerAsignaciones(),
+          codigosAsignados(),
+        ]);
+        const enUso = new Set(asignados.keys());
+        for (const a of asignaciones) {
+          if (a.estado !== "revocada") enUso.add(a.codigo);
+        }
+        for (const p of pedidos) {
+          for (const codigo of codigosDe(p)) enUso.add(codigo);
+        }
+
+        // Folio propio del regalo: no hay pedido, y así el panel y «Mi cuenta»
+        // pueden distinguir un Premium regalado de uno comprado.
+        const folio = `REGALO-${cuenta.id.slice(0, 6).toUpperCase()}`;
+        const emision = await emitirCodigos(1, folio, enUso);
+        if (!emision.ok) return { ok: false, motivo: "sin_codigos" };
+        const codigo = emision.codigos[0];
+
+        const asignado = await asignarPremiumACuenta(cuenta.id, codigo, folio);
+        if (!asignado.ok) {
+          // No quedó en ninguna cuenta: se apaga para no dejar un código suelto
+          // que acredite Premium sin dueño.
+          await soltarEmitido(codigo).catch(() => false);
+          return { ok: false, motivo: "servidor" };
+        }
+
+        return {
+          ok: true,
+          codigo,
+          usuario: cuenta.usuario || correo.split("@")[0],
+        };
+      } catch (e) {
+        console.error("[asignaciones] no se pudo regalar el premium:", e instanceof Error ? e.message : e);
         return { ok: false, motivo: "servidor" };
       }
     });

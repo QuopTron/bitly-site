@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bot, CircleDot, Gem, RefreshCw, ShieldOff, Trash2, UserRound, Users } from "lucide-react";
+import {
+  Bot,
+  CircleDot,
+  Eye,
+  Gem,
+  Gift,
+  RefreshCw,
+  ShieldOff,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { adminCuentas, type CuentaAdmin, type ResumenCuentas } from "@/server/cuentas";
+import { regalarPremium } from "@/server/asignaciones";
 
 /** Hace cuánto fue la última señal, en corto. */
 function hace(iso: string, es: boolean): string {
@@ -25,12 +37,21 @@ function Tarjeta({ valor, etiqueta }: { valor: number; etiqueta: string }) {
   );
 }
 
+/** Motivo del servidor → clave de traducción. */
+const MOTIVOS_REGALO: Record<string, string> = {
+  ya_premium: "adminUsuariosRegaloYa",
+  sin_codigos: "adminUsuariosRegaloSinCodigos",
+  sin_cuenta: "adminUsuariosRegaloSinCuenta",
+};
+
 export default function AdminCuentas({ codigo }: { codigo: string }) {
   const t = useI18n();
   const [cuentas, setCuentas] = useState<CuentaAdmin[]>([]);
   const [resumen, setResumen] = useState<ResumenCuentas | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState(false);
+  const [regalando, setRegalando] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<{ tipo: "ok" | "error"; texto: string; codigo?: string } | null>(null);
 
   const cargar = useCallback(async () => {
     if (!codigo) return;
@@ -53,12 +74,40 @@ export default function AdminCuentas({ codigo }: { codigo: string }) {
     void cargar();
   }, [cargar]);
 
+  const regalar = async (correo: string) => {
+    if (regalando) return;
+    setRegalando(correo);
+    setAviso(null);
+    try {
+      const r = await regalarPremium({ data: { admin: codigo, correo } });
+      if (r.ok) {
+        setAviso({ tipo: "ok", texto: `${t("adminUsuariosRegalado")} @${r.usuario}`, codigo: r.codigo });
+        // Refresco inmediato: el badge Premium y el resumen tienen que cambiar
+        // en la misma pasada, sin recargar el panel.
+        await cargar();
+      } else {
+        setAviso({ tipo: "error", texto: t(MOTIVOS_REGALO[r.motivo] ?? "adminUsuariosRegaloError") });
+      }
+    } catch {
+      setAviso({ tipo: "error", texto: t("adminUsuariosRegaloError") });
+    } finally {
+      setRegalando(null);
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
-          <CircleDot className={`h-3 w-3 ${(resumen?.enLinea ?? 0) > 0 ? "text-primary" : "text-muted-foreground"}`} aria-hidden />
+          <CircleDot
+            className={`h-3 w-3 ${(resumen?.enLinea ?? 0) > 0 ? "text-primary" : "text-muted-foreground"}`}
+            aria-hidden
+          />
           {t("adminUsuariosOnline")}: <strong className="text-foreground">{resumen?.enLinea ?? 0}</strong>
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground">
+          <Eye className="h-3 w-3" aria-hidden />
+          {t("adminUsuariosAnonimos")}: <strong className="text-foreground">{resumen?.anonimos ?? 0}</strong>
         </span>
         <button
           type="button"
@@ -72,14 +121,31 @@ export default function AdminCuentas({ codigo }: { codigo: string }) {
       </div>
 
       {resumen && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
           <Tarjeta valor={resumen.total} etiqueta={t("adminUsuariosTotal")} />
           <Tarjeta valor={resumen.enLinea} etiqueta={t("adminUsuariosOnline")} />
+          <Tarjeta valor={resumen.anonimos} etiqueta={t("adminUsuariosAnonimos")} />
           <Tarjeta valor={resumen.premium} etiqueta={t("adminUsuariosPremium")} />
           <Tarjeta valor={resumen.invitadas} etiqueta={t("adminUsuariosInvitadas")} />
           <Tarjeta valor={resumen.porConfirmar} etiqueta={t("adminUsuariosPorConfirmar")} />
           <Tarjeta valor={resumen.eliminadas} etiqueta={t("adminUsuariosEliminadas")} />
         </div>
+      )}
+
+      {aviso && (
+        <p
+          role="status"
+          className={`rounded-xl border px-3 py-2 text-[11px] ${
+            aviso.tipo === "ok"
+              ? "border-primary/40 bg-primary/10 text-primary"
+              : "border-destructive/40 bg-destructive/10 text-destructive"
+          }`}
+        >
+          {aviso.texto}
+          {aviso.codigo && (
+            <code className="ml-1 break-all text-[10px] text-foreground/70">{aviso.codigo}</code>
+          )}
+        </p>
       )}
 
       {cargando && cuentas.length === 0 && (
@@ -144,6 +210,21 @@ export default function AdminCuentas({ codigo }: { codigo: string }) {
                     ? `${t("adminUsuariosActividad")}: ${hace(c.ultimaActividad || c.ultimoAcceso, false)}`
                     : t("adminUsuariosNunca")}
                 </span>
+
+                {!c.premium && !c.eliminada && !c.baneada && (
+                  <button
+                    type="button"
+                    onClick={() => void regalar(c.correo)}
+                    disabled={regalando !== null}
+                    className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    <Gift
+                      className={`h-2.5 w-2.5 ${regalando === c.correo ? "animate-pulse" : ""}`}
+                      aria-hidden
+                    />
+                    {t("adminUsuariosRegalar")}
+                  </button>
+                )}
 
                 {c.codigo && (
                   <code className="w-full break-all rounded-lg bg-background/60 px-2 py-1 text-[9px] text-muted-foreground">

@@ -5,6 +5,7 @@ import { getLanguage, useLanguage } from "@/lib/i18n";
 import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { instalarReveals } from "@/lib/reveal";
 import { contarVista } from "@/lib/vistas";
+import { latirPresencia, useLatidoPresencia } from "@/lib/presente";
 import { bloquearDescarga, registrarServiceWorker, useEsStandalone } from "@/lib/pwa";
 import { SCRIPT_TEMA_INICIAL } from "@/lib/tema";
 import { DESCRIPCION, OG_IMAGE, SITIO, TITULO, jsonLd } from "@/lib/seo";
@@ -117,6 +118,9 @@ function RootComponent() {
   useEffect(() => {
     void contarVista();
   }, []);
+  // Presencia: un latido liviano por minuto, en cualquier ruta, para que el
+  // panel sepa cuánta gente hay en el sitio (con o sin cuenta).
+  useLatidoPresencia();
   // PWA: se registra el SW una vez (sólo en producción) y, si la página está
   // corriendo como app instalada, se apaga la descarga del audio.
   useEffect(() => {
@@ -124,6 +128,13 @@ function RootComponent() {
   }, []);
   const standalone = useEsStandalone();
   useEffect(() => (standalone ? bloquearDescarga() : undefined), [standalone]);
+  // Al cerrar la pestaña, un último latido: `pagehide` sí deja salir peticiones
+  // con keepalive (a diferencia de `unload`, que ya no se dispara en móvil).
+  useEffect(() => {
+    const alSalir = () => latirPresencia();
+    window.addEventListener("pagehide", alSalir);
+    return () => window.removeEventListener("pagehide", alSalir);
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />

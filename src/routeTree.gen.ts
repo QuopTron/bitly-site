@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApiDescargarRouteImport } from './routes/api/descargar'
+import { Route as ApiPresenteRouteImport } from './routes/api/presente'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const ApiDescargarRoute = ApiDescargarRouteImport.update({
   path: '/api/descargar',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPresenteRoute = ApiPresenteRouteImport.update({
+  id: '/api/presente',
+  path: '/api/presente',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/api/descargar': typeof ApiDescargarRoute
+  '/api/presente': typeof ApiPresenteRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/api/descargar': typeof ApiDescargarRoute
+  '/api/presente': typeof ApiPresenteRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/api/descargar': typeof ApiDescargarRoute
+  '/api/presente': typeof ApiPresenteRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/api/descargar'
+  fullPaths: '/' | '/admin' | '/api/descargar' | '/api/presente'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/api/descargar'
-  id: '__root__' | '/' | '/admin' | '/api/descargar'
+  to: '/' | '/admin' | '/api/descargar' | '/api/presente'
+  id: '__root__' | '/' | '/admin' | '/api/descargar' | '/api/presente'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   ApiDescargarRoute: typeof ApiDescargarRoute
+  ApiPresenteRoute: typeof ApiPresenteRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDescargarRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/presente': {
+      id: '/api/presente'
+      path: '/api/presente'
+      fullPath: '/api/presente'
+      preLoaderRoute: typeof ApiPresenteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   ApiDescargarRoute: ApiDescargarRoute,
+  ApiPresenteRoute: ApiPresenteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

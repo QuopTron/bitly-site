@@ -1009,4 +1009,11 @@ export const DICT: Record<string, [string, string]> = {
   adminUsuariosBaneada: ["Dada de baja por abuso",                   "Banned for abuse"],
   adminUsuariosLiberado:["Código liberado",                          "Released code"],
   adminUsuariosError:   ["No pudimos leer las cuentas.",             "We couldn't read the accounts."],
+  adminUsuariosAnonimos:["Anónimos en línea",                       "Anonymous online"],
+  adminUsuariosRegalar: ["Regalar Premium",                          "Gift Premium"],
+  adminUsuariosRegalado:["Premium regalado a",                      "Premium gifted to"],
+  adminUsuariosRegaloError:["No pudimos regalar el Premium.",       "We couldn't gift the Premium."],
+  adminUsuariosRegaloYa:["Esa cuenta ya tiene Premium.",            "That account already has Premium."],
+  adminUsuariosRegaloSinCodigos:["No hay códigos disponibles.",     "No codes available."],
+  adminUsuariosRegaloSinCuenta:["Esa cuenta ya no existe.",         "That account no longer exists."],
 };

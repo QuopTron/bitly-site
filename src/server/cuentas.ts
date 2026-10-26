@@ -186,6 +186,8 @@ export type CuentaAdmin = {
 export type ResumenCuentas = {
   total: number;
   enLinea: number;
+  /** Visitantes sin sesión en la ventana de presencia (ver `presente.ts`). */
+  anonimos: number;
   premium: number;
   invitadas: number;
   porConfirmar: number;
@@ -506,6 +508,45 @@ export async function cuentaDeToken(token: string | null | undefined): Promise<C
 export async function cuentaPorId(id: string): Promise<CuentaGuardada | null> {
   if (!id) return null;
   return (await leerCuentas()).find((c) => c.id === id) ?? null;
+}
+
+/** Cuántas cuentas con sesión latieron en la ventana de presencia. */
+export async function contarCuentasEnLinea(): Promise<number> {
+  try {
+    const ahora = Date.now();
+    return (await leerCuentas()).filter((c) => {
+      if (c.eliminada) return false;
+      const actividad = Date.parse(c.ultimaActividad || c.ultimoAcceso || "");
+      return Number.isFinite(actividad) && ahora - actividad < EN_LINEA_MS;
+    }).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Latido de la cuenta desde el layout del sitio.
+ *
+ * Actualiza `ultimaActividad` como mucho cada 5 minutos (cada guardado es un
+ * commit en el repo de datos) para que el panel la vea en línea mientras
+ * navega, sin esperar a que abra «Mi cuenta».
+ */
+export async function latirCuenta(token: string | null | undefined): Promise<boolean> {
+  const cuenta = await cuentaDeToken(token);
+  if (!cuenta) return false;
+  const ahora = Date.now();
+  const ultima = Date.parse(cuenta.ultimaActividad ?? cuenta.ultimoAcceso ?? "");
+  if (Number.isFinite(ultima) && ahora - ultima < ACTIVIDAD_ESCRITURA_MS) return false;
+  try {
+    const cuentas = await leerCuentas();
+    const indice = cuentas.findIndex((c) => c.id === cuenta.id);
+    if (indice < 0) return false;
+    const siguiente = cuentas.slice();
+    siguiente[indice] = { ...cuentas[indice], ultimaActividad: new Date(ahora).toISOString() };
+    return guardar(siguiente, `cuenta ${cuenta.id}: actividad`);
+  } catch {
+    return false;
+  }
 }
 
 export type CodigoAsignado = {
@@ -1360,9 +1401,15 @@ export const adminCuentas = createServerFn({ method: "POST" })
         })
         .sort((a, b) => (a.creado < b.creado ? 1 : -1));
 
+      // Import dinámico: `presente.ts` importa este módulo, así que cargarlo
+      // arriba armaría un ciclo. En el handler no hay problema.
+      const { contarAnonimos } = await import("@/server/presente");
+      const anonimos = await contarAnonimos().catch(() => 0);
+
       const resumen: ResumenCuentas = {
         total: cuentas.filter((c) => !c.eliminada).length,
         enLinea: cuentas.filter((c) => c.enLinea).length,
+        anonimos,
         premium: cuentas.filter((c) => c.premium && !c.eliminada).length,
         invitadas: cuentas.filter((c) => c.origen === "invitada" && !c.eliminada).length,
         porConfirmar: cuentas.filter((c) => !c.correoConfirmado && !c.eliminada).length,
