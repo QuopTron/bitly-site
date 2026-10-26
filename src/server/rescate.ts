@@ -109,6 +109,12 @@ export type PeticionAudio = {
    * que una sesión válida no gaste el cupo de rescates por IP.
    */
   token?: string | null;
+  /**
+   * Canales que el navegador ya intentó y no abrieron (429 del catálogo, 403
+   * del relay, enlace vencido). Se piden los demás en vez de devolver otra vez
+   * el mismo enlace roto: es la red que evita que la demo quede muda.
+   */
+  evitar?: string[];
 };
 
 export type AudioResuelto = {
@@ -436,6 +442,45 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
 const MONOCHROME_BASE = "https://tracks.monochrome.st";
 const TIMEOUT_MONOCHROME_MS = 4_000;
 const TTL_MONOCHROME_MS = 30 * 60 * 1000;
+/**
+ * Enfriamiento del catálogo cuando su host de pistas limita (429) o niega.
+ *
+ * El catálogo se buscaba MUY bien, pero el archivo vive en otro host que bajo
+ * carga responde 429: el enlace "existía" y el navegador quedaba mudo con «esa
+ * pista no tiene audio». Antes de entregar un enlace de monochrome se prueba
+ * con un Range mínimo; si falla, se marca el canal unos minutos y el rescate
+ * sigue por stash/Bandcamp/YouTube sin devolverle a nadie un enlace muerto.
+ */
+let monoCaidoHasta = 0;
+const MONO_ENFRIAMIENTO_MS = 3 * 60 * 1000;
+const TIMEOUT_SONDA_MS = 1_500;
+
+/** ¿El host de pistas de monochrome sirve este enlace ahora? */
+async function monochromeDisponible(url: string): Promise<boolean> {
+  if (Date.now() < monoCaidoHasta) return false;
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_SONDA_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { Range: "bytes=0-1", "User-Agent": USER_AGENT },
+      signal: control.signal,
+      redirect: "follow",
+    });
+    // No hace falta el cuerpo: se corta enseguida para no bajar la pista entera.
+    await res.body?.cancel().catch(() => undefined);
+    if (res.ok || res.status === 206) return true;
+    if (res.status === 403 || res.status === 429 || res.status >= 500) {
+      monoCaidoHasta = Date.now() + MONO_ENFRIAMIENTO_MS;
+    }
+    return false;
+  } catch {
+    // Timeout o red caída: se prueba otro canal, pero sin castigar el catálogo
+    // (puede ser un corte puntual de ESTE isolate, no del host).
+    return false;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
 
 /**
  * Memoria ISRC → pista del isolate. El mismo tema se pide para el clic, la
@@ -1577,7 +1622,11 @@ function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
  * espera encima. Sin esto el clic paga identidad (~6 s) + búsqueda de YouTube
  * en SERIE, que era justo el salto de ~10 s a ~25 s en canciones sin FLAC.
  */
-async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise<AudioResuelto | null> {
+async function resolverAudioInterno(
+  p: PeticionAudio,
+  claves: string[],
+  evitar: Set<string>,
+): Promise<AudioResuelto | null> {
   const titulo = (p.titulo ?? "").trim();
   const artista = (p.artista ?? "").trim();
   const album = (p.album ?? "").trim();
@@ -1588,9 +1637,10 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   if (!configCache || configCache.expira <= Date.now()) void traerConfigStash();
 
   // En paralelo desde ya (sin título el backend rechazaría igual): ver doc.
-  const ytParalelo = titulo
-    ? rescatarYouTube({ ...p, titulo, artista, album, duracionMs })
-    : Promise.resolve(null);
+  const ytParalelo =
+    titulo && !evitar.has("youtube")
+      ? rescatarYouTube({ ...p, titulo, artista, album, duracionMs })
+      : Promise.resolve(null);
 
   const isrcPedido = normalizarISRC(p.isrc);
   const bienFormado = esISRCValido(isrcPedido);
@@ -1638,7 +1688,7 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // que el catálogo sin pérdida resuelve en ~1 s. Agotado el tope se sigue por
   // la vía sin pérdida; si TAMBIÉN falla, el respaldo final vuelve a esperar a
   // `ytParalelo` completo con su propio techo, así que el nicho no se pierde.
-  if (p.calidad === "estandar") {
+  if (p.calidad === "estandar" && !evitar.has("youtube")) {
     const yt = await Promise.race([
       ytParalelo,
       new Promise<null>((listo) => setTimeout(() => listo(null), TOPE_ESTANDAR_YT_MS)),
@@ -1652,10 +1702,13 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // Monochrome corre en paralelo con la identidad de Qobuz: en cuanto hay un
   // ISRC (el de la pista o el que publica Deezer) se le pregunta a su catálogo.
   // Es la fuente sin pérdida más fiable cuando el relay de stash está ocupado.
-  const monoParalelo = (async () => {
-    const isrc = porIsrc ?? (await isrcDeRespaldo(pedido));
-    return { isrc, pista: isrc ? await resolverMonochrome(isrc) : null };
-  })();
+  type MonoInicial = { isrc: string | null; pista: Awaited<ReturnType<typeof resolverMonochrome>> };
+  const monoParalelo: Promise<MonoInicial> = evitar.has("monochrome")
+    ? Promise.resolve({ isrc: null, pista: null })
+    : (async () => {
+        const isrc = porIsrc ?? (await isrcDeRespaldo(pedido));
+        return { isrc, pista: isrc ? await resolverMonochrome(isrc) : null };
+      })();
 
   /**
    * Identidad de una pista: TRES rutas en PARALELO, empujadas en orden de
@@ -1772,20 +1825,25 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // nombre arranca YA, en paralelo con la identidad de Qobuz. Antes esperaba a
   // que terminara `monoParalelo` (que puede incluir Deezer) y recién entonces
   // empezaba otra búsqueda de 4 s: era el tramo más largo del rescate de nicho.
-  const monoNombre = titulo ? resolverMonochromePorNombre(pedido) : Promise.resolve(null);
+  const monoNombre =
+    titulo && !evitar.has("monochrome")
+      ? resolverMonochromePorNombre(pedido)
+      : Promise.resolve(null);
 
   // Bandcamp se busca con un pequeño retardo, en paralelo con el catálogo y el
   // relay: si el FLAC aparece primero, su resultado se descarta; si no (nicho),
   // ya está listo y no paga otra espera al final. El retardo evita gastar dos
   // búsquedas en el caso común, que monochrome resuelve en menos de un segundo.
   const bandcampParalelo = (async () => {
-    if (!titulo || !artista) return null;
+    if (!titulo || !artista || evitar.has("bandcamp")) return null;
     await new Promise((listo) => setTimeout(listo, 1_200));
     return resolverBandcamp(pedido);
   })();
 
   const monoInicial = await monoParalelo;
-  if (monoInicial.pista) return devolverMonochrome(monoInicial.pista);
+  if (monoInicial.pista && (await monochromeDisponible(monoInicial.pista.url))) {
+    return devolverMonochrome(monoInicial.pista);
+  }
 
   const [candidatosResueltos, monoPorNombre] = await Promise.all([candidatosPromise, monoNombre]);
   let candidatos = candidatosResueltos;
@@ -1808,20 +1866,22 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // de la pista no estaba, ya se buscó por nombre en paralelo
   // (ver resolverMonochromePorNombre); después se prueban los ISRC que
   // acreditaron Qobuz/Deezer.
-  if (monoPorNombre) return devolverMonochrome(monoPorNombre);
+  if (monoPorNombre && (await monochromeDisponible(monoPorNombre.url))) {
+    return devolverMonochrome(monoPorNombre);
+  }
 
   let mono = null as Awaited<ReturnType<typeof resolverMonochrome>>;
   const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
-  for (const c of candidatos) {
+  for (const c of evitar.has("monochrome") ? [] : candidatos) {
     const isrc = normalizarISRC(c.isrc ?? "");
     if (!isrc || isrcsMonochrome.has(isrc)) continue;
     isrcsMonochrome.add(isrc);
     mono = await resolverMonochrome(isrc, 2_500);
     if (mono) break;
   }
-  if (mono) return devolverMonochrome(mono);
+  if (mono && (await monochromeDisponible(mono.url))) return devolverMonochrome(mono);
 
-  for (const c of candidatos) {
+  for (const c of evitar.has("stash-relay") ? [] : candidatos) {
     const mint = await mintaStash(c.id);
     if (!mint) continue;
     const duracion = c.duracionMs > 0 ? Math.round(c.duracionMs / 1000) : p.duracionMs ? Math.round(p.duracionMs / 1000) : 0;
@@ -1858,6 +1918,7 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   // audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s. La
   // petición arrancó al entrar en la función (ver `ytParalelo`), así que acá
   // solo se espera el resultado, ya avanzado.
+  if (evitar.has("youtube")) return null;
   const yt = await ytParalelo;
   if (!yt) return null;
   return devolverYouTube(yt);
@@ -1869,9 +1930,12 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
  */
 export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
   const claves = clavesDe(p);
+  const evitar = new Set((Array.isArray(p.evitar) ? p.evitar : []).map((c) => String(c)));
 
+  // Un enlace cacheado del canal que el navegador acaba de fallar no sirve:
+  // se resuelve de nuevo para pedir OTRO canal.
   const cacheado = enlaceCacheado(claves);
-  if (cacheado) {
+  if (cacheado && !evitar.has(cacheado.canal)) {
     return {
       url: cacheado.url,
       duracion: cacheado.duracion,
@@ -1881,11 +1945,11 @@ export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | n
       isrc: cacheado.isrc,
     };
   }
-  const vueloKey = claves[0];
+  const vueloKey = `${claves[0]}|${[...evitar].sort().join(",")}`;
   const enCurso = enVuelo.get(vueloKey);
   if (enCurso) return enCurso;
 
-  const tarea = resolverAudioInterno(p, claves).finally(() => {
+  const tarea = resolverAudioInterno(p, claves, evitar).finally(() => {
     if (enVuelo.get(vueloKey) === tarea) enVuelo.delete(vueloKey);
   });
   enVuelo.set(vueloKey, tarea);

@@ -168,7 +168,34 @@ async function buscarRemoto(
  */
 const enCurso = new Map<string, Promise<AudioRescatado | null>>();
 
-async function resolverAudio(p: Pista): Promise<AudioRescatado | null> {
+/**
+ * Canales que acaban de fallar EN ESTE navegador, con su vencimiento.
+ *
+ * Un 429 del host de pistas no es de una sola canción: si el catálogo está
+ * limitando, todas las pistas van a fallar con ese canal y cada una pagaría la
+ * espera del fallo antes de caer al respaldo. Anotarlo por dos minutos hace
+ * que las siguientes vayan derecho al canal que sí abre, sin sonar peor.
+ */
+const canalesCaidos = new Map<string, number>();
+const CAIDO_MS = 2 * 60 * 1000;
+
+/** Marca un canal como caído en este navegador por un par de minutos. */
+export function anotarCanalCaido(canal: string | null | undefined): void {
+  const limpio = String(canal ?? "").trim();
+  if (!limpio) return;
+  canalesCaidos.set(limpio, Date.now() + CAIDO_MS);
+}
+
+/** Canales que hoy no abren; se poda solo al consultarlo. */
+function canalesCaidosAhora(): string[] {
+  const ahora = Date.now();
+  for (const [canal, hasta] of canalesCaidos) {
+    if (hasta <= ahora) canalesCaidos.delete(canal);
+  }
+  return [...canalesCaidos.keys()];
+}
+
+async function resolverAudio(p: Pista, evitar: string[] = []): Promise<AudioRescatado | null> {
   const audio = await rescatarDemo({
     titulo: p.titulo,
     artista: p.artista,
@@ -178,6 +205,7 @@ async function resolverAudio(p: Pista): Promise<AudioRescatado | null> {
     ext: p.ext,
     codigo: codigoPremiumGuardado(),
     token: leerTokenCuenta(),
+    evitar,
   });
   if (!audio) return null;
   p.audioUrl = audio.url;
@@ -194,14 +222,19 @@ async function resolverAudio(p: Pista): Promise<AudioRescatado | null> {
  * Con `codigo` viaja el código Premium guardado: el servidor lo verifica y
  * decide si esta pista viene en FLAC o en calidad estándar (ver `demo-proxy`).
  */
-export function audioDe(p: Pista): Promise<AudioRescatado | null> {
-  if (p.audioUrl) {
+export function audioDe(p: Pista, evitar: string[] = []): Promise<AudioRescatado | null> {
+  // Los canales que fallaron en otras pistas también se descartan acá.
+  const descartados = [...new Set([...evitar, ...canalesCaidosAhora()])];
+  if (p.audioUrl && descartados.length === 0) {
     return Promise.resolve({ url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined });
   }
-  const pendiente = enCurso.get(p.id);
+  // La lista entra en la clave: dos pedidos del mismo tema con canales
+  // descartados distintos no pueden compartir la misma resolución.
+  const clave = descartados.length > 0 ? `${p.id}|${descartados.sort().join(",")}` : p.id;
+  const pendiente = enCurso.get(clave);
   if (pendiente) return pendiente;
-  const promesa = resolverAudio(p).finally(() => enCurso.delete(p.id));
-  enCurso.set(p.id, promesa);
+  const promesa = resolverAudio(p, descartados).finally(() => enCurso.delete(clave));
+  enCurso.set(clave, promesa);
   return promesa;
 }
 

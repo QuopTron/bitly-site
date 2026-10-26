@@ -8,7 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { formatoCuenta, progresoOferta } from "@/lib/pricing";
 import { useFaseActual } from "@/lib/use-pricing";
-import { audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
+import { anotarCanalCaido, audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
 import { consultarDescargas, descargarPista } from "@/lib/descargas-cuenta";
 import { leerTokenCuenta } from "@/lib/cuentas-cliente";
 import type { EstadoDescargasCuenta } from "@/server/descargas-cuenta";
@@ -224,6 +224,10 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const repetirRef = useRef(false);
   const colaRef = useRef<Pista[]>([]);
   const reproducirRef = useRef<(p: Pista) => void>(() => {});
+  /** Canales que ya no abrieron para una pista: el rescate pide los demás. */
+  const evitarRef = useRef(new Map<string, string[]>());
+  /** La pista que está en el <audio>, para el manejador de `error`. */
+  const pistaRef = useRef<Pista | null>(null);
 
   const info = extensionDe(extension);
 
@@ -297,6 +301,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
     // que `reproducir` vuelva a resolver (y así "insistir" sí rescata).
     const alError = () => {
       setSonando(false);
+      // Se recuerda el canal que falló: el próximo clic pide otro en vez de
+      // recibir la misma URL rota del caché del servidor.
+      const actual = pistaRef.current;
+      if (actual?.canal) {
+        anotarCanalCaido(actual.canal);
+        const previos = evitarRef.current.get(actual.id) ?? [];
+        if (!previos.includes(actual.canal)) {
+          evitarRef.current.set(actual.id, [...previos, actual.canal]);
+        }
+      }
       setPista((prev) => {
         if (prev) {
           prev.audioUrl = null;
@@ -479,6 +493,58 @@ export default function DemoPlayer({ onCuenta }: Props) {
     [volumen],
   );
 
+  /**
+   * Carga el audio y lo arranca; si el canal no abre, pide OTRO y reintenta.
+   *
+   * El caso real: el catálogo sin pérdida responde 429 (o el relay 403) y el
+   * <audio> queda mudo aunque el enlace "existiera". Antes eso terminaba en
+   * «esa pista no tiene audio»; ahora se descarta ese canal y se le pide al
+   * servidor el siguiente (stash, Bandcamp o YouTube). Si ninguno abre, se
+   * avisa y se corta: no se insiste en bucle.
+   */
+  const abrirYArrancar = useCallback(
+    async (
+      el: HTMLAudioElement,
+      p: Pista,
+      resuelto: Awaited<ReturnType<typeof audioDe>>,
+    ): Promise<boolean> => {
+      let audio = resuelto;
+      // Tres intentos como máximo: el canal inicial y dos respaldos. Sumar un
+      // cuarto alarga la espera y casi no suma chances (los canales restantes
+      // suelen compartir la misma caída de red o de identidad).
+      for (let intento = 0; intento < 3 && audio; intento++) {
+        el.pause();
+        el.preload = "auto";
+        el.src = audio.url;
+        el.load();
+        // Lo que suena se pinta ANTES de esperar al navegador: la barra y el
+        // miniplayer aparecen junto con el audio, no un instante después.
+        setPista(p);
+        setAvance(0);
+        if (await arrancar(el)) {
+          p.audioUrl = audio.url;
+          p.canal = audio.canal ?? null;
+          return true;
+        }
+        const canal = audio.canal;
+        if (canal) {
+          anotarCanalCaido(canal);
+          const previos = evitarRef.current.get(p.id) ?? [];
+          if (!previos.includes(canal)) evitarRef.current.set(p.id, [...previos, canal]);
+        }
+        // Se descarta el enlace roto antes de pedir otro: si no, `audioDe`
+        // devolvería el mismo desde la propia pista.
+        p.audioUrl = null;
+        p.canal = null;
+        audio = await audioDe(p, evitarRef.current.get(p.id) ?? []);
+      }
+      p.audioUrl = null;
+      p.canal = null;
+      return false;
+    },
+    [arrancar],
+  );
+
   const reproducir = useCallback(
     async (p: Pista, lista?: Pista[]) => {
       if (!ilimitado && cuota.sinCuota) {
@@ -494,14 +560,12 @@ export default function DemoPlayer({ onCuenta }: Props) {
 
       // Pulsar la pista que ya suena solo reanuda: no gasta reproducción.
       if (pista?.id === p.id && p.audioUrl) {
-        void arrancar(el).then((ok) => {
+        const resuelto = { url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined };
+        void (async () => {
+          const ok = await abrirYArrancar(el, p, resuelto);
           setSonando(ok);
-          if (!ok) {
-            p.audioUrl = null;
-            p.canal = null;
-            setAvisoAudio(t("demoAudioNone"));
-          }
-        });
+          if (!ok) setAvisoAudio(t("demoAudioNone"));
+        })();
         return;
       }
 
@@ -530,37 +594,23 @@ export default function DemoPlayer({ onCuenta }: Props) {
 
       if (!ilimitado) cuota.gastar();
       // `load()` deja el elemento limpio y sin carrera: fija el src, reinicia
-      // la posición y recién después se espera la metadata. Antes se asignaba
-      // `currentTime = 0` con el <audio> todavía vacío; en la segunda pista
-      // eso dejaba el elemento en un estado del que no volvía a sonar.
-      el.pause();
-      el.preload = "auto";
-      el.src = audioResuelto.url;
-      el.load();
-      // Lo que suena se pinta ANTES de esperar al navegador: la barra y el
-      // miniplayer aparecen junto con el audio, no un instante después.
-      setPista(p);
-      setAvance(0);
+      // la posición y recién después se espera la metadata. Sin esperar a la
+      // metadata: iPhone no baja ni la cabecera hasta que se le pide
+      // reproducir, y `play()` ya espera los datos por su cuenta.
       void (async () => {
-        // Sin esperar la metadata: iPhone no baja ni la cabecera hasta que se
-        // le pide reproducir, así que esperarla acá eran segundos de silencio
-        // antes de intentar. `play()` ya espera los datos por su cuenta.
-        const ok = await arrancar(el);
+        const ok = await abrirYArrancar(el, p, audioResuelto);
+        if (orden !== pendiente.current) return;
         setSonando(ok);
-        if (!ok) {
-          // El enlace se resolvió pero el navegador no pudo abrirlo (403,
-          // formato, relay caído). Se descarta para que el próximo clic
-          // vuelva a pedir audio en vez de repetir la URL rota.
-          p.audioUrl = null;
-          p.canal = null;
-          setAvisoAudio(t("demoAudioNone"));
-        }
+        if (!ok) setAvisoAudio(t("demoAudioNone"));
       })();
     },
-    [arrancar, cuota, ilimitado, pista, t],
+    [abrirYArrancar, cuota, ilimitado, pista, t],
   );
 
   // El `ended` y los handlers viejos leen por ref: siempre el valor vigente.
+  useEffect(() => {
+    pistaRef.current = pista;
+  }, [pista]);
   useEffect(() => {
     repetirRef.current = repetir;
   }, [repetir]);
@@ -696,10 +746,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
     if (sonando) {
       el.pause();
       setSonando(false);
-    } else {
-      void arrancar(el).then(setSonando);
+      return;
     }
-  }, [arrancar, sonando, pista]);
+    // Si el canal falló, `arrancar` reintentaría la MISMA URL rota: hay que
+    // volver a rescatar (con los canales descartados ya anotados).
+    if (!pista.audioUrl || el.error) {
+      void reproducir(pista);
+      return;
+    }
+    void arrancar(el).then(setSonando);
+  }, [arrancar, pista, reproducir, sonando]);
 
   /** Salta a un segundo concreto; lo usan la barra de seek y el karaoke. */
   const buscarSegundo = useCallback(

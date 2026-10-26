@@ -50,6 +50,11 @@ export type PistaParaAudio = {
    * escuchar sin límite, así que la red no puede cortarle la música.
    */
   token?: string | null;
+  /**
+   * Canales que ya fallaron en este navegador para esta pista. El servidor
+   * devuelve otro enlace en vez de repetir el que no abrió.
+   */
+  evitar?: string[];
 };
 
 export type AudioRescatado = {
