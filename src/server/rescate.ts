@@ -775,16 +775,23 @@ async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duraci
 }
 
 /**
- * Identifica la pista en Bandcamp por nombre y devuelve su MP3. Se prueba en
- * los dos órdenes porque el buscador del sitio no es simétrico, igual que el de
- * monochrome.
+ * Identifica la pista en Bandcamp por nombre y devuelve su MP3.
+ *
+ * El buscador de Bandcamp es MUY bueno con el nombre del ARTISTA solo: devuelve
+ * todas sus pistas publicadas, y ahí están los discos de folklore que no existen
+ * en Qobuz ni en el relay (Los Thuthanaka, por ejemplo). Antes se preguntaba
+ * únicamente por "artista + título" y se filtraba con el comparador estricto de
+ * Qobuz —pensado para ISRC y álbumes—, así que una pista que Bandcamp sí tenía
+ * quedaba como «sin coincidencia». Ahora se busca también por artista y se
+ * puntúa con el mismo comparador de campos que usa YouTube (título + artista),
+ * que tolera comillas tipográficas, tildes y sufijos tipo "-4" del slug.
  */
 async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null> {
   const titulo = p.titulo.trim();
   const artista = p.artista.trim();
-  if (!titulo || !artista) return null;
+  if (!titulo) return null;
 
-  const consultas = [`${artista} ${titulo}`, `${titulo} ${artista}`]
+  const consultas = [`${artista} ${titulo}`, `${titulo} ${artista}`, artista]
     .map((c) => c.replace(/\s+/g, " ").trim())
     .filter((c, i, todas) => c !== "" && todas.indexOf(c) === i);
   const listas = await Promise.all(consultas.map((c) => buscarBandcamp(c)));
@@ -797,39 +804,42 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
   }
   if (porId.size === 0) return null;
 
-  const cands: TrackResult[] = [];
-  for (const [url, r] of porId) {
-    cands.push({
-      id: url,
-      title: r.name ?? "",
-      artist: r.band_name ?? "",
-      album: r.album_name ?? "",
-      coverUrl: "",
-      durationMs: 0,
-      isrc: "",
-      provider: "bandcamp",
-    });
-  }
-  const best = bestOriginalAlbumDuracion(
-    titulo,
-    artista,
-    p.album ?? "",
-    Math.max(0, Math.round(p.duracionMs ?? 0)),
-    cands,
-  );
-  if (!best) return null;
+  const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
+  let mejor: { url: string; nombre: string; punto: number } | null = null;
 
-  const pagina = await audioDePaginaBandcamp(best.id);
+  for (const [url, r] of porId) {
+    // El título tiene que aparecer de verdad (2 = contiene o mismo orden de
+    // palabras, 3 = igual). Con 1 ("solape débil") se cuela cualquier cosa.
+    const puntoTitulo = fieldScore(titulo, r.name ?? "");
+    if (puntoTitulo < 2) continue;
+    // Y el artista tiene que coincidir (el canal de Bandcamp ES el artista).
+    const puntoArtista = artista ? fieldScore(artista, r.band_name ?? "") : 0;
+    if (artista && puntoArtista === 0) continue;
+
+    let punto = puntoTitulo * 100 + puntoArtista * 40;
+    // La duración del resultado, si viene, desempata versiones y directos.
+    const dur = Number((r as { duration?: number }).duration ?? 0);
+    if (objetivo > 0 && dur > 0) {
+      const dif = Math.abs(dur - objetivo);
+      if (dif <= 5) punto += 60;
+      else if (dif <= 20) punto += 30;
+      else if (dif > 90) punto -= 40;
+    }
+    if (!mejor || punto > mejor.punto) mejor = { url, nombre: r.name ?? "", punto };
+  }
+  if (!mejor) return null;
+
+  const pagina = await audioDePaginaBandcamp(mejor.url);
   if (!pagina) return null;
   return {
     url: pagina.url,
     bitDepth: 16,
     sampleRate: 44100,
     ttl: TTL_BANDCAMP_MS,
-    id: best.id,
+    id: mejor.url,
     isrc: null,
-    duracion: pagina.duracion || Math.round((p.duracionMs ?? 0) / 1000),
-    pista: best.title,
+    duracion: pagina.duracion || objetivo,
+    pista: mejor.nombre,
   };
 }
 

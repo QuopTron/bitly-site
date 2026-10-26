@@ -1,95 +1,66 @@
 /**
- * Pase de la demo: precio que sube con el tiempo.
+ * Pase de la demo: el mismo precio que Premium, que sube con el reloj.
  *
- * Cuando se acaban las 4 reproducciones gratis, el pase arranca en Bs 10 y se
- * queda ahí durante las primeras 3 horas. A la 4.ª hora pasa a Bs 11, a la 5.ª
- * a Bs 12, y así suma Bs 1 por cada hora que pasa, sin techo: cada hora que se
- * deja pasar cuesta un boliviano más. Tomarlo temprano siempre sale más barato.
+ * No es un precio por visitante: es la oferta de lanzamiento del sitio, así que
+ * sale del MISMO reloj que `@/lib/pricing`. A las 4 de la tarde del 26 arranca
+ * en Bs 10, cada hora suma Bs 1 (11 a las 5, 12 a las 6…) y se congela en Bs 30
+ * al mediodía del 27.
  *
- * El "desde cuándo" vive en localStorage (es un precio por visitante, no una
- * cuenta): si borra los datos del navegador vuelve a empezar, igual que la
- * cuota. La hora se mide en tiempo real, no en horas de reloj, para que no se
- * pueda "esperar al cambio de hora".
+ * Antes esto vivía en localStorage y arrancaba cuando el visitante agotaba sus
+ * 4 reproducciones: dos personas veían precios distintos y un reloj viejo podía
+ * dejar a alguien pagando el tope sin haber esperado nada. Con un solo reloj,
+ * lo que dice la pared es lo mismo que dice la sección de planes.
  */
 
-const CLAVE = "bitly_demo_pase_desde";
+import { INICIO_OFERTA, PASO_MS, PRECIO_NORMAL, PRECIO_OFERTA, precioAhora } from "@/lib/pricing";
+
 /** Primer precio, en bolivianos. */
-export const PASE_BASE_BS = 10;
+export const PASE_BASE_BS = PRECIO_OFERTA;
 /** Cada cuánto sube. */
-export const PASE_PASO_MS = 60 * 60 * 1000;
-/**
- * Horas de gracia: mientras el pase lleve menos de esta cantidad de horas
- * completas, el precio sigue en `PASE_BASE_BS`. Con 3, la primera subida cae
- * al empezar la 4.ª hora (Bs 11), la siguiente en la 5.ª (Bs 12) y así.
- */
-export const PASE_GRACIA_HORAS = 3;
-/** Precio máximo: se alcanza a la hora 23 y de ahí no sube más. */
-export const PASE_TOPE_BS = 30;
-/** Hora en la que el precio toca el techo (Bs 30). */
-export const PASE_HORA_TOPE = PASE_GRACIA_HORAS + (PASE_TOPE_BS - PASE_BASE_BS);
+export const PASE_PASO_MS = PASO_MS;
+/** Precio máximo (Bs 30). */
+export const PASE_TOPE_BS = PRECIO_NORMAL;
+/** Horas desde el arranque hasta el tope (Bs 10 → Bs 30 = 20 horas). */
+export const PASE_HORA_TOPE = PRECIO_NORMAL - PRECIO_OFERTA;
+/** Ya no hay horas de gracia: la subida es cada hora desde el arranque. */
+export const PASE_GRACIA_HORAS = 0;
 
 export type EstadoPase = {
   /** Precio actual, en bolivianos. */
   bs: number;
-  /** Horas completas desde que se agotó el cupo. */
+  /** Horas completas desde que arrancó la oferta. */
   horas: number;
-  /** Milisegundos hasta el próximo aumento (0 si ya está en el techo). */
+  /** Milisegundos hasta el próximo aumento (0 si ya está en el tope). */
   siguienteEnMs: number;
-  /** ¿Llegó al techo y ya no sube? */
+  /** ¿Llegó al tope y ya no sube? */
   congelado: boolean;
-  /** Cuántas horas de gracia quedan antes de la primera subida (0 si ya subió). */
+  /** Horas de gracia restantes (siempre 0: la escalera sube desde ya). */
   graciaRestante: number;
 };
 
-function seguro(): Storage | null {
-  try {
-    return typeof window === "undefined" ? null : window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-/** Cuándo se agotó el cupo por primera vez, o `null` si todavía no pasó. */
-export function inicioPase(): number | null {
-  const crudo = seguro()?.getItem(CLAVE) ?? null;
-  const n = Number(crudo);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-/** Marca el arranque del reloj (idempotente: no reinicia si ya estaba). */
+/**
+ * Compatibilidad: la pared muestra el precio del momento. Se mantiene la
+ * función porque el componente la llama al montar; ya no guarda nada.
+ */
 export function marcarInicioPase(ahora = Date.now()): number {
-  const previo = inicioPase();
-  if (previo) return previo;
-  seguro()?.setItem(CLAVE, String(ahora));
   return ahora;
+}
+
+/** Cuándo arrancó la escalera, o `null` si todavía no empezó. */
+export function inicioPase(): number | null {
+  const inicio = INICIO_OFERTA.getTime();
+  return inicio <= Date.now() ? inicio : null;
 }
 
 /** Precio del pase para un instante dado. */
 export function estadoPase(ahora = Date.now()): EstadoPase {
-  const inicio = inicioPase();
-  // Sin marca (nadie agotó el cupo todavía) se muestra el precio base.
-  const desde = inicio ?? ahora;
-  const transcurrido = Math.max(0, ahora - desde);
-  const horas = Math.floor(transcurrido / PASE_PASO_MS);
-  const subidas = Math.max(0, horas - PASE_GRACIA_HORAS);
-  const bs = Math.min(PASE_TOPE_BS, PASE_BASE_BS + subidas);
-  // El techo llega a la hora `PASE_HORA_TOPE` (Bs 30 a las 23 h): de ahí en
-  // adelante el precio ya no sube.
+  const fecha = new Date(ahora);
+  const bs = precioAhora(fecha);
   const congelado = bs >= PASE_TOPE_BS;
-
-  // La primera subida cae al empezar la hora `PASE_GRACIA_HORAS + 1`; después,
-  // una por hora. Se calcula sobre el reloj completo, no sobre el tramo actual,
-  // para que el contador durante la gracia diga "3 h 12 min" y no "12 min".
-  const proximaHora = Math.max(horas + 1, PASE_GRACIA_HORAS + 1);
-  const siguienteEnMs = congelado ? 0 : Math.max(0, proximaHora * PASE_PASO_MS - transcurrido);
-
-  return {
-    bs,
-    horas,
-    siguienteEnMs,
-    congelado,
-    graciaRestante: Math.max(0, PASE_GRACIA_HORAS - horas),
-  };
+  const transcurrido = Math.max(0, ahora - INICIO_OFERTA.getTime());
+  const horas = Math.floor(transcurrido / PASE_PASO_MS);
+  const siguienteEnMs = congelado ? 0 : PASE_PASO_MS - (transcurrido % PASE_PASO_MS);
+  return { bs, horas, siguienteEnMs, congelado, graciaRestante: 0 };
 }
 
 /** Texto corto para el contador: `42:13` (o `3 h 07 min` si falta más). */
