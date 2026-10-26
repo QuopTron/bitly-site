@@ -15,11 +15,11 @@ import {
 /**
  * El pase con precio que sube por hora.
  *
- * Arranca en Bs 10 cuando se acaban las 4 reproducciones y se queda ahí tres
- * horas; a la 4.ª pasa a Bs 11, a la 5.ª a Bs 12, y así una más por hora hasta
- * tocar Bs 30 en la hora 23, donde se congela. El contador dice cuánto falta
- * para el próximo aumento y el "?" explica el mecanismo: un precio que sube sin
- * decir por qué se siente arbitrario; explicado, se entiende como una
+ * El 26 a las 16:00 arranca en Bs 10 y sube Bs 1 por hora; a medianoche se
+ * detiene y vuelve a mostrar Bs 10 hasta las 07:00 del 27, cuando retoma donde
+ * se quedó y sigue hasta los Bs 30, donde se congela. El contador dice cuánto
+ * falta para el próximo aumento y el "?" explica el mecanismo: un precio que
+ * sube sin decir por qué se siente arbitrario; explicado, se entiende como una
  * invitación a decidir antes.
  */
 export function PaseTope() {
