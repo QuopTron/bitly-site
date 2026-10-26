@@ -585,12 +585,15 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
   const cuenta = peticion.token ? await cuentaDeToken(peticion.token).catch(() => null) : null;
   if (!cuenta && !premium && !dentroDeCupoRescate(await quienSolicita())) return null;
 
-  // En YouTube Music el id del item ES el videoId de YouTube. Se marca acá para
-  // que el rescate vaya derecho a ese video: en artistas de nicho (bandcamp,
-  // huayño, re-subidos) buscar por nombre no siempre lo encuentra.
+  // Un id de 11 caracteres es un videoId de YouTube: el de YouTube Music, pero
+  // también el de los resultados de respaldo que salen del canal de YouTube
+  // (`buscarYouTubeBackend`) y que el cliente etiqueta con la extensión pedida.
+  // Se marca para que el rescate vaya derecho a ese video: en artistas de nicho
+  // (bandcamp, huayño, re-subidos) buscar por nombre no siempre lo encuentra, y
+  // ahí el audio de YouTube es la única copia que existe. Si el id resultara de
+  // otra fuente, el rescate sigue solo por nombre como siempre.
   const idFuente = typeof peticion.id === "string" ? peticion.id.trim() : "";
-  const videoId =
-    peticion.ext === "ytmusic-spotiflac" && /^[A-Za-z0-9_-]{11}$/.test(idFuente) ? idFuente : null;
+  const videoId = /^[A-Za-z0-9_-]{11}$/.test(idFuente) ? idFuente : null;
 
   peticion = { ...peticion, calidad: premium ? "flac" : "estandar", videoId };
 

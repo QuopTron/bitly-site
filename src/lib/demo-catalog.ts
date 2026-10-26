@@ -203,6 +203,9 @@ async function resolverAudio(p: Pista, evitar: string[] = []): Promise<AudioResc
     duracionMs: p.duracion > 0 ? p.duracion * 1000 : 0,
     isrc: p.isrc,
     ext: p.ext,
+    // El id sin `ext:tipo:`: si es un videoId de YouTube, el servidor va
+    // derecho al video en vez de adivinarlo por nombre.
+    id: p.id.split(":").slice(2).join(":"),
     codigo: codigoPremiumGuardado(),
     token: leerTokenCuenta(),
     evitar,

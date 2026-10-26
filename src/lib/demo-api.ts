@@ -39,6 +39,13 @@ export type PistaParaAudio = {
   isrc?: string | null;
   ext?: string | null;
   /**
+   * Id crudo de la fuente (sin `ext:tipo:`). Cuando es un videoId de YouTube
+   * —también los resultados del canal de YouTube, que el cliente etiqueta con
+   * la extensión pedida— el rescate va derecho a ese video en vez de buscar por
+   * nombre, que en el nicho no siempre encuentra la única copia que existe.
+   */
+  id?: string | null;
+  /**
    * Código Premium guardado en este navegador. NO decide nada por sí solo: el
    * servidor lo verifica contra el registro y con eso elige FLAC o calidad
    * estándar. Si falta o no acredita, suena estándar.
