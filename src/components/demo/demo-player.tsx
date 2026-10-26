@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ChevronRight, Gem, KeyRound, Loader2, Lock, MessageCircle, Pause, Play, Search, Shuffle, SkipBack, SkipForward, UserPlus, Volume2, VolumeX, X } from "lucide-react";
+import { Download, Gem, KeyRound, ListMusic, Loader2, Lock, MessageCircle, Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, UserPlus, Volume2, VolumeX, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
-import { getFaseActual } from "@/lib/pricing";
+import { formatoCuenta, progresoOferta } from "@/lib/pricing";
+import { useFaseActual } from "@/lib/use-pricing";
 import { audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
+import { consultarDescargas, descargarPista } from "@/lib/descargas-cuenta";
+import { leerTokenCuenta } from "@/lib/cuentas-cliente";
+import type { EstadoDescargasCuenta } from "@/server/descargas-cuenta";
 import { demoDespertar } from "@/server/demo-proxy";
 import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
@@ -20,6 +24,7 @@ import ExtensionPicker from "@/components/demo/extension-picker";
 import CategoriaChips from "@/components/demo/categoria-chips";
 import ModoAppOverlay from "@/components/demo/modo-app-overlay";
 import Karaoke from "@/components/demo/karaoke";
+import { CabeceraDetalle, FilaCancion, TarjetaColeccion } from "@/components/demo/catalogo-demo";
 
 // Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
 const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
@@ -50,6 +55,32 @@ const mmss = (seg: number) => {
   return `${Math.floor(t / 60)}:${(t % 60).toString().padStart(2, "0")}`;
 };
 
+/**
+ * Espera a que el <audio> tenga metadata utilizable. No se espera `canplay`
+ * porque con `preload="none"` puede no llegar nunca antes de `play()`; con
+ * `loadedmetadata` alcanza para fijar `currentTime` y arrancar sin la carrera
+ * que dejaba la segunda reproducción muda.
+ */
+function esperarMetadata(el: HTMLAudioElement, ms: number): Promise<void> {
+  if (el.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+  return new Promise((listo) => {
+    let hecho = false;
+    const terminar = () => {
+      if (hecho) return;
+      hecho = true;
+      clearTimeout(reloj);
+      el.removeEventListener("loadedmetadata", terminar);
+      el.removeEventListener("canplay", terminar);
+      el.removeEventListener("error", terminar);
+      listo();
+    };
+    const reloj = setTimeout(terminar, ms);
+    el.addEventListener("loadedmetadata", terminar);
+    el.addEventListener("canplay", terminar);
+    el.addEventListener("error", terminar);
+  });
+}
+
 /** Longitud del anillo de progreso del cover circular del miniplayer. */
 const ANILLO = 2 * Math.PI * 15.7;
 
@@ -62,25 +93,47 @@ const restante = (ms: number) => {
   return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
 };
 
-/** Etiqueta corta de cada TIPO de resultado, para la insignia de la fila. */
-const CLAVES_TIPO: Record<Pista["tipo"], string> = {
-  track: "demoKindTrack",
-  album: "demoKindAlbum",
-  artist: "demoKindArtist",
-  playlist: "demoKindPlaylist",
-};
+/**
+ * Silencio de 50 ms en WAV, armado acá mismo para no meter un base64 de un KB
+ * en el archivo.
+ *
+ * En iPhone (Safari, y también en Chrome y Firefox de iOS, que usan WebKit) un
+ * `play()` que llega DESPUÉS de un `await` ya no cuenta como parte del toque y
+ * lo rechazan. Resolver el audio tarda —hay que pedírselo al relay—, así que
+ * sin esto la canción quedaba sin arrancar hasta un segundo clic. El remedio es
+ * desbloquear el elemento con un sonido in audible dentro del PRIMER toque de la
+ * página: a partir de ahí WebKit sí deja reproducir por código.
+ */
+function urlSilencio(): string {
+  const muestras = 400; // 50 ms a 8 kHz, 8 bits
+  const bytes = new Uint8Array(44 + muestras).fill(128);
+  const vista = new DataView(bytes.buffer);
+  const texto = (pos: number, t: string) => {
+    for (let i = 0; i < t.length; i++) vista.setUint8(pos + i, t.charCodeAt(i));
+  };
+  texto(0, "RIFF");
+  vista.setUint32(4, 36 + muestras, true);
+  texto(8, "WAVE");
+  texto(12, "fmt ");
+  vista.setUint32(16, 16, true);
+  vista.setUint16(20, 1, true);
+  vista.setUint16(22, 1, true);
+  vista.setUint32(24, 8000, true);
+  vista.setUint32(28, 8000, true);
+  vista.setUint16(32, 1, true);
+  vista.setUint16(34, 8, true);
+  texto(36, "data");
+  vista.setUint32(40, muestras, true);
+  // Blob y no `data:`: la CSP del sitio sólo permite media de `self`, `blob:`
+  // y https, así que un data URI se bloquea y el elemento queda en error.
+  return URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+}
 
-
-
-/** Listado que se dejó antes de abrir un álbum/artista/lista (para volver). */
-type EstadoLista = {
-  resultados: Pista[] | null;
-  termino: string;
-  filtro: string | null;
-  respaldada: boolean;
-  limitado: boolean;
-  otraFuente: string | null;
-  sinResultados: boolean;
+type Detalle = {
+  item: Pista;
+  pistas: Pista[] | null;
+  cargando: boolean;
+  error: boolean;
 };
 
 /**
@@ -132,8 +185,8 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const [limitado, setLimitado] = useState(false);
 
   const [otraFuente, setOtraFuente] = useState<string | null>(null);
-  /** Listado previo a abrir un contenido, para volver con un clic. */
-  const [anterior, setAnterior] = useState<EstadoLista | null>(null);
+  const [detalle, setDetalle] = useState<Detalle | null>(null);
+  const [listaActual, setListaActual] = useState<Pista[]>([]);
 
   const [pista, setPista] = useState<Pista | null>(null);
   const [sonando, setSonando] = useState(false);
@@ -144,6 +197,18 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const [aleatorio, setAleatorio] = useState(false);
   const [volumen, setVolumen] = useState(1);
 
+  const [estadoDescargasCuenta, setEstadoDescargasCuenta] = useState<EstadoDescargasCuenta | null>(null);
+  const [descargando, setDescargando] = useState<{ id: string; progreso: number } | null>(null);
+  const [avisoDescarga, setAvisoDescarga] = useState<string | null>(null);
+  /**
+   * Cola: nace SOLO deslizando una canción a la derecha. No es "lo que sigue en
+   * la lista" — eso lo resuelve `listaActual` — sino lo que el visitante puso
+   * a mano ahí, y se vacía a medida que suena.
+   */
+  const [cola, setCola] = useState<Pista[]>([]);
+  /** Repetir la pista actual cuando termina, sin gastar otra reproducción. */
+  const [repetir, setRepetir] = useState(false);
+
   const [topeAbierto, setTopeAbierto] = useState(false);
   const [codigoAbierto, setCodigoAbierto] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -151,10 +216,35 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const pendiente = useRef(0);
   /** Pistas cuyo audio ya se pidió por detrás (ver `precalentar`). */
   const precalentado = useRef(new Set<string>());
+  /** El <audio> ya se desbloqueó con un toque real (necesario en iPhone). */
+  const desbloqueado = useRef(false);
   /** Orden de la búsqueda vigente: una respuesta vieja no pinta nada. */
   const busquedaEnCurso = useRef(0);
+  /** El evento `ended` se registra una sola vez: lee el estado por refs. */
+  const repetirRef = useRef(false);
+  const colaRef = useRef<Pista[]>([]);
+  const reproducirRef = useRef<(p: Pista) => void>(() => {});
 
   const info = extensionDe(extension);
+
+  const refrescarDescargas = useCallback(() => {
+    void consultarDescargas()
+      .then(setEstadoDescargasCuenta)
+      .catch(() => setEstadoDescargasCuenta({ ok: false, motivo: "servidor" }));
+  }, []);
+
+  useEffect(() => {
+    refrescarDescargas();
+    const revisar = () => refrescarDescargas();
+    window.addEventListener("bitly-cuenta", revisar);
+    window.addEventListener("bitly-premium", revisar);
+    window.addEventListener("storage", revisar);
+    return () => {
+      window.removeEventListener("bitly-cuenta", revisar);
+      window.removeEventListener("bitly-premium", revisar);
+      window.removeEventListener("storage", revisar);
+    };
+  }, [refrescarDescargas]);
 
   // Despierta el backend de YouTube mientras el visitante busca. Si el host está
   // en un plan free que se apaga, el arranque se paga acá y no al tocar play.
@@ -168,10 +258,37 @@ export default function DemoPlayer({ onCuenta }: Props) {
   useEffect(() => {
     const el = new Audio();
     el.preload = "none";
+    // iOS deja de cargar y de sonar cuando el <audio> no está en el documento.
+    // Se lo cuelga del body, invisible pero presente: `display:none` también lo
+    // apaga en Safari, así que va de 1×1 con opacidad 0.
+    el.setAttribute("playsinline", "");
+    el.setAttribute("webkit-playsinline", "");
+    el.setAttribute("aria-hidden", "true");
+    el.tabIndex = -1;
+    el.style.cssText =
+      "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none";
+    document.body.appendChild(el);
     audio.current = el;
 
     const alTiempo = () => setAvance(el.currentTime);
     const alTerminar = () => {
+      // Repetir: vuelve a empezar la misma, indistinguible de "sigue sonando".
+      if (repetirRef.current) {
+        try {
+          el.currentTime = 0;
+        } catch {
+          // Sin seek posible: el `play()` de abajo la reinicia igual.
+        }
+        void el.play().catch(() => setSonando(false));
+        return;
+      }
+      // Con cola, lo encolado manda: suena lo siguiente sin tocar el resto.
+      const siguiente = colaRef.current[0];
+      if (siguiente) {
+        setCola((actual) => actual.slice(1));
+        reproducirRef.current(siguiente);
+        return;
+      }
       setSonando(false);
       setAvance(0);
     };
@@ -196,6 +313,49 @@ export default function DemoPlayer({ onCuenta }: Props) {
       el.removeEventListener("timeupdate", alTiempo);
       el.removeEventListener("ended", alTerminar);
       el.removeEventListener("error", alError);
+      el.remove();
+    };
+  }, []);
+
+  /**
+   * Desbloqueo de audio para iPhone: en el primer toque de la página se
+   * reproduce el silencio, y desde ahí WebKit permite arrancar la canción por
+   * código aunque el audio se haya resuelto en medio de un `await`.
+   *
+   * Se escucha en captura porque el toque puede caer en cualquier botón y no
+   * siempre burbujea hasta la ventana (hay capas que cortan el evento).
+   */
+  useEffect(() => {
+    let silencio: string | null = null;
+    const liberar = () => {
+      if (silencio) URL.revokeObjectURL(silencio);
+      silencio = null;
+    };
+    const desbloquear = () => {
+      const el = audio.current;
+      if (!el || desbloqueado.current) return;
+      silencio ??= urlSilencio();
+      try {
+        el.src = silencio;
+        const arranque = el.play();
+        if (arranque) {
+          void arranque
+            .then(() => {
+              desbloqueado.current = true;
+              // Sólo se pausa si nadie cambió la fuente mientras tanto.
+              if (el.src === silencio) el.pause();
+            })
+            .catch(() => undefined);
+        }
+      } catch {
+        // Sin desbloqueo queda el reintento en silencio de `arrancar`.
+      }
+    };
+    const eventos = ["pointerdown", "touchend", "keydown"] as const;
+    for (const evento of eventos) window.addEventListener(evento, desbloquear, true);
+    return () => {
+      for (const evento of eventos) window.removeEventListener(evento, desbloquear, true);
+      liberar();
     };
   }, []);
 
@@ -225,8 +385,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
     setSinResultados(false);
     setRespaldada(false);
     setLimitado(false);
-    // Una búsqueda nueva cierra la vista de contenidos: no hay dónde volver.
-    setAnterior(null);
+    setDetalle(null);
     // Tope para la ESPERA VISIBLE, no para el pedido: si el servidor está
     // colgado (se vio quedarse en «Buscando…» más de dos minutos), se dice en
     // vez de girar la ruedita; si contesta después, igual se pinta.
@@ -240,6 +399,8 @@ export default function DemoPlayer({ onCuenta }: Props) {
       if (orden !== busquedaEnCurso.current) return;
       setBusquedaLenta(false);
       setResultados(r.pistas);
+      const canciones = r.pistas.filter((p) => p.tipo === "track");
+      setListaActual(canciones);
       setSinResultados(r.pistas.length === 0);
       setRespaldada(r.pistas.length > 0 && r.origen === "respaldo");
       setOtraFuente(r.pistas.length > 0 ? r.otraFuente ?? null : null);
@@ -251,6 +412,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
     } catch {
       if (orden !== busquedaEnCurso.current) return;
       setResultados([]);
+      setListaActual([]);
       setSinResultados(true);
     } finally {
       clearTimeout(relojito);
@@ -274,7 +436,8 @@ export default function DemoPlayer({ onCuenta }: Props) {
       setSinResultados(false);
       setRespaldada(false);
       setOtraFuente(null);
-      setAnterior(null);
+      setDetalle(null);
+      setListaActual([]);
       if (termino.trim()) void hacerBusqueda(termino, id, filtroSiguiente);
     },
     [termino, hacerBusqueda],
@@ -293,28 +456,38 @@ export default function DemoPlayer({ onCuenta }: Props) {
     async (el: HTMLAudioElement): Promise<boolean> => {
       el.volume = volumen;
       el.muted = false;
-      try {
-        await el.play();
-        return true;
-      } catch {
+      for (let intento = 0; intento < 2; intento++) {
         try {
-          el.muted = true;
           await el.play();
-          el.muted = volumen === 0;
           return true;
         } catch {
-          return false;
+          // El audio ya resuelto pero todavía sin datos: se le da un instante
+          // al navegador y se reintenta antes de declararlo roto.
+          if (intento === 0) await esperarMetadata(el, 2_500);
+          try {
+            el.muted = true;
+            await el.play();
+            el.muted = volumen === 0;
+            return true;
+          } catch {
+            if (intento === 1) return false;
+          }
         }
       }
+      return false;
     },
     [volumen],
   );
 
   const reproducir = useCallback(
-    async (p: Pista) => {
+    async (p: Pista, lista?: Pista[]) => {
       if (!ilimitado && cuota.sinCuota) {
         setTopeAbierto(true);
         return;
+      }
+      if (lista) {
+        const canciones = lista.filter((x) => x.tipo === "track");
+        if (canciones.length > 0) setListaActual(canciones);
       }
       const el = audio.current;
       if (!el) return;
@@ -336,7 +509,17 @@ export default function DemoPlayer({ onCuenta }: Props) {
       const orden = ++pendiente.current;
       setPreparando(p.id);
       setAvisoAudio(null);
-      const audioResuelto = await audioDe(p);
+
+      // Un `null` puede ser transitorio (el single-flight de la pista acaba de
+      // fallar, un canal respondió 503, el isolate se despertó tarde). Antes
+      // eso obligaba a pulsar la fila otra vez; ahora se reintenta una vez
+      // sola, sin que el visitante tenga que contar clics.
+      let audioResuelto = await audioDe(p);
+      if (!audioResuelto) {
+        await new Promise((listo) => setTimeout(listo, 600));
+        if (orden !== pendiente.current) return;
+        audioResuelto = await audioDe(p);
+      }
       if (orden !== pendiente.current) return;
       setPreparando(null);
 
@@ -346,13 +529,23 @@ export default function DemoPlayer({ onCuenta }: Props) {
       }
 
       if (!ilimitado) cuota.gastar();
+      // `load()` deja el elemento limpio y sin carrera: fija el src, reinicia
+      // la posición y recién después se espera la metadata. Antes se asignaba
+      // `currentTime = 0` con el <audio> todavía vacío; en la segunda pista
+      // eso dejaba el elemento en un estado del que no volvía a sonar.
+      el.pause();
+      el.preload = "auto";
       el.src = audioResuelto.url;
-      el.currentTime = 0;
+      el.load();
       // Lo que suena se pinta ANTES de esperar al navegador: la barra y el
       // miniplayer aparecen junto con el audio, no un instante después.
       setPista(p);
       setAvance(0);
-      void arrancar(el).then((ok) => {
+      void (async () => {
+        // Sin esperar la metadata: iPhone no baja ni la cabecera hasta que se
+        // le pide reproducir, así que esperarla acá eran segundos de silencio
+        // antes de intentar. `play()` ya espera los datos por su cuenta.
+        const ok = await arrancar(el);
         setSonando(ok);
         if (!ok) {
           // El enlace se resolvió pero el navegador no pudo abrirlo (403,
@@ -362,21 +555,46 @@ export default function DemoPlayer({ onCuenta }: Props) {
           p.canal = null;
           setAvisoAudio(t("demoAudioNone"));
         }
-      });
+      })();
     },
     [arrancar, cuota, ilimitado, pista, t],
   );
 
+  // El `ended` y los handlers viejos leen por ref: siempre el valor vigente.
+  useEffect(() => {
+    repetirRef.current = repetir;
+  }, [repetir]);
+  useEffect(() => {
+    colaRef.current = cola;
+  }, [cola]);
+  useEffect(() => {
+    reproducirRef.current = (p) => void reproducir(p);
+  }, [reproducir]);
+
+  /** El gesto de deslizar alterna: si ya estaba, se saca de la cola. */
+  const alternarCola = useCallback((p: Pista) => {
+    setCola((actual) =>
+      actual.some((x) => x.id === p.id) ? actual.filter((x) => x.id !== p.id) : [...actual, p],
+    );
+  }, []);
+
   /** Posición de una pista dentro del listado (−1 si no está). */
   const indiceDe = useCallback(
-    (p: Pista | null) => (p ? (resultados ?? []).findIndex((x) => x.id === p.id) : -1),
-    [resultados],
+    (p: Pista | null) => (p ? listaActual.findIndex((x) => x.id === p.id) : -1),
+    [listaActual],
   );
 
   /** Siguiente (+1) o anterior (−1); con aleatoria, salta a una al azar. */
   const moverse = useCallback(
     (sentido: 1 | -1) => {
-      const lista = resultados ?? [];
+      // "Siguiente" primero gasta la cola; recién después sigue la lista.
+      if (sentido === 1 && cola.length > 0) {
+        const [siguiente, ...resto] = cola;
+        setCola(resto);
+        void reproducir(siguiente);
+        return;
+      }
+      const lista = listaActual;
       if (lista.length === 0) return;
       if (aleatorio && lista.length > 1) {
         const actual = indiceDe(pista);
@@ -391,7 +609,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
       const i = indiceDe(pista);
       void reproducir(lista[(((i + sentido) % n) + n) % n]);
     },
-    [aleatorio, indiceDe, pista, reproducir, resultados],
+    [aleatorio, cola, indiceDe, listaActual, pista, reproducir],
   );
 
   /** Filtro de canciones de la fuente activa: adónde vuelve un item abierto. */
@@ -410,73 +628,67 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const abrirItem = useCallback(
     async (p: Pista) => {
       if (!p.titulo.trim()) return;
-      const previo: EstadoLista = {
-        resultados,
-        termino,
-        filtro,
-        respaldada,
-        limitado,
-        otraFuente,
-        sinResultados,
-      };
-      // El campo guarda el nombre del item abierto: es el título de la vista
-      // (y la pista con la que se re-busca si la fuente no responde).
-      setTermino(p.titulo);
-      setPista(null);
-      setSonando(false);
       setAvisoAudio(null);
-      audio.current?.pause();
-      setCargando(true);
-      setSinResultados(false);
-      setRespaldada(false);
-      setLimitado(false);
-      setOtraFuente(null);
-      setResultados(null);
+      setDetalle({ item: p, pistas: null, cargando: true, error: false });
+      requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
       try {
-        const pistas = await contenidoDe(p);
-        if (pistas && pistas.length > 0) {
-          // Los contenidos son canciones: la burbuja se acomoda sin re-buscar.
-          setFiltro(filtroCanciones);
-          setResultados(pistas);
-          setRespaldada(p.respaldada);
-          setAnterior(previo);
-          requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
-        } else {
-          // Red de seguridad: la fuente no supo recorrer la colección.
-          setFiltro(filtroCanciones);
-          await hacerBusqueda(p.titulo, extension, filtroCanciones);
+        let pistas = await contenidoDe(p);
+        if (!pistas || pistas.length === 0) {
+          const respaldo = await buscar(p.titulo, p.ext, null, 24);
+          pistas = respaldo.pistas;
         }
-      } finally {
-        setCargando(false);
+        const canciones = pistas.filter((x) => x.tipo === "track");
+        if (canciones.length > 0) setListaActual(canciones);
+        setDetalle({ item: p, pistas, cargando: false, error: pistas.length === 0 });
+      } catch {
+        setDetalle((previo) => (previo ? { ...previo, cargando: false, error: true } : null));
       }
     },
-    [
-      resultados,
-      termino,
-      filtro,
-      respaldada,
-      limitado,
-      otraFuente,
-      sinResultados,
-      extension,
-      filtroCanciones,
-      hacerBusqueda,
-    ],
+    [],
   );
 
-  /** Vuelve al listado que se dejó antes de abrir un contenido. */
   const volver = useCallback(() => {
-    if (!anterior) return;
-    setResultados(anterior.resultados);
-    setTermino(anterior.termino);
-    setFiltro(anterior.filtro);
-    setRespaldada(anterior.respaldada);
-    setLimitado(anterior.limitado);
-    setOtraFuente(anterior.otraFuente);
-    setSinResultados(anterior.sinResultados);
-    setAnterior(null);
+    setDetalle(null);
     requestAnimationFrame(() => listaRef.current?.scrollTo({ top: 0 }));
-  }, [anterior]);
+  }, []);
+
+  const descargar = useCallback(
+    async (p: Pista) => {
+      if (!leerTokenCuenta() && !cuota.premium) {
+        setAvisoDescarga(t("demoDescargaSesion"));
+        onCuenta?.();
+        return;
+      }
+      if (descargando) return;
+      setAvisoDescarga(null);
+      setDescargando({ id: p.id, progreso: -1 });
+      try {
+        const r = await descargarPista(p, (progreso) =>
+          setDescargando((previo) => (previo && previo.id === p.id ? { ...previo, progreso } : previo)),
+        );
+        if (r.ok) {
+          setAvisoDescarga(Plantilla(t("demoDescargaOk"), { nombre: r.nombre }));
+        } else if (r.motivo === "sesion") {
+          setAvisoDescarga(t("demoDescargaSesion"));
+          onCuenta?.();
+        } else if (r.motivo === "limite") {
+          // El tope lo manda el servidor en la cabecera del 429: así el texto no
+          // queda desfasado si algún día el límite deja de ser 75.
+          setAvisoDescarga(Plantilla(t("demoDescargaLimite"), { n: r.limite ?? 75 }));
+        } else if (r.motivo === "sin_audio") {
+          setAvisoDescarga(t("demoAudioNone"));
+        } else {
+          setAvisoDescarga(t("demoDescargaError"));
+        }
+      } catch {
+        setAvisoDescarga(t("demoDescargaError"));
+      } finally {
+        setDescargando(null);
+        refrescarDescargas();
+      }
+    },
+    [cuota.premium, descargando, onCuenta, refrescarDescargas, t],
+  );
 
   const alternar = useCallback(() => {
     const el = audio.current;
@@ -541,7 +753,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
   // Avance de la pista actual como fracción (0–1) para el anillo del cover.
   const avanceCirculo = pista && pista.duracion > 0 ? Math.min(1, avance / pista.duracion) : 0;
 
-  const fase = getFaseActual();
+  const { fase, vivo } = useFaseActual();
   const restantes = Math.max(0, cuota.restantes);
   const cuotaTexto = cuota.premium
     ? t("demoPremiumOn")
@@ -555,15 +767,30 @@ export default function DemoPlayer({ onCuenta }: Props) {
           ? Plantilla(t("demoFreeOne"), { n: 1 })
           : Plantilla(t("demoFreeLeft"), { n: restantes });
 
-  const diasTexto = !fase.siguiente
-    ? null
-    : fase.diasParaSiguiente <= 1
-      ? t("demoLadderOneDay")
-      : Plantilla(t("demoLadderIn"), { n: fase.diasParaSiguiente });
+  const finTexto = fase.enOferta
+    ? vivo
+      ? Plantilla(t("demoOfferEnds"), { t: formatoCuenta(fase.msParaFin) })
+      : t("plansOfferDeadline")
+    : null;
 
-  const siguienteTexto = fase.siguiente
-    ? Plantilla(t("demoLadderNext"), { price: format(fase.siguiente.precio, moneda) })
-    : Plantilla(t("demoLadderFinal"), { price: format(fase.precio, moneda) });
+  const avanceOferta = fase.enOferta && vivo ? progresoOferta(new Date()) * 100 : 0;
+
+  const descargasCuenta = estadoDescargasCuenta?.ok ? estadoDescargasCuenta : null;
+  const descargasTexto = !cuota.cuenta
+    ? null
+    : !descargasCuenta
+      ? t("demoDescargasCargando")
+      : descargasCuenta.premium
+        ? t("demoDescargasIlimitadas")
+        : Plantilla(t("demoDescargasRestantes"), {
+            n: descargasCuenta.restantes ?? 0,
+            limite: descargasCuenta.limite,
+          });
+
+  const cancionesResultados = (resultados ?? []).filter((p) => p.tipo === "track");
+  const coleccionesResultados = (resultados ?? []).filter((p) => p.tipo !== "track");
+  const detalleCanciones = (detalle?.pistas ?? []).filter((p) => p.tipo === "track");
+  const detalleColecciones = (detalle?.pistas ?? []).filter((p) => p.tipo !== "track");
 
   const irADescargas = () => {
     setTopeAbierto(false);
@@ -650,19 +877,27 @@ export default function DemoPlayer({ onCuenta }: Props) {
             </form>
 
             {/* Cuota + botón de canje */}
-            <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-2.5 sm:px-4">
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${
-                  cuota.premium
-                    ? "bg-gradient-to-r from-primary to-accent text-primary-foreground ring-transparent"
-                    : cuota.sinCuota
-                      ? "bg-destructive/10 text-destructive ring-destructive/25"
-                      : "bg-primary/15 text-primary ring-primary/25"
-                }`}
-              >
-                {(cuota.premium || cuota.cuenta) && <Gem className="h-3 w-3" />}
-                {cuotaTexto}
-              </span>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 pt-2.5 sm:px-4">
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${
+                    cuota.premium
+                      ? "bg-gradient-to-r from-primary to-accent text-primary-foreground ring-transparent"
+                      : cuota.sinCuota
+                        ? "bg-destructive/10 text-destructive ring-destructive/25"
+                        : "bg-primary/15 text-primary ring-primary/25"
+                  }`}
+                >
+                  {(cuota.premium || cuota.cuenta) && <Gem className="h-3 w-3" />}
+                  {cuotaTexto}
+                </span>
+                {descargasTexto && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-card/60 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground ring-1 ring-border/60">
+                    <Download className="h-3 w-3" />
+                    {descargasTexto}
+                  </span>
+                )}
+              </div>
               {!cuota.premium && (
                 <button
                   type="button"
@@ -740,18 +975,6 @@ export default function DemoPlayer({ onCuenta }: Props) {
                 </div>
               )}
 
-              {/* Se abrió un contenido: botón para volver al listado previo. */}
-              {anterior && !cargando && (
-                <button
-                  type="button"
-                  onClick={volver}
-                  className="mb-1.5 ml-0.5 inline-flex items-center gap-1 rounded-full bg-card/60 px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border/50 transition hover:text-primary"
-                >
-                  <ArrowLeft className="h-3 w-3" />
-                  {t("demoVolver")}
-                </button>
-              )}
-
               {respaldada && resultados && resultados.length > 0 && (
                 <p className="px-1 pb-1.5 text-xs text-muted-foreground">{t("demoFallback")}</p>
               )}
@@ -766,89 +989,158 @@ export default function DemoPlayer({ onCuenta }: Props) {
                 <p className="px-1 pb-1.5 text-xs text-destructive/80">{avisoAudio}</p>
               )}
 
-              {resultados && resultados.length > 0 && (
-                <ul className="space-y-1">
-                  {resultados.map((p, i) => {
-                    const esActual = pista?.id === p.id;
-                    // Canciones, álbumes, artistas y listas conviven en el mismo
-                    // listado: cada fila dice QUÉ es y con qué dato cuenta
-                    // (artista, álbum o dueño de la lista), y las que no son
-                    // canciones se ABREN en vez de intentar sonar.
-                    const esCancion = p.tipo === "track";
-                    const secundaria = [p.artista, esCancion ? p.album : ""]
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                      .join(" · ");
-                    // Cada fila entra con un pelín más de retraso que la
-                    // anterior: el listado "cae" en cascada en vez de aparecer
-                    // de golpe.
-                    return (
-                      <li
-                        key={p.id}
-                        className="anim-entra"
-                        style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => (esCancion ? void reproducir(p) : void abrirItem(p))}
-                          title={esCancion ? undefined : Plantilla(t("demoAbrirItem"), { nombre: p.titulo })}
-                          className={`flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-all duration-200 active:scale-[0.985] ${
-                            esActual ? "bg-primary/15 ring-1 ring-primary/25" : "hover:bg-card/60"
-                          }`}
-                        >
-                          {p.caratula ? (
-                            <img src={p.caratula} alt="" loading="lazy" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
-                          ) : (
-                            // Sin carátula, la INICIAL hace de cover: un ícono
-                            // genérico no dice qué es, una letra sí.
-                            <span
-                              aria-hidden
-                              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-primary-foreground"
-                              style={{ backgroundImage: "var(--gradiente-marca)" }}
-                            >
-                              {letraDe(p.titulo)}
-                            </span>
-                          )}
-                          <span className="min-w-0 flex-1">
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate text-xs font-semibold">{p.titulo}</span>
-                              {!esCancion && (
-                                <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-px text-xs font-bold uppercase tracking-wide text-primary ring-1 ring-primary/25">
-                                  {t(CLAVES_TIPO[p.tipo])}
-                                </span>
-                              )}
-                            </span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {secundaria || "\u00a0"}
-                            </span>
-                          </span>
-                          {esCancion && p.duracion > 0 && (
-                            <span className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">
-                              {mmss(p.duracion)}
-                            </span>
-                          )}
-                          <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${
-                              esActual && sonando ? "bg-primary text-primary-foreground" : "bg-primary/20 text-primary"
-                            }`}
-                          >
-                            {preparando === p.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : !esCancion ? (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            ) : esActual && sonando ? (
-                              <Pause className="h-3 w-3" />
-                            ) : (
-                              <Play className="h-3 w-3" />
-                            )}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+              {avisoDescarga && (
+                <p className="mb-1.5 rounded-xl bg-primary/10 px-2.5 py-1.5 text-[11px] font-medium text-primary ring-1 ring-primary/20">
+                  {avisoDescarga}
+                </p>
+              )}
+
+              {detalle && !cargando && (
+                <div className="space-y-3 pb-1">
+                  <CabeceraDetalle
+                    p={detalle.item}
+                    total={detalleCanciones.length}
+                    cargando={detalle.cargando}
+                    onVolver={volver}
+                    onReproducirTodo={() => {
+                      const primera = detalleCanciones[0];
+                      if (primera) void reproducir(primera, detalleCanciones);
+                    }}
+                  />
+                  {detalle.cargando && (
+                    <div className="flex items-center justify-center py-6">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    </div>
+                  )}
+                  {!detalle.cargando && detalle.error && (
+                    <p className="rounded-xl bg-card/50 px-3 py-4 text-center text-xs text-muted-foreground ring-1 ring-border/50">
+                      {t("demoSinContenido")}
+                    </p>
+                  )}
+                  {!detalle.cargando && detalleCanciones.length > 0 && (
+                    <div className="space-y-1">
+                      {detalleCanciones.map((p, i) => (
+                        <FilaCancion
+                          key={p.id}
+                          p={p}
+                          indice={i}
+                          activa={pista?.id === p.id}
+                          sonando={sonando}
+                          preparando={preparando === p.id}
+                          descargando={descargando?.id === p.id}
+                          progreso={descargando?.id === p.id ? descargando.progreso : null}
+                          onReproducir={() => void reproducir(p, detalleCanciones)}
+                          onDescargar={() => void descargar(p)}
+                          onEncolar={() => alternarCola(p)}
+                          enCola={cola.some((x) => x.id === p.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {!detalle.cargando && detalleColecciones.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="px-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        {t("demoMasDelArtista")}
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {detalleColecciones.map((p, i) => (
+                          <TarjetaColeccion key={p.id} p={p} indice={i} onAbrir={() => void abrirItem(p)} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!detalle && resultados && resultados.length > 0 && (
+                <div className="space-y-3 pb-1">
+                  {coleccionesResultados.length > 0 && (
+                    <section className="space-y-2">
+                      <h4 className="px-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        {t("demoResultadosColecciones")}
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {coleccionesResultados.map((p, i) => (
+                          <TarjetaColeccion key={p.id} p={p} indice={i} onAbrir={() => void abrirItem(p)} />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                  {cancionesResultados.length > 0 && (
+                    <section className="space-y-1">
+                      {coleccionesResultados.length > 0 && (
+                        <h4 className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                          {t("demoCatTracks")}
+                        </h4>
+                      )}
+                      {cancionesResultados.map((p, i) => (
+                        <FilaCancion
+                          key={p.id}
+                          p={p}
+                          indice={i}
+                          activa={pista?.id === p.id}
+                          sonando={sonando}
+                          preparando={preparando === p.id}
+                          descargando={descargando?.id === p.id}
+                          progreso={descargando?.id === p.id ? descargando.progreso : null}
+                          onReproducir={() => void reproducir(p, cancionesResultados)}
+                          onDescargar={() => void descargar(p)}
+                          onEncolar={() => alternarCola(p)}
+                          enCola={cola.some((x) => x.id === p.id)}
+                        />
+                      ))}
+                    </section>
+                  )}
+                </div>
               )}
             </div>
+
+            {/* Cola: lo que el visitante deslizó a la derecha, en orden. */}
+            {cola.length > 0 && (
+              <div className="shrink-0 border-t border-border/60 px-3 py-2 sm:px-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    <ListMusic className="h-3.5 w-3.5" aria-hidden />
+                    {t("demoCola")} · {cola.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCola([])}
+                    className="text-[11px] font-semibold text-muted-foreground transition hover:text-destructive"
+                  >
+                    {t("demoColaLimpiar")}
+                  </button>
+                </div>
+                <div className="mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none]">
+                  {cola.map((q, i) => (
+                    <span
+                      key={q.id}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-card/70 px-2 py-1 text-[11px] font-medium ring-1 ring-border/60"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCola((actual) => actual.filter((x) => x.id !== q.id));
+                          void reproducir(q);
+                        }}
+                        className="max-w-32 truncate text-left"
+                        title={q.titulo}
+                      >
+                        {i + 1}. {q.titulo}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${t("demoColaQuitar")}: ${q.titulo}`}
+                        onClick={() => setCola((actual) => actual.filter((x) => x.id !== q.id))}
+                        className="text-muted-foreground transition hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Miniplayer */}
             {pista && (
@@ -861,6 +1153,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
                     aria-hidden
                     className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover opacity-25 blur-2xl"
                   />
+                )}
+                {descargando?.id === pista.id && (
+                  <span aria-hidden className="absolute inset-x-0 bottom-0 z-10 h-0.5 bg-white/10">
+                    <span
+                      className={`block h-full bg-primary transition-[width] duration-200 ${
+                        descargando.progreso < 0 ? "w-1/3 animate-pulse" : ""
+                      }`}
+                      style={descargando.progreso >= 0 ? { width: `${Math.max(4, descargando.progreso)}%` } : undefined}
+                    />
+                  </span>
                 )}
                 <div className="relative bg-background/55 px-3 py-1.5 backdrop-blur-2xl sm:px-4">
                 <div className="flex items-center gap-2">
@@ -903,7 +1205,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
                       {pista.artista || "\u00a0"}
                       {pista.canal === "stash-relay"
                        ? " · FLAC"
-                       : pista.canal === "monochrome"
+                       : pista.canal === "monochrome" || pista.canal === "bandcamp"
                          ? " · audio"
                          : pista.canal === "youtube"
                            ? ` · ${t("demoCalidadEstandar")}`
@@ -914,6 +1216,23 @@ export default function DemoPlayer({ onCuenta }: Props) {
                     <span className="text-foreground">{mmss(avance)}</span>
                     <span className="text-muted-foreground"> / {mmss(pista.duracion)}</span>
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => void descargar(pista)}
+                    disabled={descargando?.id === pista.id}
+                    title={Plantilla(t("demoDescargarAria"), { nombre: pista.titulo })}
+                    aria-label={Plantilla(t("demoDescargarAria"), { nombre: pista.titulo })}
+                    className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-white/10 px-1.5 text-[10px] font-bold text-muted-foreground ring-1 ring-white/10 transition hover:text-primary disabled:text-primary"
+                  >
+                    {descargando?.id === pista.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Download className="h-3 w-3" />
+                    )}
+                    {descargando?.id === pista.id && descargando.progreso >= 0 && (
+                      <span className="tabular-nums">{descargando.progreso}%</span>
+                    )}
+                  </button>
                 </div>
 
                 {/* Aleatoria · anterior · play/pausa · siguiente · volumen */}
@@ -931,6 +1250,20 @@ export default function DemoPlayer({ onCuenta }: Props) {
                     }`}
                   >
                     <Shuffle className="h-2.5 w-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRepetir((r) => !r)}
+                    aria-label={t("demoRepetir")}
+                    aria-pressed={repetir}
+                    title={t("demoRepetir")}
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-1 transition ${
+                      repetir
+                        ? "bg-primary/20 text-primary ring-primary/40"
+                        : "text-muted-foreground ring-white/10 hover:text-foreground"
+                    }`}
+                  >
+                    <Repeat className="h-2.5 w-2.5" />
                   </button>
                   <button
                     type="button"
@@ -1039,27 +1372,32 @@ export default function DemoPlayer({ onCuenta }: Props) {
 
         {/* �� Indicador de precio �� */}
         <aside data-reveal suppressHydrationWarning style={retraso(120)} className="tarjeta hidden min-w-0 flex-col p-5 lg:flex">
-          <h3 className="texto-tag text-2xl leading-none">{fase.siguiente ? t("demoLadderTitle") : t("plansPremiumPrice")}</h3>
+          <h3 className="texto-tag text-2xl leading-none">{fase.enOferta ? t("demoOfferTitle") : t("plansPremiumPrice")}</h3>
           <div className="mt-4 flex items-baseline justify-between gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("plansPremium")}
             </span>
-            <span className="text-2xl font-bold text-primary">{format(fase.precio, moneda)}</span>
+            <span className="flex items-baseline gap-2">
+              {fase.enOferta && (
+                <span className="text-sm text-muted-foreground line-through">{format(fase.original, moneda)}</span>
+              )}
+              <span className="text-2xl font-bold text-primary">{format(fase.precio, moneda)}</span>
+            </span>
           </div>
           <div className="mt-3">
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-primary to-accent"
-                style={{
-                  width: fase.siguiente
-                    ? `${Math.min(100, Math.max(6, 100 - (fase.diasParaSiguiente / 30) * 100))}%`
-                    : "100%",
-                }}
+                className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-1000"
+                style={{ width: `${Math.min(100, Math.max(fase.enOferta ? 4 : 100, avanceOferta))}%` }}
               />
             </div>
             <div className="mt-2 flex items-center justify-between text-xs">
-              <span className="font-semibold text-foreground">{siguienteTexto}</span>
-              {diasTexto && <span className="text-muted-foreground">{diasTexto}</span>}
+              <span className="font-semibold text-foreground">
+                {fase.enOferta
+                  ? Plantilla(t("demoOfferAfter"), { price: format(fase.original, moneda) })
+                  : Plantilla(t("demoLadderFinal"), { price: format(fase.precio, moneda) })}
+              </span>
+              {finTexto && <span className="text-muted-foreground">{finTexto}</span>}
             </div>
           </div>
           <button

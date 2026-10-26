@@ -44,6 +44,12 @@ export type PistaParaAudio = {
    * estándar. Si falta o no acredita, suena estándar.
    */
   codigo?: string | null;
+  /**
+   * Token de la cuenta, si hay sesión. El servidor lo verifica y, con cuenta
+   * válida, no gasta el cupo de rescates por IP: la cuenta gratis promete
+   * escuchar sin límite, así que la red no puede cortarle la música.
+   */
+  token?: string | null;
 };
 
 export type AudioRescatado = {
@@ -51,7 +57,7 @@ export type AudioRescatado = {
   /** Segundos. */
   duracion: number;
   /** "stash-relay" = FLAC completo; "youtube" = audio completo vía backend local. */
-  canal?: "monochrome" | "stash-relay" | "youtube";
+  canal?: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
   proveedor?: string;
   isrc?: string | null;
 };

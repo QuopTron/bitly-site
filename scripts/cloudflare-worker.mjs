@@ -195,6 +195,7 @@ export default {
     sembrarEnv(env);
     const { pathname } = new URL(request.url);
     const esRpc = pathname.startsWith("/_serverFn/");
+    const esApi = pathname.startsWith("/api/");
 
     // Tope de cuerpo en el borde: el comprobante más grande permitido son 4 MB
     // de base64, así que nada legítimo pasa de 6 MB. Sin esto, un POST enorme
@@ -241,11 +242,17 @@ export default {
     const respuesta = await app.fetch(request, env, ctx);
     const salida = respuesta.status !== 404 ? respuesta : await env.ASSETS.fetch(request);
     const final = await conCsp(salida);
-    if (!esRpc) return final;
-    // La RPC nunca se cachea ni se indexa, venga del código o de un proxy.
+    // La RPC y la API de la app (descargas, audio) no se cachean ni se indexan,
+    // y salen con las mismas cabeceras de seguridad que el resto del sitio: un
+    // archivo descargado no se puede "adivinar" como HTML/JS (nosniff) ni leer
+    // desde otro origen (CORP).
+    if (!esRpc && !esApi) return final;
     const cab = new Headers(final.headers);
     cab.set("Cache-Control", "no-store");
     cab.set("X-Robots-Tag", "noindex, nofollow");
+    cab.set("X-Content-Type-Options", "nosniff");
+    cab.set("Cross-Origin-Resource-Policy", "same-origin");
+    cab.set("Referrer-Policy", "strict-origin-when-cross-origin");
     return new Response(final.body, { status: final.status, statusText: final.statusText, headers: cab });
   },
 };

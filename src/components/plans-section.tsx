@@ -1,7 +1,8 @@
 import { lazy, Suspense, useState } from "react";
 import { Check, X as XIcon, MessageCircle, Gem, Info } from "lucide-react";
 import { useI18n, getLanguage } from "@/lib/i18n";
-import { getFaseActual } from "@/lib/pricing";
+import { formatoCuenta } from "@/lib/pricing";
+import { useFaseActual } from "@/lib/use-pricing";
 import { useCurrency, format } from "@/lib/currency";
 import { retraso } from "@/lib/reveal";
 import { enlaceWhatsApp } from "@/lib/contacto";
@@ -28,7 +29,8 @@ export default function PlansSection({ onCuenta }: Props) {
   const t = useI18n();
   const hayCuenta = useHayCuenta();
   const [currency] = useCurrency();
-  const { precio, original, etiqueta, etiquetaEn, enOferta } = getFaseActual();
+  const { fase, vivo } = useFaseActual();
+  const { precio, original, etiqueta, etiquetaEn, enOferta, msParaFin } = fase;
   const lang = getLanguage();
   const [infoHoras, setInfoHoras] = useState(false);
   const [comoObtener, setComoObtener] = useState(false);
@@ -147,6 +149,13 @@ export default function PlansSection({ onCuenta }: Props) {
               {enOferta && <span className="text-sm text-muted-foreground line-through">{format(original, currency)}</span>}
             </div>
             <p className="mt-1 text-xs font-medium text-primary">{t("plansPremiumPrice")}</p>
+            {enOferta && (
+              <p className="mt-1 text-[11px] font-semibold text-primary" suppressHydrationWarning>
+                {vivo
+                  ? t("plansOfferEnds").replace("{t}", formatoCuenta(msParaFin))
+                  : t("plansOfferDeadline")}
+              </p>
+            )}
           </div>
           <ul className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:block sm:space-y-2.5">
             {premFeatures.map((k) => (

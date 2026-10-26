@@ -18,6 +18,7 @@
 
 import { abrirDemo, buscarDemo, letrasDemo, rescatarDemo, type AudioRescatado } from "@/lib/demo-api";
 import { codigoPremiumGuardado } from "@/lib/demo-cuota";
+import { leerTokenCuenta } from "@/lib/cuentas-cliente";
 import type { Letras } from "@/server/letras";
 import { extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
@@ -41,7 +42,7 @@ export type Pista = {
    * "youtube" = audio completo vía el backend local de yt-dlp. Null hasta que
    * se pide reproducir.
    */
-  canal: "monochrome" | "stash-relay" | "youtube" | null;
+  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube" | null;
   /** Vino del catálogo de respaldo (la extensión no pudo responder). */
   respaldada: boolean;
 };
@@ -76,6 +77,26 @@ function desdeItem(item: Item, ext: ExtensionId, respaldada: boolean): Pista {
   };
 }
 
+/**
+ * Últimas búsquedas, para no repetir el viaje al servidor.
+ *
+ * Con datos móviles cada búsqueda son dos o tres segundos de espera; volver a
+ * la misma consulta (reenviar el formulario, cambiar de categoría y volver,
+ * abrir un álbum y regresar) no tiene por qué pagarlos otra vez. Vive sólo en
+ * memoria de la pestaña y vence a los 3 minutos, así el catálogo no queda viejo.
+ * Los fallos y las respuestas limitadas NO se guardan: esos hay que reintentarlos.
+ */
+const CACHE_BUSQUEDAS = new Map<string, { cuando: number; resultado: ResultadoDemo }>();
+const CACHE_TTL_MS = 3 * 60 * 1000;
+const CACHE_MAX = 24;
+/** Búsquedas idénticas en vuelo: la segunda espera la primera, no la repite. */
+const BUSQUEDAS_EN_CURSO = new Map<string, Promise<ResultadoDemo>>();
+
+/** Copia de las pistas: el reproductor les escribe `audioUrl` al sonar. */
+function copiar(r: ResultadoDemo): ResultadoDemo {
+  return { ...r, pistas: r.pistas.map((p) => ({ ...p, audioUrl: null, canal: null })) };
+}
+
 /** Búsqueda contra el proxy cifrado. Nunca lanza: un fallo es "sin resultados". */
 export async function buscar(
   termino: string,
@@ -86,6 +107,37 @@ export async function buscar(
   const consulta = termino.trim();
   if (!consulta) return { pistas: [], origen: "respaldo" };
 
+  const clave = `${ext}|${filtro ?? ""}|${limite}|${consulta.toLowerCase()}`;
+  const guardada = CACHE_BUSQUEDAS.get(clave);
+  if (guardada && Date.now() - guardada.cuando < CACHE_TTL_MS) return copiar(guardada.resultado);
+
+  const enCurso = BUSQUEDAS_EN_CURSO.get(clave);
+  if (enCurso) return copiar(await enCurso);
+
+  const promesa = buscarRemoto(consulta, ext, filtro, limite);
+  BUSQUEDAS_EN_CURSO.set(clave, promesa);
+  try {
+    const resultado = await promesa;
+    // Sólo se guarda lo que sirve: resultados con pistas y sin tope de cuota.
+    if (resultado.pistas.length > 0 && !resultado.limitado) {
+      if (CACHE_BUSQUEDAS.size >= CACHE_MAX) {
+        const masVieja = CACHE_BUSQUEDAS.keys().next().value;
+        if (masVieja) CACHE_BUSQUEDAS.delete(masVieja);
+      }
+      CACHE_BUSQUEDAS.set(clave, { cuando: Date.now(), resultado });
+    }
+    return copiar(resultado);
+  } finally {
+    BUSQUEDAS_EN_CURSO.delete(clave);
+  }
+}
+
+async function buscarRemoto(
+  consulta: string,
+  ext: ExtensionId,
+  filtro: string | null,
+  limite: number,
+): Promise<ResultadoDemo> {
   try {
     const r = await buscarDemo({ consulta, ext, filtro, limite });
     // El servidor puede haber contestado con OTRA fuente. Se etiqueta cada pista
@@ -125,6 +177,7 @@ async function resolverAudio(p: Pista): Promise<AudioRescatado | null> {
     isrc: p.isrc,
     ext: p.ext,
     codigo: codigoPremiumGuardado(),
+    token: leerTokenCuenta(),
   });
   if (!audio) return null;
   p.audioUrl = audio.url;

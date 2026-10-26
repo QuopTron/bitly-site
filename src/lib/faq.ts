@@ -17,4 +17,5 @@ export const FAQ: FaqItem[] = [
   { qKey: "faq5Q", aKey: "faq5A" },
   { qKey: "faq6Q", aKey: "faq6A" },
   { qKey: "faq7Q", aKey: "faq7A" },
+  { qKey: "faq8Q", aKey: "faq8A" },
 ];

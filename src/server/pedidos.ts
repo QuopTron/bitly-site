@@ -39,7 +39,7 @@ import {
   soltarPremiumDePedido,
 } from "@/server/cuentas";
 import { leerRegistroCodigos } from "@/lib/premium-check";
-import { getFaseActual } from "@/lib/pricing";
+import { getFaseActual, PRECIO_NORMAL } from "@/lib/pricing";
 import { MAX_CODIGOS, emitirCodigos, firmaConfigurada } from "@/server/codigos";
 import { avisoNuevoPedido, correoDePrueba, cuerpoCorreo } from "@/server/correo-compra";
 
@@ -60,9 +60,6 @@ const VENTANA_MIN = (() => {
   return process.env.NODE_ENV === "production" ? 10 : 1;
 })();
 const VENTANA_ANULACION_MS = VENTANA_MIN * 60_000;
-
-/** Precio por código, en Bs. El total del pedido es esto × cantidad. */
-const PRECIO_UNIDAD = getFaseActual().precio;
 
 export type EstadoPedido = "pendiente" | "revision" | "pagado" | "enviado" | "cancelado";
 
@@ -202,7 +199,7 @@ function publico(p: PedidoGuardado): PedidoPublico {
     nombre: p.nombre,
     estado: p.estado,
     cantidad,
-    total: Number.isFinite(p.total) ? p.total : cantidad * PRECIO_UNIDAD,
+    total: Number.isFinite(p.total) ? p.total : cantidad * PRECIO_NORMAL,
     codigos,
     codigo: codigos[0] ?? null,
     ventanaFin: p.ventanaFin ?? p.creado,
@@ -436,7 +433,7 @@ export const crearPedido = createServerFn({ method: "POST" })
         tipoComprobante: tipo.tipo,
         estado: "pendiente",
         cantidad,
-        total: PRECIO_UNIDAD * cantidad,
+        total: getFaseActual().precio * cantidad,
         codigos: [],
         codigo: null,
         ventanaFin: new Date(ahoraMs + VENTANA_ANULACION_MS).toISOString(),
@@ -812,7 +809,7 @@ export const actualizarPedido = createServerFn({ method: "POST" })
           ...actual,
           estado: nuevoEstado,
           cantidad,
-          total: PRECIO_UNIDAD * cantidad,
+          total: cantidad === actual.cantidad ? actual.total : getFaseActual().precio * cantidad,
           codigos,
           codigo: codigos[0] ?? null,
           // Reabrir un pedido reinicia el plazo: «dame tiempo» no puede

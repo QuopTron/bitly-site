@@ -69,6 +69,7 @@ import {
   splitSearchQuery,
   type TrackResult,
 } from "@/server/matching";
+import { tocaConsulta } from "@/server/relevancia";
 
 /* ── Tipos del contrato ──────────────────────────────────────────── */
 
@@ -103,13 +104,18 @@ export type PeticionAudio = {
    * decidida) y no se cachea ni se guarda en ningún enlace.
    */
   codigo?: string | null;
+  /**
+   * Token de la cuenta del navegador. También lo consume sólo `demo-proxy`, para
+   * que una sesión válida no gaste el cupo de rescates por IP.
+   */
+  token?: string | null;
 };
 
 export type AudioResuelto = {
   url: string;
   /** Segundos (se usa en la barra del reproductor). */
   duracion: number;
-  canal: "monochrome" | "stash-relay" | "youtube";
+  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
   /** De dónde salió la identidad: "qobuz-web" o el catálogo del respaldo. */
   proveedor: string;
   /** Id de la pista en el catálogo que resolvió. */
@@ -121,7 +127,7 @@ export type AudioResuelto = {
 
 /* ── Caché de enlaces ────────────────────────────────────────────── */
 
-type Enlace = { url: string; duracion: number; canal: "monochrome" | "stash-relay" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
+type Enlace = { url: string; duracion: number; canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
 
 const enlaces = new Map<string, Enlace>();
 const MAX_ENLACES = 400;
@@ -431,6 +437,23 @@ const MONOCHROME_BASE = "https://tracks.monochrome.st";
 const TIMEOUT_MONOCHROME_MS = 4_000;
 const TTL_MONOCHROME_MS = 30 * 60 * 1000;
 
+/**
+ * Memoria ISRC → pista del isolate. El mismo tema se pide para el clic, la
+ * precarga y el siguiente de la lista; sin esto cada repetición pagaba otra
+ * búsqueda de 4 s aunque el catálogo ya hubiera contestado. Es positiva y con
+ * vencimiento: un "no está" nunca se recuerda.
+ */
+const monoMemoria = new Map<string, { mint: Mint & { id: string; isrc: string; duracion: number }; expira: number }>();
+const MAX_MONO_MEMORIA = 500;
+
+function recordarMonochrome(clave: string, mint: Mint & { id: string; isrc: string; duracion: number }): void {
+  if (monoMemoria.size >= MAX_MONO_MEMORIA) {
+    const primero = monoMemoria.keys().next().value;
+    if (primero) monoMemoria.delete(primero);
+  }
+  monoMemoria.set(clave, { mint, expira: Date.now() + TTL_MONOCHROME_MS });
+}
+
 type PistaMonochrome = {
   id?: string;
   trackId?: string;
@@ -487,10 +510,14 @@ async function resolverMonochrome(
 ): Promise<(Mint & { id: string; isrc: string; duracion: number }) | null> {
   const clave = normalizarISRC(isrc);
   if (!clave) return null;
+  const memorizado = monoMemoria.get(`isrc:${clave}`);
+  if (memorizado && memorizado.expira > Date.now()) return memorizado.mint;
   const pistas = await buscarMonochrome(`isrc:${clave}`, ms);
   const pista = pistas.find((p) => normalizarISRC(p.isrc ?? "") === clave);
   if (!pista) return null;
-  return mintMonochrome(pista, clave);
+  const mint = mintMonochrome(pista, clave);
+  recordarMonochrome(`isrc:${clave}`, mint);
+  return mint;
 }
 
 /**
@@ -509,6 +536,15 @@ async function resolverMonochromePorNombre(
   const titulo = p.titulo.trim();
   const artista = p.artista.trim();
   if (!titulo) return null;
+  const claveNombre = [
+    "nombre",
+    titulo.toLowerCase(),
+    artista.toLowerCase(),
+    (p.album ?? "").toLowerCase(),
+    Math.max(0, Math.round(p.duracionMs ?? 0)),
+  ].join("|");
+  const memorizado = monoMemoria.get(claveNombre);
+  if (memorizado && memorizado.expira > Date.now()) return memorizado.mint;
 
   // Dos órdenes: el buscador del catálogo NO es simétrico (medido: "Queen
   // Bohemian Rhapsody" devuelve a Queen y "Bohemian Rhapsody Queen" devuelve
@@ -548,7 +584,196 @@ async function resolverMonochromePorNombre(
   if (!best) return null;
   const pista = porId.get(best.id);
   if (!pista) return null;
-  return mintMonochrome(pista, best.isrc);
+  const mint = mintMonochrome(pista, best.isrc);
+  recordarMonochrome(claveNombre, mint);
+  return mint;
+}
+
+/* ── Canal Bandcamp (audio público de artistas de nicho) ─────────── */
+
+/**
+ * Bandcamp publica el MP3 320/128 de cada pista en su propia página, con Range
+ * y sin cuenta. No es FLAC, así que va DESPUÉS de monochrome y del relay, pero
+ * rescata justo lo que los catálogos grandes no tienen: sellos independientes y
+ * escenas locales (medido con "Quta (capo-kullawada)" de Los Thuthanaka).
+ *
+ * El buscador de Bandcamp es interno y sólo contesta por POST; su resultado
+ * trae nombre, banda y URL de la pista, que se verifican con el mismo ranking
+ * estricto que el resto de los canales antes de bajar un solo byte.
+ */
+const BANDCAMP_BUSQUEDA = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic";
+const TIMEOUT_BANDCAMP_MS = 6_000;
+const TTL_BANDCAMP_MS = 15 * 60 * 1000;
+
+type ResultadoBandcamp = {
+  type?: string;
+  name?: string;
+  band_name?: string;
+  album_name?: string;
+  item_url_path?: string;
+  img?: string | null;
+};
+
+type AudioBandcamp = Mint & { id: string; isrc: null; duracion: number; pista: string };
+
+function desescaparHtml(texto: string): string {
+  return texto
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+async function buscarBandcamp(consulta: string): Promise<ResultadoBandcamp[]> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  try {
+    const res = await fetch(BANDCAMP_BUSQUEDA, {
+      method: "POST",
+      signal: control.signal,
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ search_text: consulta, search_filter: "t", full_page: false }),
+    });
+    if (!res.ok) return [];
+    const datos = (await res.json()) as { auto?: { results?: ResultadoBandcamp[] } };
+    return datos.auto?.results ?? [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/** La página de la pista trae `data-tralbum` con el MP3 firmado y la duración. */
+async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  try {
+    const res = await fetch(url, {
+      signal: control.signal,
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const atributo = /data-tralbum="([^"]+)"/.exec(html)?.[1];
+    if (!atributo) return null;
+    const datos = JSON.parse(desescaparHtml(atributo)) as {
+      trackinfo?: Array<{ file?: Record<string, string>; duration?: number }>;
+    };
+    const pista = datos.trackinfo?.[0];
+    const audio = pista?.file?.["mp3-128"] ?? pista?.file?.["mp3-v0"];
+    if (!audio) return null;
+    const duracion = Math.max(0, Math.round(pista?.duration ?? 0));
+    return { url: desescaparHtml(audio), duracion };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/**
+ * Identifica la pista en Bandcamp por nombre y devuelve su MP3. Se prueba en
+ * los dos órdenes porque el buscador del sitio no es simétrico, igual que el de
+ * monochrome.
+ */
+async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null> {
+  const titulo = p.titulo.trim();
+  const artista = p.artista.trim();
+  if (!titulo || !artista) return null;
+
+  const consultas = [`${artista} ${titulo}`, `${titulo} ${artista}`]
+    .map((c) => c.replace(/\s+/g, " ").trim())
+    .filter((c, i, todas) => c !== "" && todas.indexOf(c) === i);
+  const listas = await Promise.all(consultas.map((c) => buscarBandcamp(c)));
+  const porId = new Map<string, ResultadoBandcamp>();
+  for (const lista of listas) {
+    for (const r of lista) {
+      if (r.type !== "t" || !r.item_url_path) continue;
+      porId.set(r.item_url_path, r);
+    }
+  }
+  if (porId.size === 0) return null;
+
+  const cands: TrackResult[] = [];
+  for (const [url, r] of porId) {
+    cands.push({
+      id: url,
+      title: r.name ?? "",
+      artist: r.band_name ?? "",
+      album: r.album_name ?? "",
+      coverUrl: "",
+      durationMs: 0,
+      isrc: "",
+      provider: "bandcamp",
+    });
+  }
+  const best = bestOriginalAlbumDuracion(
+    titulo,
+    artista,
+    p.album ?? "",
+    Math.max(0, Math.round(p.duracionMs ?? 0)),
+    cands,
+  );
+  if (!best) return null;
+
+  const pagina = await audioDePaginaBandcamp(best.id);
+  if (!pagina) return null;
+  return {
+    url: pagina.url,
+    bitDepth: 16,
+    sampleRate: 44100,
+    ttl: TTL_BANDCAMP_MS,
+    id: best.id,
+    isrc: null,
+    duracion: pagina.duracion || Math.round((p.duracionMs ?? 0) / 1000),
+    pista: best.title,
+  };
+}
+
+/**
+ * El buscador de Bandcamp devuelve la portada sin el prefijo `a` que exige el
+ * CDN (`.../img/4178418448_3.jpg` responde 404; `.../img/a4178418448_3.jpg`
+ * responde 200). Si la URL ya trae el prefijo, se deja intacta.
+ */
+function portadaBandcamp(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace(/\/img\/(\d+_\d+\.(?:jpe?g|png|webp))$/i, "/img/a$1");
+}
+
+/**
+ * Búsqueda de pistas en Bandcamp para el fallback del LISTADO. Devuelve sólo
+ * tracks que comparten una palabra significativa con la consulta: el buscador
+ * de Bandcamp también aproxima y no queremos cambiar un resultado desviado por
+ * otro. La reproducción vuelve a verificar título/artista al resolver el audio.
+ */
+export async function buscarBandcampItems(consulta: string, limite = 12): Promise<Item[]> {
+  const resultados = await buscarBandcamp(consulta);
+  const items: Item[] = [];
+  const vistos = new Set<string>();
+  for (const r of resultados) {
+    if (r.type !== "t" || !r.item_url_path || vistos.has(r.item_url_path)) continue;
+    const item: Item = {
+      id: r.item_url_path,
+      tipo: "track",
+      titulo: r.name ?? "",
+      artista: r.band_name ?? "",
+      album: r.album_name ?? "",
+      caratula: portadaBandcamp(r.img),
+      duracionMs: 0,
+      isrc: null,
+    };
+    if (!item.titulo || !tocaConsulta([item], consulta)) continue;
+    vistos.add(r.item_url_path);
+    items.push(item);
+    if (items.length >= limite) break;
+  }
+  return items;
 }
 
 /* ── Canal YouTube (yattee-server o backend local de yt-dlp) ─────── */
@@ -1519,16 +1744,51 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
     };
   };
 
+  const devolverBandcamp = (bc: AudioBandcamp): AudioResuelto => {
+    const enlace: Enlace = {
+      url: bc.url,
+      duracion: bc.duracion,
+      canal: "bandcamp",
+      proveedor: "bandcamp",
+      id: bc.id,
+      isrc: null,
+      expira: Date.now() + bc.ttl,
+    };
+    guardarEnlace(claves, enlace);
+    return {
+      url: enlace.url,
+      duracion: enlace.duracion,
+      canal: "bandcamp",
+      proveedor: enlace.proveedor,
+      id: enlace.id,
+      isrc: enlace.isrc,
+      bitDepth: bc.bitDepth,
+      sampleRate: bc.sampleRate,
+    };
+  };
+
   const candidatosPromise = juntarCandidatos(pedido);
+  // El ISRC no está en el catálogo (o la fuente no trae uno): la búsqueda por
+  // nombre arranca YA, en paralelo con la identidad de Qobuz. Antes esperaba a
+  // que terminara `monoParalelo` (que puede incluir Deezer) y recién entonces
+  // empezaba otra búsqueda de 4 s: era el tramo más largo del rescate de nicho.
+  const monoNombre = titulo ? resolverMonochromePorNombre(pedido) : Promise.resolve(null);
+
+  // Bandcamp se busca con un pequeño retardo, en paralelo con el catálogo y el
+  // relay: si el FLAC aparece primero, su resultado se descarta; si no (nicho),
+  // ya está listo y no paga otra espera al final. El retardo evita gastar dos
+  // búsquedas en el caso común, que monochrome resuelve en menos de un segundo.
+  const bandcampParalelo = (async () => {
+    if (!titulo || !artista) return null;
+    await new Promise((listo) => setTimeout(listo, 1_200));
+    return resolverBandcamp(pedido);
+  })();
+
   const monoInicial = await monoParalelo;
   if (monoInicial.pista) return devolverMonochrome(monoInicial.pista);
 
-  // El ISRC no está en el catálogo (o la fuente no trae uno): se busca por
-  // nombre MIENTRAS corre la identidad de Qobuz, así el fallback no suma espera
-  // cuando el ranking estricto acierta.
-  const monoNombre = titulo ? resolverMonochromePorNombre(pedido) : Promise.resolve(null);
-
-  let candidatos = await candidatosPromise;
+  const [candidatosResueltos, monoPorNombre] = await Promise.all([candidatosPromise, monoNombre]);
+  let candidatos = candidatosResueltos;
 
   // El re-subido de YouTube/SoundCloud pone `ARTISTA - Canción` en el TÍTULO y
   // el canal en el campo artista ("Monsieur Blaya", "Maitre 80"), así que el
@@ -1545,9 +1805,9 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
   }
 
   // Monochrome primero: su catálogo no depende del pool del relay. Si el ISRC
-  // de la pista no estaba, se busca por nombre (ver resolverMonochromePorNombre)
-  // y después se prueban los ISRC que acreditó Qobuz/Deezer.
-  const monoPorNombre = await monoNombre;
+  // de la pista no estaba, ya se buscó por nombre en paralelo
+  // (ver resolverMonochromePorNombre); después se prueban los ISRC que
+  // acreditaron Qobuz/Deezer.
   if (monoPorNombre) return devolverMonochrome(monoPorNombre);
 
   let mono = null as Awaited<ReturnType<typeof resolverMonochrome>>;
@@ -1587,9 +1847,14 @@ async function resolverAudioInterno(p: PeticionAudio, claves: string[]): Promise
     };
   }
 
+  // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
+  // YouTube porque no depende de un backend externo ni de credenciales.
+  const bandcamp = await bandcampParalelo;
+  if (bandcamp) return devolverBandcamp(bandcamp);
+
   // Último recurso: el audio COMPLETO vía el backend local de yt-dlp. El enlace
-  // es del propio backend (su proxy), se cachea una hora —el token del backend
-  // ya vive menos— y si no hay backend configurado o falla, la pista queda SIN
+  // es del propio backend (su proxy), se cachea una hora -el token del backend
+  // ya vive menos- y si no hay backend configurado o falla, la pista queda SIN
   // audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s. La
   // petición arrancó al entrar en la función (ver `ytParalelo`), así que acá
   // solo se espera el resultado, ya avanzado.

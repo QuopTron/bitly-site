@@ -16,7 +16,8 @@ import {
 import ModalWrapper from "@/components/ui/modal-wrapper";
 import { useI18n } from "@/lib/i18n";
 import { useCurrency, format } from "@/lib/currency";
-import { getFaseActual } from "@/lib/pricing";
+import { formatoCuenta } from "@/lib/pricing";
+import { useFaseActual } from "@/lib/use-pricing";
 import { enlaceWhatsApp } from "@/lib/contacto";
 import { guardarPedidoLocal, hoyISO } from "@/lib/pedidos-cliente";
 import { leerTokenCuenta, useHayCuenta } from "@/lib/cuentas-cliente";
@@ -84,7 +85,8 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
   // en vez de dejar cargar un comprobante que después no se puede seguir.
   const hayCuenta = useHayCuenta();
   const [currency] = useCurrency();
-  const { precio } = getFaseActual();
+  const { fase, vivo } = useFaseActual();
+  const { precio, original, enOferta, msParaFin } = fase;
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
   const [celular, setCelular] = useState("");
@@ -541,12 +543,26 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
           </form>
 
           <aside className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card/60 p-3 text-center">
-            <p className="texto-tag text-2xl leading-none text-primary">{format(total, currency)}</p>
+            <p className="flex items-baseline justify-center gap-2">
+              {enOferta && (
+                <span className="text-sm text-muted-foreground line-through">
+                  {format(original * cantidad, currency)}
+                </span>
+              )}
+              <span className="texto-tag text-2xl leading-none text-primary">{format(total, currency)}</span>
+            </p>
             <p className="text-[11px] text-muted-foreground">
               {cantidad > 1
                 ? `${cantidad} × ${format(precio, currency)}`
                 : t("pagoPrecioUnico")}
             </p>
+            {enOferta && (
+              <p className="text-[11px] font-semibold text-primary" suppressHydrationWarning>
+                {vivo
+                  ? t("pagoOfferEnds").replace("{t}", formatoCuenta(msParaFin))
+                  : t("plansOfferDeadline")}
+              </p>
+            )}
             <QrPago texto={t("pagoQrFalta")} />
             <p className="text-[11px] leading-relaxed text-muted-foreground">{t("pagoQrAyuda")}</p>
             <a

@@ -36,17 +36,20 @@ const VACIAS = new Set([
   "uno", "unos", "unas", "the", "and", "for", "with", "from", "vol", "feat",
 ]);
 
-export function pareceDesvio(items: Item[], consulta: string): boolean {
-  if (items.length === 0) return false;
+/** ¿Algún resultado contiene una palabra significativa de la consulta? */
+export function tocaConsulta(items: Item[], consulta: string): boolean {
   const tokens = consulta
     .split(/\s+/)
     .filter((t) => t.length >= 3 && !VACIAS.has(t.toLowerCase()));
   if (tokens.length === 0) return false;
-
-  const toca = items.some((i) =>
+  return items.some((i) =>
     tokens.some((t) => fieldScore(t, `${i.titulo} ${i.artista}`) >= 2),
   );
-  if (toca) return false;
+}
+
+export function pareceDesvio(items: Item[], consulta: string): boolean {
+  if (items.length === 0) return false;
+  if (tocaConsulta(items, consulta)) return false;
 
   const artistas = new Set(
     items.map((i) => i.artista.trim().toLowerCase()).filter((a) => a.length > 0),

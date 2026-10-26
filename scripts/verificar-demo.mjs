@@ -186,12 +186,18 @@ try {
   // ── 2. Búsqueda ──
   await escribir(ses, "#demo input[type='text'], #demo input:not([type])", "get lucky daft punk");
   await clic(ses, "#demo form button[type='submit']");
-  await esperar(ses, `document.querySelectorAll("#demo ul li button").length > 0`);
+  // Las canciones son filas anchas: el botón de reproducir de cada una lleva
+  // "Reproducir o pausar: <pista>" y adentro van título, artista y álbum.
+  await esperar(ses, `document.querySelectorAll("#demo button[aria-label^='Reproducir']").length > 0`);
   // Cada fila se lee entera (título + artista): el artista es el que dice
   // cuál es la grabación pedida, no el título.
   const filas = await js(
     ses,
-    `[...document.querySelectorAll("#demo ul li button")].map((b) => b.innerText.replace(/\\s+/g, " ").trim())`,
+    `[...document.querySelectorAll("#demo button[aria-label^='Reproducir']")].map((b) => b.innerText.replace(/\\s+/g, " ").trim())`,
+  );
+  check(
+    "cada canción trae su botón de descarga",
+    (await js(ses, `document.querySelectorAll("#demo button[aria-label^='Descargar']").length`)) === filas.length,
   );
   console.log("resultados:", JSON.stringify(filas.slice(0, 3)));
   check(
@@ -201,14 +207,27 @@ try {
   );
 
   // ── 3. Autoplay con clic REAL ──
-  await clic(ses, "#demo ul li button");
+  await clic(ses, "#demo button[aria-label^='Reproducir']");
   // La resolución del audio pasa por el relay de stash y, si ese canal no
   // responde, por el backend local de yt-dlp: en una red lenta 30 s no alcanzan
   // y el verificador fallaba por impaciencia, no por un bug del reproductor.
-  await esperar(ses, `!!document.querySelector("#demo svg.lucide-pause")`, {
-    tiempo: 60000,
-    nombre: "que arranque solo (icono de pausa)",
-  });
+  // El canal sin pérdida falla de vez en cuando (devuelve un cuerpo que el
+  // navegador no puede abrir). El reproductor invalida esa URL al fallar, así
+  // que un segundo toque —lo que haría cualquiera— la vuelve a resolver: se
+  // reintenta una vez antes de dar la prueba por perdida.
+  let sono = false;
+  for (let intento = 0; intento < 2 && !sono; intento++) {
+    if (intento > 0) await clic(ses, "#demo button[aria-label^='Reproducir']");
+    try {
+      await esperar(ses, `!!document.querySelector("#demo svg.lucide-pause")`, {
+        tiempo: 45000,
+        nombre: "que arranque solo (icono de pausa)",
+      });
+      sono = true;
+    } catch (e) {
+      if (intento === 1) throw e;
+    }
+  }
   await dormir(1200);
   const estado = await js(
     ses,
@@ -273,17 +292,17 @@ try {
   check("la letra avanza y pinta el verso actual", Boolean(verso) && activo === verso, activo);
 
   // ── 4. Las cuatro categorías se pueden recorrer ──
-  // Cambiar de burbuja reabre la búsqueda: el listado tiene que pasar a
-  // álbumes, cada fila decir QUÉ es (insignia) y abrir una traer su música.
+  // Cambiar de burbuja reabre la búsqueda: los resultados pasan a ser
+  // colecciones (tarjetas cuadradas) y abrir una trae SU música en el lugar,
+  // sin tocar lo que el visitante escribió en el buscador.
   await clic(ses, "#demo form [role='group'] button:nth-child(2)");
-  await esperar(
-    ses,
-    `document.querySelectorAll("#demo ul li button [class*=uppercase]").length > 0`,
-    { nombre: "resultados de álbumes", tiempo: 30000 },
-  );
+  await esperar(ses, `document.querySelectorAll("#demo button[title^='Ver la música de']").length > 0`, {
+    nombre: "álbumes en tarjetas",
+    tiempo: 30000,
+  });
   const insignias = await js(
     ses,
-    `[...document.querySelectorAll("#demo ul li button [class*=uppercase]")].map((e) => e.innerText.trim())`,
+    `[...document.querySelectorAll("#demo button[title^='Ver la música de'] [class*=uppercase]")].map((e) => e.innerText.trim())`,
   );
   console.log("insignias:", JSON.stringify(insignias.slice(0, 4)));
   check(
@@ -291,31 +310,38 @@ try {
     /álbum|album/i.test(insignias?.[0] ?? ""),
     insignias?.[0],
   );
+  check("las colecciones son cuadradas", (await js(ses, `(() => { const t = document.querySelector("#demo button[title^='Ver la música de'] span[class*='aspect-square']");
+    if (!t) return false; const r = t.getBoundingClientRect(); return Math.abs(r.width - r.height) <= 2; })()`)) === true);
 
   const album = await js(
     ses,
-    `(() => { const b = document.querySelector("#demo ul li button"); if (!b) return null;
-      return { titulo: b.querySelector("span.truncate")?.innerText?.trim() ?? "",
-               insignia: b.querySelector("[class*=uppercase]")?.innerText?.trim() ?? "" }; })()`,
+    `(() => { const b = document.querySelector("#demo button[title^='Ver la música de']"); if (!b) return null;
+      const r = b.getBoundingClientRect();
+      return { titulo: (b.querySelector("span.truncate")?.innerText ?? "").trim(),
+               insignia: (b.querySelector("[class*=uppercase]")?.innerText ?? "").trim(),
+               cuadrado: Math.abs(r.width - r.height) <= 4 }; })()`,
   );
-  await clic(ses, "#demo ul li button");
-  await esperar(ses, `document.querySelectorAll("#demo ul li button").length > 0`, {
-    nombre: "música del álbum abierto",
-  });
+  console.log("álbum a abrir:", JSON.stringify(album));
+  await clic(ses, "#demo button[title^='Ver la música de']");
+  await esperar(
+    ses,
+    `[...document.querySelectorAll("#demo button")].some((b) => /Reproducir todo/i.test(b.innerText))`,
+    { nombre: "cabecera del álbum abierto", tiempo: 40000 },
+  );
   await dormir(1200);
   const trasAbrir = await js(
     ses,
     `({ valor: document.querySelector("#demo input")?.value ?? "",
-        insignias: [...document.querySelectorAll("#demo ul li button [class*=uppercase]")].length,
-        filas: [...document.querySelectorAll("#demo ul li button")].slice(0, 2).map((b) => b.innerText.replace(/\\s+/g, " ").trim()) })`,
+        cabecera: document.querySelector("#demo section, #demo")?.innerText.includes("Volver a resultados") ?? false,
+        titulo: (document.querySelector("#demo h3")?.innerText ?? "").trim(),
+        filas: document.querySelectorAll("#demo button[aria-label^='Reproducir']").length,
+        volver: !!document.querySelector("#demo button[aria-label], #demo button") })`,
   );
   console.log("tras abrir el álbum:", JSON.stringify(trasAbrir));
-  check(
-    "abrir un álbum busca su música",
-    Boolean(album?.titulo) && trasAbrir?.valor === album.titulo,
-    `${album?.titulo} → ${trasAbrir?.valor}`,
-  );
-  check("la música del álbum vuelve a ser canciones", (trasAbrir?.insignias ?? 1) === 0, String(trasAbrir?.insignias));
+  check("abrir una colección no cambia el buscador", trasAbrir?.valor === "get lucky daft punk", trasAbrir?.valor);
+  check("la colección abierta muestra su cabecera", Boolean(trasAbrir?.titulo) && trasAbrir?.cabecera === true, trasAbrir?.titulo);
+  check("la colección abierta lista sus canciones", (trasAbrir?.filas ?? 0) > 0, String(trasAbrir?.filas));
+  check("hay un botón para volver a los resultados", (await js(ses, `[...document.querySelectorAll("#demo button")].some((b) => /Volver a resultados/i.test(b.innerText))`)) === true);
 
   // Volver a Canciones para dejar el marco como estaba.
   await clic(ses, "#demo form [role='group'] button:nth-child(1)");

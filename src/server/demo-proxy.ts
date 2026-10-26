@@ -38,11 +38,18 @@ import {
   normalizarItems,
 } from "@/server/extensions";
 import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
-import { buscarYouTubeBackend, despertarCanalYouTube, resolverAudio, type PeticionAudio } from "@/server/rescate";
+import {
+  buscarBandcampItems,
+  buscarYouTubeBackend,
+  despertarCanalYouTube,
+  resolverAudio,
+  type PeticionAudio,
+} from "@/server/rescate";
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
-import { pareceDesvio } from "@/server/relevancia";
+import { cuentaDeToken } from "@/server/cuentas";
+import { pareceDesvio, tocaConsulta } from "@/server/relevancia";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
 import {
@@ -392,12 +399,13 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     aviso = String((e as Error)?.message ?? e).slice(0, 200);
   }
 
-  if (items.length > 0 && !pareceDesvio(items, consulta)) {
+  if (items.length > 0 && !pareceDesvio(items, consulta) && tocaConsulta(items, consulta)) {
     return cerrar(data, { origen: "extension", items, aviso, fuente });
   }
   if (items.length > 0) {
-    // El catálogo contestó con el disco de otro artista: se guarda por si no
-    // hay nada mejor y se sigue buscando donde de verdad puede estar.
+    // El catálogo contestó con el disco de otro artista o con resultados que
+    // no comparten NINGUNA palabra significativa: se guardan por si no hay
+    // nada mejor y se sigue buscando donde de verdad puede estar.
     debiles = items;
     items = [];
   }
@@ -410,10 +418,21 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     aviso = aviso ?? "respaldo";
   }
 
-  // El respaldo también puede devolver otro artista. Ahí sí se prueba YouTube
-  // antes de aceptarlo, que es donde vive el folklore y lo re-subido.
-  const respaldoDesviado = items.length > 0 && pareceDesvio(items, consulta);
-  if (items.length === 0 || respaldoDesviado) {
+  // El respaldo también puede devolver otro artista o no tocar la consulta.
+  // Antes de aceptarlo se prueba Bandcamp -donde vive el folklore y los sellos
+  // independientes- y después YouTube para lo re-subido.
+  const respaldoUtil =
+    items.length > 0 && !pareceDesvio(items, consulta) && tocaConsulta(items, consulta);
+  if (!respaldoUtil) {
+    const categoria = peticion.filtro ? categoriaDeFiltro(peticion.filtro) : null;
+    if (!categoria || categoria === "tracks") {
+      const bc = await buscarBandcampItems(consulta, limite);
+      // Los items de Bandcamp se etiquetan como "deezer" sólo por el contrato
+      // del cliente (los tracks no se abren como álbum/artista y así el audio
+      // sigue el camino normal); no publican ISRC, así que no acreditan
+      // identidad de Deezer ni de ninguna otra fuente.
+      if (bc.length > 0) return cerrar(data, { origen: "respaldo", items: bc, aviso, fuente: "deezer" });
+    }
     const yt = await buscarYouTubeBackend(consulta, limite);
     if (yt && yt.length > 0) return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
   }
@@ -530,7 +549,7 @@ export async function abrirContenidoImpl(carga: Carga): Promise<Cifrado> {
 type RespuestaAudio = {
   url: string;
   duracion: number;
-  canal: "monochrome" | "stash-relay" | "youtube";
+  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
   proveedor: string;
   id: string | null;
   isrc: string | null;
@@ -552,13 +571,19 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
     return null;
   }
   if (!peticion?.titulo) return null;
-  if (!dentroDeCupoRescate(await quienSolicita())) return null;
 
   // La calidad la decide ACÁ, no el navegador: se verifica el código Premium
   // que mandó el cliente contra el registro (con caché corta). Sin código
   // activo —cuenta gratis, invitado o un código caducado— va calidad estándar;
   // así cambiar el JSON de la petición no sirve para llevarse el FLAC.
-  const premium = await esCodigoPremiumActivo(peticion.codigo);
+  const premium = await esCodigoPremiumActivo(peticion.codigo).catch(() => false);
+
+  // El cupo por IP es anti-abuso para INVITADOS. Con sesión de cuenta válida
+  // (o Premium) no se gasta: el sitio promete escuchar sin límite, y si la red
+  // cortaba a las ~20 extracciones la demo se quedaba muda por horas y parecía
+  // que la canción no existía.
+  const cuenta = peticion.token ? await cuentaDeToken(peticion.token).catch(() => null) : null;
+  if (!cuenta && !premium && !dentroDeCupoRescate(await quienSolicita())) return null;
 
   // En YouTube Music el id del item ES el videoId de YouTube. Se marca acá para
   // que el rescate vaya derecho a ese video: en artistas de nicho (bandcamp,
