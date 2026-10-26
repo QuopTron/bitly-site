@@ -145,8 +145,17 @@ export default function PlansSection({ onCuenta }: Props) {
           <div className="mb-3 pt-2 sm:pt-0">
             <h3 className="texto-tag text-2xl leading-none text-primary sm:text-3xl">{t("plansPremium")}</h3>
             <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="texto-tag text-4xl leading-none text-foreground sm:text-6xl">{format(precio, currency)}</span>
-              {enOferta && <span className="text-sm text-muted-foreground line-through">{format(original, currency)}</span>}
+              {/* El precio depende del reloj: el HTML prerenderizado trae el del
+                  build y el navegador el del momento. Se silencia la diferencia
+                  porque en el primer tick (useFaseActual) ya queda el vigente. */}
+              <span suppressHydrationWarning className="texto-tag text-4xl leading-none text-foreground sm:text-6xl">
+                {format(precio, currency)}
+              </span>
+              {enOferta && (
+                <span suppressHydrationWarning className="text-sm text-muted-foreground line-through">
+                  {format(original, currency)}
+                </span>
+              )}
             </div>
             <p className="mt-1 text-xs font-medium text-primary">{t("plansPremiumPrice")}</p>
             {enOferta && (

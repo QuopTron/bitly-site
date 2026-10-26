@@ -61,11 +61,15 @@ export function PaseTope() {
       </div>
 
       <div className="relative mt-1 flex items-end gap-2">
-        <p className="text-2xl font-black leading-none tabular-nums">
+        {/* Precio y contador salen del reloj: el HTML prerenderizado trae los
+            del build y el navegador los del momento. El primer tick (1 s) pone
+            los vigentes, así que la diferencia no rompe la hidratación. */}
+        <p suppressHydrationWarning className="text-2xl font-black leading-none tabular-nums">
           Bs {pase.bs}
           <span className="ml-1 text-[10px] font-semibold text-muted-foreground">/1 h</span>
         </p>
         <span
+          suppressHydrationWarning
           className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ${
             pase.congelado
               ? "bg-primary/15 text-primary ring-primary/30"
@@ -93,11 +97,12 @@ export function PaseTope() {
 
       <div className="relative mt-2 flex items-center gap-1.5">
         {pase.horas > 0 && (
-          <span className="text-[10px] text-muted-foreground">
+          <span suppressHydrationWarning className="text-[10px] text-muted-foreground">
             {t("demoPaseHoras").replace("{n}", String(pase.horas))}
           </span>
         )}
         <a
+          suppressHydrationWarning
           href={enlaceWhatsApp(
             t("demoPaseWa").replace("{bs}", String(pase.bs)).replace("{horas}", String(pase.horas)),
           )}
