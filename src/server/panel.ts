@@ -8,6 +8,8 @@
 
 import { createServerFn } from "@tanstack/react-start";
 import { adminValido } from "./admin";
+import type { CuentaGuardada } from "./cuentas";
+import type { PruebaCanal } from "./rescate";
 import { getJson, leerStats, putJson } from "@/server/github-store";
 
 const ARCHIVO_EGRESOS = "data/egresos.json";
@@ -335,6 +337,268 @@ export const eliminarEgreso = createServerFn({ method: "POST" })
       return ok ? { ok: true } : { ok: false, motivo: "servidor" };
     } catch (e) {
       console.error("[panel] no se pudo borrar el egreso:", e instanceof Error ? e.message : e);
+      return { ok: false, motivo: "servidor" };
+    }
+  });
+
+/* ── Verificación de personas y códigos ──────────────────────────────────
+ *
+ * Una persona escribe "no me anda el código" o "¿mi cuenta existe?" y el dueño
+ * necesita una respuesta de un vistazo, no recorrer la lista a ojo. Se busca
+ * por correo, usuario, código o folio y se devuelve TODO lo que coincide:
+ * cuentas, pedidos y el estado real de cada código (activo, usado, cancelado,
+ * liberado), con la cuenta que lo tiene.
+ *
+ * Solo lectura: no canjea ni asigna nada. El dueño mira; la app sigue siendo la
+ * única que marca un código como usado.
+ */
+
+export type CuentaHallada = {
+  id: string;
+  usuario: string;
+  correo: string;
+  premium: boolean;
+  codigo: string | null;
+  correoConfirmado: boolean;
+  invitada: boolean;
+  baneada: boolean;
+  eliminada: boolean;
+  creado: string;
+  ultimaActividad: string;
+};
+
+export type EstadoCodigoPanel =
+  | "activo"
+  | "usado"
+  | "cancelado"
+  | "liberado"
+  | "no_encontrado"
+  | "desconocido";
+
+export type CodigoHallado = {
+  codigo: string;
+  estado: EstadoCodigoPanel;
+  /** De dónde sale el estado: del registro de la app o de los emitidos acá. */
+  origen: "sitio" | "registro" | null;
+  usuario: string | null;
+  correo: string | null;
+  pedido: string | null;
+  emitido: string | null;
+};
+
+export type PedidoHallado = {
+  folio: string;
+  nombre: string;
+  correo: string;
+  estado: string;
+  cantidad: number;
+  total: number;
+  creado: string;
+};
+
+export type ResultadoBusquedaPanel =
+  | {
+      ok: true;
+      consulta: string;
+      totalCuentas: number;
+      cuentas: CuentaHallada[];
+      codigos: CodigoHallado[];
+      pedidos: PedidoHallado[];
+    }
+  | { ok: false; motivo: "admin" | "datos" | "servidor" };
+
+export type ResultadoCanales =
+  | { ok: true; pruebas: PruebaCanal[] }
+  | { ok: false; motivo: "admin" | "servidor" };
+
+/**
+ * Salud de los canales de audio, probada DESDE el Worker.
+ *
+ * El dueño ve qué canal contesta y cuál está caído sin tener que abrir la demo
+ * ni adivinar: es la diferencia entre "esa canción no está" y "ese canal no
+ * responde" cuando alguien escribe diciendo que no le suena nada.
+ */
+export const probarCanales = createServerFn({ method: "POST" })
+  .validator((d: { admin?: unknown }) => d)
+  .handler(async ({ data }): Promise<ResultadoCanales> => {
+    if (!(await adminValido(data?.admin))) return { ok: false, motivo: "admin" };
+    try {
+      const { probarCanalesDemo } = await import("./rescate");
+      return { ok: true, pruebas: await probarCanalesDemo() };
+    } catch (e) {
+      console.error("[panel] no se pudieron probar los canales:", e instanceof Error ? e.message : e);
+      return { ok: false, motivo: "servidor" };
+    }
+  });
+
+type CuentaVerificada = {
+  id?: string;
+  usuario?: string;
+  correo?: string;
+  codigo?: string | null;
+  codigoLiberado?: string | null;
+  correoConfirmado?: boolean;
+  origen?: string;
+  baneada?: boolean;
+  eliminada?: boolean;
+  creado?: string;
+  ultimaActividad?: string;
+  ultimoAcceso?: string;
+  premiumPedido?: string;
+};
+
+type PedidoVerificado = {
+  folio?: string;
+  nombre?: string;
+  correo?: string;
+  codigo?: string | null;
+  estado?: string;
+  cantidad?: number;
+  total?: number;
+  creado?: string;
+};
+
+/** Estados del registro de la app → vocabulario del panel. */
+const ESTADOS_REGISTRO: Record<string, EstadoCodigoPanel> = {
+  activo: "activo",
+  usado: "usado",
+  cancelado: "cancelado",
+  libre: "liberado",
+};
+
+const normalizar = (v: unknown): string => String(v ?? "").trim().toLowerCase();
+
+export const buscarEnPanel = createServerFn({ method: "POST" })
+  .validator((d: { admin?: unknown; consulta?: unknown }) => d)
+  .handler(async ({ data }): Promise<ResultadoBusquedaPanel> => {
+    if (!(await adminValido(data?.admin))) return { ok: false, motivo: "admin" };
+    const consulta = String(data?.consulta ?? "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, 140);
+    if (consulta.length < 2) return { ok: false, motivo: "datos" };
+    const q = consulta.toLowerCase();
+
+    try {
+      const [cuentasCrudas, pedidosCrudos] = await Promise.all([
+        getJson<CuentaVerificada[]>("datos", ARCHIVO_CUENTAS, []),
+        getJson<PedidoVerificado[]>("datos", ARCHIVO_PEDIDOS, []),
+      ]);
+      const { usuarioDe } = await import("./cuentas");
+
+      const todas = (Array.isArray(cuentasCrudas) ? cuentasCrudas : []).filter(
+        (c): c is CuentaVerificada => Boolean(c) && typeof c.id === "string",
+      );
+      const cuentas: CuentaHallada[] = todas
+        .map((c) => ({
+          id: String(c.id),
+          usuario: usuarioDe(c as CuentaGuardada),
+          correo: normalizar(c.correo),
+          premium: Boolean(c.codigo),
+          codigo: c.codigo ?? null,
+          correoConfirmado: Boolean(c.correoConfirmado ?? true),
+          invitada: c.origen === "invitada",
+          baneada: Boolean(c.baneada),
+          eliminada: Boolean(c.eliminada),
+          creado: String(c.creado ?? ""),
+          ultimaActividad: String(c.ultimaActividad || c.ultimoAcceso || ""),
+        }))
+        .filter(
+          (c) =>
+            c.id.toLowerCase().includes(q) ||
+            c.usuario.toLowerCase().includes(q) ||
+            c.correo.includes(q) ||
+            normalizar(c.codigo).includes(q),
+        )
+        .sort((a, b) => (a.creado < b.creado ? 1 : -1));
+
+      const pedidos: PedidoHallado[] = (Array.isArray(pedidosCrudos) ? pedidosCrudos : [])
+        .filter(
+          (p) =>
+            Boolean(p) &&
+            (normalizar(p.folio).includes(q) ||
+              normalizar(p.nombre).includes(q) ||
+              normalizar(p.correo).includes(q) ||
+              normalizar(p.codigo).includes(q)),
+        )
+        .map((p) => ({
+          folio: String(p.folio ?? ""),
+          nombre: String(p.nombre ?? ""),
+          correo: normalizar(p.correo),
+          estado: normalizar(p.estado),
+          cantidad: Number(p.cantidad) || 1,
+          total: Number(p.total) || 0,
+          creado: String(p.creado ?? ""),
+        }))
+        .slice(0, 12);
+
+      // Candidatos a código: lo que se escribió (si tiene pinta de código), los
+      // que aparecen en los pedidos/cuentas encontrados y los que emitió el
+      // sitio y coinciden con el texto.
+      const candidatos = new Set<string>();
+      if (consulta.length >= 12) candidatos.add(consulta);
+      for (const pedido of pedidosCrudos) {
+        if (!pedido) continue;
+        const coincide =
+          normalizar(pedido.folio).includes(q) ||
+          normalizar(pedido.nombre).includes(q) ||
+          normalizar(pedido.correo).includes(q) ||
+          normalizar(pedido.codigo).includes(q);
+        if (coincide && pedido.codigo && candidatos.size < 10) candidatos.add(String(pedido.codigo));
+      }
+      for (const c of cuentas.slice(0, 6)) {
+        if (c.codigo && candidatos.size < 10) candidatos.add(c.codigo);
+      }
+
+      const [{ listarEmitidos }, { leerRegistroCodigos }, { codigosAsignados }] = await Promise.all([
+        import("./codigos-emitidos"),
+        import("@/lib/premium-check"),
+        import("./cuentas"),
+      ]);
+
+      const emitidos = await listarEmitidos();
+      for (const e of emitidos) {
+        if (candidatos.size >= 10) break;
+        if (normalizar(e.codigo).includes(q)) candidatos.add(e.codigo);
+      }
+
+      const registro = await leerRegistroCodigos().catch(() => null);
+      const dueños = await codigosAsignados().catch(() => new Map());
+
+      const codigos: CodigoHallado[] = [...candidatos].slice(0, 10).map((codigo) => {
+        const emitido = emitidos.find((e) => e.codigo === codigo) ?? null;
+        const registroEstado = registro?.get(codigo);
+        const estado: EstadoCodigoPanel = registroEstado
+          ? (ESTADOS_REGISTRO[registroEstado] ?? "desconocido")
+          : emitido
+            ? emitido.activo
+              ? "activo"
+              : "liberado"
+            : registro
+              ? "no_encontrado"
+              : "desconocido";
+        const dueño = dueños.get(codigo) ?? null;
+        return {
+          codigo,
+          estado,
+          origen: emitido ? "sitio" : registroEstado ? "registro" : null,
+          usuario: dueño?.usuario ?? null,
+          correo: dueño?.correo ?? null,
+          pedido: emitido?.folio ?? null,
+          emitido: emitido?.emitido ?? null,
+        };
+      });
+
+      return {
+        ok: true,
+        consulta,
+        totalCuentas: cuentas.length,
+        cuentas: cuentas.slice(0, 12),
+        codigos,
+        pedidos,
+      };
+    } catch (e) {
+      console.error("[panel] no se pudo verificar:", e instanceof Error ? e.message : e);
       return { ok: false, motivo: "servidor" };
     }
   });

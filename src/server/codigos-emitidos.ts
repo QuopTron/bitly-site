@@ -48,6 +48,35 @@ function leerCrudo(): Promise<Emitido[]> {
   return enCurso;
 }
 
+/**
+ * Lista de lo emitido, para el panel del dueño.
+ *
+ * El dueño necesita responder "¿este código es nuestro y sigue vivo?" sin
+ * abrir el repo privado: acá va el código completo, con folio, cuenta y fecha.
+ */
+export type EmitidoPublico = {
+  codigo: string;
+  folio: string;
+  cuentaId: string | null;
+  emitido: string;
+  activo: boolean;
+};
+
+export async function listarEmitidos(): Promise<EmitidoPublico[]> {
+  try {
+    const lista = await leerCrudo();
+    return lista.map((e) => ({
+      codigo: e.c,
+      folio: e.f,
+      cuentaId: e.u ?? null,
+      emitido: e.d,
+      activo: Boolean(e.a),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function cachear(lista: Emitido[]): void {
   const mapa = new Map<string, boolean>();
   for (const e of lista) mapa.set(e.c, Boolean(e.a));

@@ -27,10 +27,12 @@ import {
   crearEgreso,
   eliminarEgreso,
   listarEgresos,
+  probarCanales,
   resumenPanel,
   type Egreso,
   type ResumenPanel,
 } from "@/server/panel";
+import type { PruebaCanal } from "@/server/rescate";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 
@@ -243,7 +245,69 @@ function Grafico({ meses }: { meses: ResumenPanel["ingresos"]["porMes"] }) {
   );
 }
 
-function Resumen({ datos, onEgresos }: { datos: ResumenPanel; onEgresos: () => void }) {
+/** Salud de los canales de audio, probada desde el Worker. */
+function Canales({ token }: { token: string }) {
+  const [pruebas, setPruebas] = useState<PruebaCanal[] | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+
+  const probar = async () => {
+    if (cargando) return;
+    setCargando(true);
+    setError("");
+    try {
+      const r = await probarCanales({ data: { admin: token } });
+      if (r.ok) setPruebas(r.pruebas);
+      else setError("No pudimos probar los canales.");
+    } catch {
+      setError("No pudimos probar los canales.");
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-border/70 bg-card/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Salud de los canales de audio</h2>
+        <button
+          type="button"
+          onClick={() => void probar()}
+          disabled={cargando}
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-background/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3 w-3 ${cargando ? "animate-spin" : ""}`} aria-hidden />
+          {cargando ? "Probando…" : "Probar ahora"}
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Se prueba desde el servidor del sitio con «Bohemian Rhapsody»: si un canal falla acá, la demo lo va a extrañar.
+      </p>
+      {error && <p className="mt-2 text-[11px] text-destructive">{error}</p>}
+      {pruebas && (
+        <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+          {pruebas.map((p) => (
+            <li
+              key={p.canal}
+              className={`rounded-xl border px-2.5 py-1.5 text-[11px] ${
+                p.ok ? "border-primary/30 bg-primary/5" : "border-destructive/40 bg-destructive/10"
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${p.ok ? "bg-primary" : "bg-destructive"}`} aria-hidden />
+                <strong className="text-foreground">{p.canal}</strong>
+                <span className="ml-auto tabular-nums text-[10px] text-muted-foreground">{p.ms} ms</span>
+              </span>
+              <span className="mt-0.5 block break-words text-[10px] text-muted-foreground">{p.detalle}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Resumen({ datos, onEgresos, token }: { datos: ResumenPanel; onEgresos: () => void; token: string }) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -334,6 +398,8 @@ function Resumen({ datos, onEgresos }: { datos: ResumenPanel; onEgresos: () => v
           )}
         </section>
       </div>
+
+      <Canales token={token} />
     </div>
   );
 }
@@ -679,7 +745,7 @@ function Panel({ sesion, onSalir }: { sesion: SesionAdmin; onSalir: () => void }
             {!datos && error && !cargando && (
               <p className="py-16 text-center text-xs text-destructive">No pudimos cargar el resumen. Probá con Actualizar.</p>
             )}
-            {datos && <Resumen datos={datos} onEgresos={() => setTab("egresos")} />}
+            {datos && <Resumen datos={datos} onEgresos={() => setTab("egresos")} token={sesion.token} />}
           </>
         )}
 

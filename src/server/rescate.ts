@@ -360,9 +360,13 @@ async function mintearEn(
           await dormir(espera);
           continue;
         }
+        console.warn(`[stash] track ${trackId} ocupado: ${res.status} tras ${intento + 1} intentos`);
         return null;
       }
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`[stash] track ${trackId} respondió ${res.status}`);
+        return null;
+      }
       const cuerpo = (await res.json()) as {
         url?: string;
         format_id?: number;
@@ -372,10 +376,19 @@ async function mintearEn(
       const audio = String(cuerpo.url ?? "");
       // Un 200 con error adentro es el peor caso del contrato: se trata como fallo
       // para no devolverle al reproductor una URL que no es.
-      if (!audio.startsWith("https://")) return null;
-      if (Number(cuerpo.format_id ?? 0) < 6) return null;
+      if (!audio.startsWith("https://")) {
+        console.warn(`[stash] track ${trackId} sin URL (${Object.keys(cuerpo).join(",") || "cuerpo vacío"})`);
+        return null;
+      }
+      if (Number(cuerpo.format_id ?? 0) < 6) {
+        console.warn(`[stash] track ${trackId} formato ${cuerpo.format_id} (sin FLAC)`);
+        return null;
+      }
       // Sin `etsp` el reproductor no puede derivar el vencimiento.
-      if (!/[?&]etsp=\d+/.test(audio)) return null;
+      if (!/[?&]etsp=\d+/.test(audio)) {
+        console.warn(`[stash] track ${trackId} sin etsp en la URL`);
+        return null;
+      }
       return {
         url: audio,
         bitDepth: Number(cuerpo.bit_depth ?? 0),
@@ -453,7 +466,10 @@ const TTL_MONOCHROME_MS = 30 * 60 * 1000;
  */
 let monoCaidoHasta = 0;
 const MONO_ENFRIAMIENTO_MS = 3 * 60 * 1000;
-const TIMEOUT_SONDA_MS = 1_500;
+// 1,5 s era demasiado corto para la primera conexión del Worker con el host de
+// archivos (TLS + cola): una pista buena se descartaba por lenta y la canción
+// caía a un canal que tampoco respondía. 4 s es holgado sin frenar el rescate.
+const TIMEOUT_SONDA_MS = 4_000;
 
 /** ¿El host de pistas de monochrome sirve este enlace ahora? */
 async function monochromeDisponible(url: string): Promise<boolean> {
@@ -469,13 +485,25 @@ async function monochromeDisponible(url: string): Promise<boolean> {
     // No hace falta el cuerpo: se corta enseguida para no bajar la pista entera.
     await res.body?.cancel().catch(() => undefined);
     if (res.ok || res.status === 206) return true;
-    if (res.status === 403 || res.status === 429 || res.status >= 500) {
+    // 429 es un límite de la IP del Worker, no del archivo: Cloudflare comparte
+    // su salida con miles de clientes, así que el catálogo ve "demasiadas
+    // peticiones" aunque la pista exista. El NAVEGADOR la baja desde la IP de
+    // la persona, donde no hay ese cupo. Medido en producción: descartar el
+    // enlace por el 429 del Worker dejaba sin audio a Bohemian Rhapsody,
+    // So What, Enter Sandman y Lose Yourself con el FLAC disponible.
+    if (res.status === 429) {
+      console.warn("[mono] 429 desde la IP del Worker: se entrega igual (el navegador usa otra IP)");
+      return true;
+    }
+    if (res.status === 403 || res.status >= 500) {
       monoCaidoHasta = Date.now() + MONO_ENFRIAMIENTO_MS;
     }
+    console.warn(`[mono] el archivo respondio ${res.status}`);
     return false;
-  } catch {
+  } catch (e) {
     // Timeout o red caída: se prueba otro canal, pero sin castigar el catálogo
     // (puede ser un corte puntual de ESTE isolate, no del host).
+    console.warn(`[mono] la sonda del archivo fallo: ${e instanceof Error ? e.message : e}`);
     return false;
   } finally {
     clearTimeout(reloj);
@@ -539,10 +567,16 @@ async function buscarMonochrome(consulta: string, ms: number): Promise<PistaMono
       signal: control.signal,
       headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // Sin este aviso, un canal bloqueado desde la IP del Worker se veía igual
+      // que un catálogo que no tiene la pista.
+      console.warn(`[mono] la búsqueda respondió ${res.status}`);
+      return [];
+    }
     const datos = (await res.json()) as { tracks?: PistaMonochrome[] };
     return (datos.tracks ?? []).filter((p) => p.playable !== false && idMonochrome(p));
-  } catch {
+  } catch (e) {
+    console.warn(`[mono] la búsqueda falló: ${e instanceof Error ? e.message : e}`);
     return [];
   } finally {
     clearTimeout(reloj);
@@ -1001,6 +1035,9 @@ type VideoYattee = {
   adaptiveFormats?: Array<{ itag?: number | string; type?: string; bitrate?: number; url?: string }>;
 };
 
+/** Último estado HTTP del canal de YouTube: explica un `null` en los logs. */
+let ultimoEstadoYt = 0;
+
 /** GET JSON contra yattee con auth básica. Nunca lanza: `null` es "falló". */
 async function pedirYattee<T>(
   cfg: { yattee: string; auth: string },
@@ -1018,9 +1055,14 @@ async function pedirYattee<T>(
     try {
       const res = await fetch(`${cfg.yattee}${ruta}`, { signal: control.signal, headers: encabezados });
       if (res.ok) return (await res.json()) as T;
+      ultimoEstadoYt = res.status;
       if (res.status < 500 || intento === 1) return null;
-    } catch {
-      if (intento === 1) return null;
+    } catch (e) {
+      ultimoEstadoYt = -1;
+      if (intento === 1) {
+        console.warn(`[yt] ${ruta.slice(0, 60)}: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }
     } finally {
       clearTimeout(reloj);
     }
@@ -1074,6 +1116,7 @@ async function buscarCandidatosYattee(
   };
 
   const candidatos = await pedir(consulta);
+  if (candidatos.length === 0) console.warn(`[yt] búsqueda sin resultados (estado ${ultimoEstadoYt})`);
   const mejorTitulo = candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
   // Si el canal/artista ensució la búsqueda (re-subidos), el título solo suele
   // encontrar la grabación. Se suman sin duplicar por videoId.
@@ -1148,7 +1191,13 @@ async function rescatarEnYattee(
     );
     const elegido = formatoDe(video);
     if (elegido) return elegido;
+    console.warn(
+      `[yt] video ${elegida.videoId} sin audio (estado ${ultimoEstadoYt}, formatos ${
+        (video?.adaptiveFormats ?? []).length
+      })`,
+    );
   }
+  console.warn(`[yt] «${p.titulo}» sin audio · ${candidatos.length} candidatos · ${Date.now() - inicio}ms`);
   return null;
 }
 
@@ -1633,6 +1682,13 @@ async function resolverAudioInterno(
   const duracionMs = Math.max(0, Math.round(p.duracionMs ?? 0));
   if (!titulo && !p.isrc) return null;
 
+  // Traza de canales para poder explicar un "no hay audio" desde los logs del
+  // worker. Sin esto, un fallo en producción era indistinguible de otro: sólo
+  // se veía el `null`, nunca QUÉ canal había fallado ni cuánto había tardado.
+  const traza: string[] = [];
+  const t0 = Date.now();
+  const anotar = (texto: string) => traza.push(`${texto}@${Date.now() - t0}ms`);
+
   // La config del relay se descarga mientras corre la identidad de la pista.
   if (!configCache || configCache.expira <= Date.now()) void traerConfigStash();
 
@@ -1844,9 +1900,11 @@ async function resolverAudioInterno(
   if (monoInicial.pista && (await monochromeDisponible(monoInicial.pista.url))) {
     return devolverMonochrome(monoInicial.pista);
   }
+  anotar(monoInicial.pista ? "mono-isrc-sin-audio" : "mono-isrc-sin-match");
 
   const [candidatosResueltos, monoPorNombre] = await Promise.all([candidatosPromise, monoNombre]);
   let candidatos = candidatosResueltos;
+  anotar(`cands=${candidatos.length}`);
 
   // El re-subido de YouTube/SoundCloud pone `ARTISTA - Canción` en el TÍTULO y
   // el canal en el campo artista ("Monsieur Blaya", "Maitre 80"), así que el
@@ -1869,6 +1927,7 @@ async function resolverAudioInterno(
   if (monoPorNombre && (await monochromeDisponible(monoPorNombre.url))) {
     return devolverMonochrome(monoPorNombre);
   }
+  anotar(monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match");
 
   let mono = null as Awaited<ReturnType<typeof resolverMonochrome>>;
   const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
@@ -1880,10 +1939,15 @@ async function resolverAudioInterno(
     if (mono) break;
   }
   if (mono && (await monochromeDisponible(mono.url))) return devolverMonochrome(mono);
+  anotar(mono ? "mono-isrc-cands-sin-audio" : "mono-isrc-cands-sin-match");
 
+  let mintsFallidos = 0;
   for (const c of evitar.has("stash-relay") ? [] : candidatos) {
     const mint = await mintaStash(c.id);
-    if (!mint) continue;
+    if (!mint) {
+      mintsFallidos++;
+      continue;
+    }
     const duracion = c.duracionMs > 0 ? Math.round(c.duracionMs / 1000) : p.duracionMs ? Math.round(p.duracionMs / 1000) : 0;
     const enlace: Enlace = {
       url: mint.url,
@@ -1907,10 +1971,13 @@ async function resolverAudioInterno(
     };
   }
 
+  anotar(`stash-fallos=${mintsFallidos}/${candidatos.length}`);
+
   // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
   // YouTube porque no depende de un backend externo ni de credenciales.
   const bandcamp = await bandcampParalelo;
   if (bandcamp) return devolverBandcamp(bandcamp);
+  anotar("bandcamp-sin-match");
 
   // Último recurso: el audio COMPLETO vía el backend local de yt-dlp. El enlace
   // es del propio backend (su proxy), se cachea una hora -el token del backend
@@ -1918,10 +1985,100 @@ async function resolverAudioInterno(
   // audio y la interfaz lo avisa: nunca se sirve un adelanto de 30 s. La
   // petición arrancó al entrar en la función (ver `ytParalelo`), así que acá
   // solo se espera el resultado, ya avanzado.
-  if (evitar.has("youtube")) return null;
+  if (evitar.has("youtube")) {
+    console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · youtube descartado`);
+    return null;
+  }
   const yt = await ytParalelo;
-  if (!yt) return null;
+  if (!yt) {
+    anotar("youtube-sin-audio");
+    console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · ${Date.now() - t0}ms`);
+    return null;
+  }
   return devolverYouTube(yt);
+}
+
+/* ── Salud de los canales (panel del dueño) ───────────────────────── */
+
+/**
+ * Prueba cada canal desde el Worker, no desde la computadora del dueño.
+ *
+ * Es la única forma de distinguir "mi red llega" de "el Worker llega":
+ * monochrome, el relay, Bandcamp y Yattee se comportan distinto según la IP de
+ * salida, y sin esto un canal caído se veía igual que un catálogo sin la pista.
+ */
+export type PruebaCanal = { canal: string; ok: boolean; ms: number; detalle: string };
+
+export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
+  const pedido: PeticionAudio = {
+    titulo: "Bohemian Rhapsody",
+    artista: "Queen",
+    album: "A Night At The Opera",
+    duracionMs: 355_000,
+  };
+
+  const medir = async (canal: string, tarea: () => Promise<string>): Promise<PruebaCanal> => {
+    const t = Date.now();
+    try {
+      const detalle = await tarea();
+      return { canal, ok: true, ms: Date.now() - t, detalle };
+    } catch (e) {
+      return { canal, ok: false, ms: Date.now() - t, detalle: e instanceof Error ? e.message : String(e) };
+    }
+  };
+
+  return Promise.all([
+    medir("monochrome", async () => {
+      const lista = await buscarMonochrome("Queen Bohemian Rhapsody", 6_000);
+      if (lista.length === 0) throw new Error("el catálogo no devolvió resultados");
+      const pista = lista[0];
+      const id = idMonochrome(pista);
+      if (!id) throw new Error("resultado sin id reproducible");
+      const mint = mintMonochrome(pista, normalizarISRC(pista.isrc ?? ""));
+      const suena = await monochromeDisponible(mint.url);
+      if (!suena) throw new Error(`el catálogo responde (${lista.length}) pero el archivo no se sirve`);
+      return `${lista.length} resultados · archivo con Range OK`;
+    }),
+    medir("stash-relay", async () => {
+      const cfg = await traerConfigStash(true);
+      if (!cfg) throw new Error("no se pudo leer lossless.json");
+      return `${cfg.bases.length} relay(s) · ${cfg.bases.map((b) => new URL(b).host).join(", ")}`;
+    }),
+    medir("bandcamp", async () => {
+      const bc = await resolverBandcamp(pedido);
+      if (!bc) throw new Error("sin coincidencia en la búsqueda");
+      return `${bc.duracion}s · ${new URL(bc.url).host}`;
+    }),
+    medir("youtube", async () => {
+      const cfg = configYouTube();
+      if (!cfg.yattee && !cfg.local) throw new Error("sin YATTEE_URL ni YT_DLP_BACKEND_URL");
+      if (cfg.local) {
+        const despierto = await despertarBackendYouTube(20_000);
+        if (!despierto) throw new Error(`el backend local no contestó ${cfg.local}`);
+        return `backend propio despierto · ${new URL(cfg.local).host}`;
+      }
+      const consulta = encodeURIComponent("Queen Bohemian Rhapsody");
+      const lista = await pedirYattee<ResultadoBusquedaYattee[]>(
+        cfg,
+        `/api/v1/search?q=${consulta}&type=video`,
+        12_000,
+      );
+      if (!lista || !Array.isArray(lista) || lista.length === 0) throw new Error("la búsqueda no devolvió nada");
+      const primero = lista.find((v) => v.videoId && !v.liveNow);
+      if (!primero?.videoId) throw new Error(`resultados sin videoId (${lista.length})`);
+      const video = await pedirYattee<VideoYattee>(
+        cfg,
+        `/api/v1/videos/${encodeURIComponent(primero.videoId)}?proxy=true&proxy_mode=relay`,
+        25_000,
+      );
+      const formatos = (video?.adaptiveFormats ?? []).filter(
+        (f) => f.url && (f.type ?? "").startsWith("audio/"),
+      );
+      if (!video) throw new Error(`el video ${primero.videoId} no respondió`);
+      if (formatos.length === 0) throw new Error(`el video ${primero.videoId} sin formatos de audio`);
+      return `${lista.length} resultados · ${formatos.length} formatos de audio`;
+    }),
+  ]);
 }
 
 /**

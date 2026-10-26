@@ -1004,6 +1004,18 @@ export default function DemoPlayer({ onCuenta }: Props) {
               </button>
             )}
 
+            {/* Aviso de audio FUERA del área que se desplaza: si el visitante
+                tocó una fila del fondo de la lista, el mensaje aparecía arriba
+                del scroll y nunca lo veía — parecía que el toque no hacía nada. */}
+            {avisoAudio && (
+              <p
+                role="status"
+                className="mx-2 mt-2 shrink-0 rounded-xl border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-[11px] font-medium text-destructive sm:mx-3"
+              >
+                {avisoAudio}
+              </p>
+            )}
+
             {/* Resultados */}
             <div
               ref={listaRef}
@@ -1057,10 +1069,6 @@ export default function DemoPlayer({ onCuenta }: Props) {
                 <p className="px-1 pb-1.5 text-xs text-muted-foreground">
                   {Plantilla(t("demoFuenteCambio"), { fuente: otraFuente })}
                 </p>
-              )}
-
-              {avisoAudio && (
-                <p className="px-1 pb-1.5 text-xs text-destructive/80">{avisoAudio}</p>
               )}
 
               {avisoDescarga && (

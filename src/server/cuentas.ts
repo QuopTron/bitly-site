@@ -103,7 +103,7 @@ type Pendiente = {
   intentos: number;
 };
 
-type CuentaGuardada = CuentaPublica & {
+export type CuentaGuardada = CuentaPublica & {
   hash: string;
   salt: string;
   iteraciones: number;
@@ -393,7 +393,7 @@ function usuarioBase(correo: string): string {
 }
 
 /** Las cuentas anteriores al login por usuario no tienen `usuario`: se deriva. */
-function usuarioDe(c: CuentaGuardada): string {
+export function usuarioDe(c: CuentaGuardada): string {
   const guardado = String(c.usuario ?? "").trim().toLowerCase();
   return guardado || usuarioBase(c.correo);
 }
