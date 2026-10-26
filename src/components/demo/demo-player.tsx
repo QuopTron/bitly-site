@@ -19,10 +19,8 @@ import { retraso } from "@/lib/reveal";
 import { navegarA } from "@/lib/navegacion";
 import { enlaceWhatsApp } from "@/lib/contacto";
 
-import { useEsStandalone } from "@/lib/pwa";
 import ExtensionPicker from "@/components/demo/extension-picker";
 import CategoriaChips from "@/components/demo/categoria-chips";
-import ModoAppOverlay from "@/components/demo/modo-app-overlay";
 import Karaoke from "@/components/demo/karaoke";
 import { CabeceraDetalle, FilaCancion, TarjetaColeccion } from "@/components/demo/catalogo-demo";
 import { ReproductorCompleto } from "@/components/demo/reproductor-completo";
@@ -164,7 +162,6 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const t = useI18n();
   // Instalada como PWA el audio no se puede guardar: la demo se oculta y se
   // invita a abrirla en el navegador, en vez de mostrar un reproductor a medias.
-  const esApp = useEsStandalone();
   const [moneda] = useCurrency();
   const cuota = useCuota();
   /** Premium o cuenta: no hay tope. La calidad la decide el servidor. */
@@ -882,33 +879,21 @@ export default function DemoPlayer({ onCuenta }: Props) {
     navegarA("planes");
   };
 
+  // A pantalla completa, como el buscador de una app de música: entrando a
+  // «Demo» lo único que se ve es la barra de búsqueda y los resultados. Sin
+  // titular ni descripción: en el celular empujaban la lista a media pantalla.
   return (
-    <section id="demo" className="mx-auto flex h-full w-full max-w-7xl flex-col px-3 pb-3 pt-1 sm:px-6 sm:pb-5">
-      <header className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-        <div className="min-w-0">
-          <span className="etiqueta">
-            <Play className="h-3.5 w-3.5" aria-hidden />
-            {t("demoBadge")}
-          </span>
-          <h2 className="texto-tag mt-1 text-2xl leading-none sm:text-3xl">{t("demoTitle")}</h2>
-        </div>
-        <p className="max-w-md text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("demoDescription")}</p>
-      </header>
-
-      {esApp && (
-        <span className="etiqueta mb-2 gap-1.5 self-start text-primary">
-          <Lock className="h-3 w-3" aria-hidden />
-          {t("pwaBloqueoNota")}
-        </span>
-      )}
-
-      <div className="grid min-h-0 flex-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+    <section
+      id="demo"
+      className="mx-auto flex h-full w-full max-w-7xl flex-col sm:px-6 sm:pb-5 sm:pt-1"
+    >
+      <div className="grid min-h-0 flex-1 items-stretch lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-4">
         <div className="flex min-h-0 min-w-0 flex-col">
           <div
             role="group"
             aria-label={t("demoAriaMarco")}
             data-bloqueo-descarga=""
-            className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.8rem] border border-border bg-card shadow-2xl shadow-primary/10"
+            className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-border bg-card sm:rounded-[1.8rem] sm:border sm:shadow-2xl sm:shadow-primary/10"
           >
             <div className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-primary" />
 
@@ -918,9 +903,9 @@ export default function DemoPlayer({ onCuenta }: Props) {
                 e.preventDefault();
                 void hacerBusqueda(termino, extension, filtro);
               }}
-              className="shrink-0 px-3 sm:px-4"
+              className="shrink-0 px-3 pt-2 sm:px-4 sm:pt-0"
             >
-              <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/60 px-2.5 py-2 focus-within:border-primary/50">
+              <div className="flex items-center gap-2 rounded-2xl border border-border bg-background/60 px-2.5 py-2.5 focus-within:border-primary/50 sm:py-2">
                 <ExtensionPicker valor={extension} onCambiado={cambiarExtension} />
                 {cargando ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
@@ -932,7 +917,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
                   onChange={(e) => setTermino(e.target.value)}
                   placeholder={t("demoSearchPlaceholder")}
                   aria-label={t("demoSearchPlaceholder")}
-                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+                  className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground/60 sm:text-sm"
                 />
                 <button
                   type="submit"
@@ -1516,8 +1501,6 @@ export default function DemoPlayer({ onCuenta }: Props) {
               </div>
             )}
 
-            {/* Modo app instalada: el reproductor queda tapado. */}
-            {esApp && <ModoAppOverlay />}
           </div>
         </div>
 

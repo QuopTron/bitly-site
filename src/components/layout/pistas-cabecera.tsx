@@ -42,8 +42,25 @@ export default function PistasCabecera() {
       /* sin almacenamiento: mejor no molestar */
     }
     if (visto) return;
-    const id = setTimeout(() => setAbierta(true), 1400);
-    return () => clearTimeout(id);
+
+    // Nunca sobre la demo: su fondo ocupa toda la pantalla y se come los toques
+    // del buscador y de las filas. Quien entra a escuchar no puede recibir un
+    // tour encima (en el celular parecía que «no dejaba reproducir»).
+    const enDemo = () => window.location.hash.startsWith("#demo");
+    if (enDemo()) return;
+
+    const id = setTimeout(() => {
+      // Otra vez la condición, por si se navegó a la demo en ese segundo y medio.
+      if (!enDemo()) setAbierta(true);
+    }, 1400);
+    const alCambiarVista = () => {
+      if (enDemo()) setAbierta(false);
+    };
+    window.addEventListener("hashchange", alCambiarVista);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener("hashchange", alCambiarVista);
+    };
   }, []);
 
   const cerrar = () => {

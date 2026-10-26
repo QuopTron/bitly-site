@@ -1658,6 +1658,13 @@ async function idPorCatalogoQobuz(
  * esperando (el techo del runtime son 20 s y el usuario mira un spinner).
  */
 const TOPE_RUTA_MS = 3_500;
+/**
+ * Techo del ÚLTIMO intento (YouTube) cuando ya fallaron los canales sin
+ * pérdida. Sin esto, un yattee caído o despertándose dejaba al visitante
+ * esperando hasta 60 s por una pista que ningún otro canal va a rescatar: cada
+ * canal debe tener su propio reloj y rendirse solo.
+ */
+const TOPE_YT_FINAL_MS = 15_000;
 
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {
@@ -1914,7 +1921,14 @@ async function resolverAudioInterno(
     return resolverBandcamp(pedido);
   })();
 
-  const monoInicial = await monoParalelo;
+  // Con techo propio: si el respaldo de ISRC (Deezer) o el catálogo de monochrome
+  // se cuelgan, el rescate sigue igual con el relay y Bandcamp. Antes esta
+  // espera era libre y podía comerse el presupuesto entero antes de preguntarle
+  // a ningún otro canal.
+  const monoInicial = await conTope(monoParalelo, TOPE_RUTA_MS * 2).catch((): MonoInicial => ({
+    isrc: null,
+    pista: null,
+  }));
   if (monoInicial.pista && (await monochromeDisponible(monoInicial.pista.url))) {
     return devolverMonochrome(monoInicial.pista);
   }
@@ -2007,7 +2021,7 @@ async function resolverAudioInterno(
     console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · youtube descartado`);
     return null;
   }
-  const yt = await ytParalelo;
+  const yt = await conTope(ytParalelo, TOPE_YT_FINAL_MS).catch(() => null);
   if (!yt) {
     anotar("youtube-sin-audio");
     console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · ${Date.now() - t0}ms`);

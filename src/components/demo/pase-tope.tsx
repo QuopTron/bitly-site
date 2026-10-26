@@ -7,16 +7,20 @@ import {
   estadoPase,
   marcarInicioPase,
   PASE_BASE_BS,
+  PASE_GRACIA_HORAS,
+  PASE_HORA_TOPE,
   PASE_TOPE_BS,
 } from "@/lib/demo-pase";
 
 /**
  * El pase con precio que sube por hora.
  *
- * Arranca en Bs 1 cuando se acaban las 4 reproducciones, suma Bs 1 por hora y
- * se congela en Bs 30. El contador dice cuánto falta para el próximo aumento y
- * el "?" explica el mecanismo: un precio que sube sin decir por qué se siente
- * arbitrario; explicado, se entiende como una invitación a decidir antes.
+ * Arranca en Bs 10 cuando se acaban las 4 reproducciones y se queda ahí tres
+ * horas; a la 4.ª pasa a Bs 11, a la 5.ª a Bs 12, y así una más por hora hasta
+ * tocar Bs 30 en la hora 23, donde se congela. El contador dice cuánto falta
+ * para el próximo aumento y el "?" explica el mecanismo: un precio que sube sin
+ * decir por qué se siente arbitrario; explicado, se entiende como una
+ * invitación a decidir antes.
  */
 export function PaseTope() {
   const t = useI18n();
@@ -30,7 +34,7 @@ export function PaseTope() {
   }, []);
 
   const pase = estadoPase(ahora);
-  const siguiente = Math.min(PASE_TOPE_BS, pase.bs + 1);
+  const siguiente = pase.bs + 1;
 
   return (
     <div className="relative mb-3 overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/15 via-card/60 to-card/40 p-3 backdrop-blur">
@@ -79,7 +83,11 @@ export function PaseTope() {
         <p className="anim-entra relative mt-2 rounded-xl bg-background/50 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
           {t("demoPaseExplica")
             .replace("{base}", String(PASE_BASE_BS))
-            .replace("{tope}", String(PASE_TOPE_BS))}
+            .replace("{h4}", String(PASE_BASE_BS + 1))
+            .replace("{h5}", String(PASE_BASE_BS + 2))
+            .replace("{gracia}", String(PASE_GRACIA_HORAS))
+            .replace("{tope}", String(PASE_TOPE_BS))
+            .replace("{horaTope}", String(PASE_HORA_TOPE))}
         </p>
       )}
 
