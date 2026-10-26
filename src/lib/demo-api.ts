@@ -141,11 +141,32 @@ export async function buscarDemo(opts: {
   }
 }
 
+/**
+ * Techo de espera del rescate.
+ *
+ * El servidor puede tardar 30-50 s en el nicho (host de YouTube dormido +
+ * extracción en frío). Pasado este techo se responde `null` en vez de dejar el
+ * `await` colgado para siempre: sin esto, un worker que no contesta dejaba el
+ * cargando infinito y el botón parecía muerto.
+ */
+const ESPERA_MAXIMA_RESCATE_MS = 90_000;
+
 /** Resuelve la URL que suena para una pista, o `null` si ningún canal responde. */
 export async function rescatarDemo(pista: PistaParaAudio): Promise<AudioRescatado | null> {
   try {
     const { carga } = await sellar(pista);
-    return (await demoRescatar({ data: carga })) as AudioRescatado | null;
+    let reloj: ReturnType<typeof setTimeout> | undefined;
+    const techo = new Promise<null>((listo) => {
+      reloj = setTimeout(() => listo(null), ESPERA_MAXIMA_RESCATE_MS);
+    });
+    try {
+      return (await Promise.race([
+        demoRescatar({ data: carga }) as Promise<AudioRescatado | null>,
+        techo,
+      ])) as AudioRescatado | null;
+    } finally {
+      if (reloj) clearTimeout(reloj);
+    }
   } catch {
     return null;
   }

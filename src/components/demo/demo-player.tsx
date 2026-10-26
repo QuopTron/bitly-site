@@ -573,6 +573,11 @@ export default function DemoPlayer({ onCuenta }: Props) {
       const orden = ++pendiente.current;
       setPreparando(p.id);
       setAvisoAudio(null);
+      // Aviso de espera larga: el nicho puede tardar 30 s o más. Decirlo es
+      // mejor que un spinner mudo, que parece un botón roto.
+      const lento = setTimeout(() => {
+        if (orden === pendiente.current) setAvisoAudio(t("demoAudioTarda"));
+      }, 12_000);
 
       // Un `null` puede ser transitorio (el single-flight de la pista acaba de
       // fallar, un canal respondió 503, el isolate se despertó tarde). Antes
@@ -581,13 +586,20 @@ export default function DemoPlayer({ onCuenta }: Props) {
       let audioResuelto = await audioDe(p);
       if (!audioResuelto) {
         await new Promise((listo) => setTimeout(listo, 600));
-        if (orden !== pendiente.current) return;
+        if (orden !== pendiente.current) {
+          clearTimeout(lento);
+          return;
+        }
         audioResuelto = await audioDe(p);
       }
-      if (orden !== pendiente.current) return;
-      setPreparando(null);
+      if (orden !== pendiente.current) {
+        clearTimeout(lento);
+        return;
+      }
 
       if (!audioResuelto) {
+        clearTimeout(lento);
+        setPreparando(null);
         setAvisoAudio(t("demoAudioNone"));
         return;
       }
@@ -597,11 +609,17 @@ export default function DemoPlayer({ onCuenta }: Props) {
       // la posición y recién después se espera la metadata. Sin esperar a la
       // metadata: iPhone no baja ni la cabecera hasta que se le pide
       // reproducir, y `play()` ya espera los datos por su cuenta.
+      //
+      // El cargando NO se apaga hasta que el audio suena de verdad: si el
+      // primer canal no abre, `abrirYArrancar` pide otro y la fila lo sigue
+      // mostrando en vez de parecer que el toque no hizo nada.
       void (async () => {
         const ok = await abrirYArrancar(el, p, audioResuelto);
+        clearTimeout(lento);
         if (orden !== pendiente.current) return;
+        setPreparando(null);
         setSonando(ok);
-        if (!ok) setAvisoAudio(t("demoAudioNone"));
+        setAvisoAudio(ok ? null : t("demoAudioNone"));
       })();
     },
     [abrirYArrancar, cuota, ilimitado, pista, t],
@@ -1335,9 +1353,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
                     onClick={alternar}
                     aria-label={t("demoPlayPause")}
                     aria-pressed={sonando}
+                    aria-busy={(preparando === pista.id) || undefined}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition duration-200 hover:scale-105 active:scale-90"
                   >
-                    {sonando ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                    {preparando === pista.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : sonando ? (
+                      <Pause className="h-3.5 w-3.5" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5" />
+                    )}
                   </button>
                   <button
                     type="button"

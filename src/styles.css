@@ -402,6 +402,13 @@
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
+/* Barra de espera del audio: un bloque que viaja de izquierda a derecha.
+   Sólo `transform`, así el compositor no repinta la fila en cada frame. */
+@keyframes bit-espera {
+  from { transform: translate3d(-110%, 0, 0); }
+  to   { transform: translate3d(330%, 0, 0); }
+}
+
 /* El subrayado de pincel se dibuja una sola vez, como si alguien lo trazara. */
 @keyframes bit-firma {
   from { stroke-dashoffset: var(--largo, 520); }
@@ -665,6 +672,8 @@
   .anim-late { animation: bit-late 3.2s ease-in-out infinite; }
   /* Entrada corta para elementos que aparecen de golpe (filas de resultados). */
   .anim-entra { animation: bit-entra 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+  /* Espera del audio mientras se resuelve el enlace de la pista. */
+  .anim-espera { animation: bit-espera 1.15s ease-in-out infinite; }
 
   /* La deriva de los halos del fondo mueve capas enormes: sólo en pantallas
      grandes, donde la GPU lo lleva sin despeinarse. */

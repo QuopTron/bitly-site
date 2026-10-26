@@ -7,6 +7,7 @@ import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
 import DemoPlayer from "@/components/demo/demo-player";
 import ComentariosInicio from "@/components/inicio/comentarios-inicio";
+import PistaDeslizar from "@/components/layout/pista-deslizar";
 
 import { useAnalitica } from "@/lib/analytics";
 import { useInstalacionPwa } from "@/lib/pwa";
@@ -15,6 +16,7 @@ import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { cargarReleases, type PlatformKey, type ReleaseIndex } from "@/lib/releases";
 import { TITULO } from "@/lib/seo";
 import { EVENTO_NAVEGAR, VISTAS, esVista, type VistaId } from "@/lib/navegacion";
+import { useDeslizamientoVistas } from "@/lib/deslizamiento-vistas";
 import { INFO_POR_DEFECTO, leerDatosSitio, registrarDescarga, type InfoApp, type StatsSitio } from "@/server/datos";
 
 /**
@@ -105,6 +107,10 @@ export default function Index() {
       window.history.replaceState(null, "", `#${id}`);
     }
   }, []);
+
+  // En celular, seguir deslizando al llegar al borde pasa a la pestaña vecina.
+  // En escritorio la navegación está en la cabecera y el gesto no existe.
+  useDeslizamientoVistas(vista, cambiarVista);
 
   useEffect(() => {
     const alNavegar = (e: Event) => {
@@ -282,6 +288,7 @@ export default function Index() {
             </div>
           );
         })}
+        <PistaDeslizar vista={vista} onCambiar={cambiarVista} />
       </main>
 
       <Suspense fallback={null}>

@@ -36,6 +36,60 @@ function limpiarNombre(valor: string): string {
 type PeticionAudio = Parameters<typeof resolverAudio>[0];
 
 /**
+ * Reconoce el formato por los primeros bytes.
+ *
+ * Varios hosts de audio (monochrome, por ejemplo) contestan con
+ * `application/octet-stream` aunque el archivo sea FLAC. Sin esto la descarga
+ * se guardaba con la extensión equivocada —un FLAC llamado `.m4a`— y el tipo
+ * genérico hacía que algunos navegadores se negaran a reproducirlo.
+ */
+function formatoPorBytes(bytes: Uint8Array): string | null {
+  const texto = (desde: number, largo: number) =>
+    String.fromCharCode(...bytes.subarray(desde, desde + largo));
+  if (bytes.length >= 4) {
+    const cabecera = texto(0, 4);
+    if (cabecera === "fLaC") return "audio/flac";
+    if (cabecera === "OggS") return "audio/ogg";
+    if (cabecera === "RIFF") return "audio/wav";
+    if (texto(4, 4) === "ftyp") return "audio/mp4";
+    if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "audio/webm";
+  }
+  if (bytes.length >= 3 && texto(0, 3) === "ID3") return "audio/mpeg";
+  // Sincronía MPEG (MP3/AAC en ADTS): 11 bits en uno.
+  if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0) return "audio/mpeg";
+  return null;
+}
+
+/** Vuelve a armar el cuerpo con el trozo que ya se leyó para mirarlo. */
+function cuerpoConPrimero(
+  primero: Uint8Array,
+  lector: ReadableStreamDefaultReader<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(control) {
+      control.enqueue(primero);
+      void (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await lector.read();
+            if (done) {
+              control.close();
+              return;
+            }
+            if (value) control.enqueue(value);
+          }
+        } catch (e) {
+          control.error(e);
+        }
+      })();
+    },
+    cancel(motivo) {
+      return lector.cancel(motivo).catch(() => undefined);
+    },
+  });
+}
+
+/**
  * Resuelve el audio y abre el stream, sin decidir todavía si se entrega.
  *
  * Devuelve también el `audio` cuando el enlace existía pero el host no lo
@@ -44,7 +98,7 @@ type PeticionAudio = Parameters<typeof resolverAudio>[0];
  */
 async function traerAudio(peticion: PeticionAudio, signal: AbortSignal) {
   const audio = await resolverAudio(peticion).catch(() => null);
-  if (!audio) return { audio: null, upstream: null, tipo: null };
+  if (!audio) return { audio: null, upstream: null, tipo: null, cuerpo: null };
 
   const upstream = await fetch(audio.url, {
     headers: {
@@ -58,9 +112,23 @@ async function traerAudio(peticion: PeticionAudio, signal: AbortSignal) {
   const tipo = upstream?.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? null;
   if (!upstream?.ok || !upstream.body || (tipo && tipo.startsWith("text/"))) {
     await upstream?.body?.cancel().catch(() => undefined);
-    return { audio, upstream: null, tipo };
+    return { audio, upstream: null, tipo, cuerpo: null };
   }
-  return { audio, upstream, tipo };
+
+  let cuerpo: ReadableStream<Uint8Array> = upstream.body;
+  let tipoFinal = tipo;
+  if (!tipo || tipo === "application/octet-stream" || tipo === "binary/octet-stream") {
+    const lector = cuerpo.getReader();
+    const primero = await lector.read().catch(() => null);
+    if (!primero || primero.done || !primero.value?.byteLength) {
+      await lector.cancel().catch(() => undefined);
+      return { audio, upstream: null, tipo, cuerpo: null };
+    }
+    const formato = formatoPorBytes(primero.value);
+    if (formato) tipoFinal = formato;
+    cuerpo = cuerpoConPrimero(primero.value, lector);
+  }
+  return { audio, upstream, tipo: tipoFinal, cuerpo };
 }
 
 function extensionDe(url: string, tipo: string | null, calidad: "flac" | "estandar"): string {
@@ -119,7 +187,7 @@ export const Route = createFileRoute("/api/descargar")({
 
         const audio = traido.audio;
         const upstream = traido.upstream;
-        const cuerpo = upstream.body;
+        const cuerpo = traido.cuerpo;
         if (!cuerpo) return jsonError("sin_audio", 404);
         const tipoCrudo = traido.tipo;
 

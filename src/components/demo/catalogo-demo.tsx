@@ -158,14 +158,25 @@ export function FilaCancion({
         transform: dx ? `translateX(${dx}px)` : undefined,
         touchAction: "pan-y",
       }}
+      aria-busy={preparando || undefined}
       className={`anim-entra group relative flex items-center gap-2 rounded-2xl border p-2 pr-1.5 ${
         enMovimiento ? "transition-none" : "transition duration-200"
       } ${
-        activa
-          ? "border-primary/30 bg-primary/12"
-          : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-card/85"
+        preparando
+          ? "border-primary/40 bg-primary/10"
+          : activa
+            ? "border-primary/30 bg-primary/12"
+            : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-card/85"
       }`}
     >
+      {/* Barra de espera: mientras se busca el audio no hay nada que oír, pero
+          sí algo que ver. Sin esto, en el celular el toque parecía no hacer nada
+          hasta que la pista arrancaba (o hasta que fallaba, en silencio). */}
+      {preparando && (
+        <span aria-hidden className="absolute inset-x-0 bottom-0 z-10 h-0.5 overflow-hidden bg-primary/15">
+          <span className="anim-espera block h-full w-1/3 rounded-full bg-primary" />
+        </span>
+      )}
       <button
         type="button"
         onClick={onReproducir}
@@ -176,7 +187,7 @@ export function FilaCancion({
           <Cover p={p} clase="h-full w-full" />
           <span
             className={`absolute inset-0 flex items-center justify-center bg-black/35 transition ${
-              activa ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              preparando || activa ? "opacity-100" : "opacity-0 group-hover:opacity-100"
             }`}
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/95 text-slate-900 shadow">
@@ -195,7 +206,14 @@ export function FilaCancion({
             {p.titulo}
           </span>
           <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">
-            {[p.artista, p.album].map((s) => s.trim()).filter(Boolean).join(" \u00b7 ") || "\u00a0"}
+            {preparando ? (
+              <span className="inline-flex items-center gap-1 font-semibold text-primary">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t("demoCargandoAudio")}
+              </span>
+            ) : (
+              [p.artista, p.album].map((s) => s.trim()).filter(Boolean).join(" \u00b7 ") || "\u00a0"
+            )}
           </span>
         </span>
       </button>
