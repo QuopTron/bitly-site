@@ -478,13 +478,31 @@ async function monochromeDisponible(url: string): Promise<boolean> {
   const reloj = setTimeout(() => control.abort(), TIMEOUT_SONDA_MS);
   try {
     const res = await fetch(url, {
-      headers: { Range: "bytes=0-1", "User-Agent": USER_AGENT },
+      // 32 bytes alcanzan para ver la firma del formato y detectar el caso
+      // feo: el host contesta 206 con un XML de error en vez del audio.
+      headers: { Range: "bytes=0-31", "User-Agent": USER_AGENT },
       signal: control.signal,
       redirect: "follow",
     });
-    // No hace falta el cuerpo: se corta enseguida para no bajar la pista entera.
+    if (res.ok || res.status === 206) {
+      // Se lee SÓLO el primer trozo y se corta: nunca se baja la pista entera.
+      const lector = res.body?.getReader();
+      let cabeza = new Uint8Array(0);
+      if (lector) {
+        const { value } = await lector.read();
+        cabeza = value ?? cabeza;
+        await lector.cancel().catch(() => undefined);
+      } else {
+        await res.body?.cancel().catch(() => undefined);
+      }
+      const texto = new TextDecoder().decode(cabeza.slice(0, 64)).trim().toLowerCase();
+      if (/^(<\?xml|<error|<html|\{\s*")/.test(texto)) {
+        console.warn("[mono] el archivo vino como error, no como audio");
+        return false;
+      }
+      return true;
+    }
     await res.body?.cancel().catch(() => undefined);
-    if (res.ok || res.status === 206) return true;
     // 429 es un límite de la IP del Worker, no del archivo: Cloudflare comparte
     // su salida con miles de clientes, así que el catálogo ve "demasiadas
     // peticiones" aunque la pista exista. El NAVEGADOR la baja desde la IP de
