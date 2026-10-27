@@ -1711,7 +1711,10 @@ const TOPE_RUTA_MS = 3_500;
  * esperando hasta 60 s por una pista que ningún otro canal va a rescatar: cada
  * canal debe tener su propio reloj y rendirse solo.
  */
-const TOPE_YT_FINAL_MS = 15_000;
+// Con el PO token provider externo, la primera extracción de un video tarda
+// ~20 s (mint del token + yt-dlp + relay); con 15 s el nicho que solo existe en
+// YouTube se quedaba sin audio justo cuando ya empezaba a resolverse.
+const TOPE_YT_FINAL_MS = 32_000;
 
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {
