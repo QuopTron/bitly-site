@@ -1164,6 +1164,29 @@ function puntuarCandidatoYattee(
   return punto;
 }
 
+/**
+ * Consulta de YouTube a partir del título, sin lo que lo vuelve infructuoso.
+ *
+ * YouTube devuelve CERO resultados para títulos con calificativos: el tema
+ * «LOS THUTHANAKA - Quta (capo-kullawada) JERSEY CLUB REMIX» no encuentra nada,
+ * mientras que «Quta capo-kullawada Los Thuthanaka» devuelve once videos, uno
+ * de 244 s (la duración del original). Se van los paréntesis, los @handles y
+ * las palabras de versión; quedan el nombre del tema y el del artista, que es
+ * lo que identifica la grabación.
+ */
+const RUIDO_TITULO_YT =
+  /\b(remix|rework|bootleg|flip|edit|version|versión|live|vivo|official|oficial|video|audio|lyrics|letra|hd|4k|8k|prod|feat|ft|instrumental|extended|radio)\b/gi;
+
+function consultaYouTube(titulo: string): string {
+  return titulo
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+    .replace(/@[\w.-]+/g, " ")
+    .replace(RUIDO_TITULO_YT, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function buscarCandidatosYattee(
   p: PeticionAudio,
   cfg: { yattee: string; auth: string },
@@ -1182,18 +1205,28 @@ async function buscarCandidatosYattee(
 
   const candidatos = await pedir(consulta);
   if (candidatos.length === 0) console.warn(`[yt] búsqueda sin resultados (estado ${ultimoEstadoYt})`);
-  const mejorTitulo = candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
-  // Si el canal/artista ensució la búsqueda (re-subidos), el título solo suele
-  // encontrar la grabación. Se suman sin duplicar por videoId.
-  if (p.titulo && (candidatos.length === 0 || mejorTitulo < 2)) {
-    const alternos = await pedir(p.titulo);
+  const sumar = (mas: ResultadoBusquedaYattee[]) => {
     const vistos = new Set(candidatos.map((c) => c.videoId));
-    for (const c of alternos) {
+    for (const c of mas) {
       if (!vistos.has(c.videoId)) {
         candidatos.push(c);
         vistos.add(c.videoId);
       }
     }
+  };
+  const mejorTitulo = () =>
+    candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
+
+  // Si el canal/artista ensució la búsqueda (re-subidos), el título solo suele
+  // encontrar la grabación. Se suman sin duplicar por videoId.
+  if (p.titulo && (candidatos.length === 0 || mejorTitulo() < 2)) {
+    sumar(await pedir(p.titulo));
+  }
+  // Y si el título tampoco encuentra nada, se prueba sin los calificativos
+  // («remix», «live», @handles): ver `consultaYouTube`.
+  const limpia = consultaYouTube(p.titulo);
+  if (limpia && limpia.toLowerCase() !== p.titulo.trim().toLowerCase() && (candidatos.length === 0 || mejorTitulo() < 2)) {
+    sumar(await pedir(limpia));
   }
   return candidatos;
 }
