@@ -106,6 +106,17 @@ try {
   check("el buscador está montado", buscador);
   if (!buscador) throw new Error("sin buscador");
 
+  // El input existe antes de que React hidrate: si se rellena en ese hueco, el
+  // evento se pierde, el estado queda vacío y el envío no busca nada (parece
+  // "sin resultados"). Se espera a que el elemento tenga las props de React.
+  const hidratado = await esperar(
+    `(() => { const el = document.querySelector("#demo form input");
+      return !!el && Object.keys(el).some((k) => k.startsWith("__react")); })()`,
+    { nombre: "hidratación", tiempo: 20_000 },
+  );
+  check("React hidrató el buscador", hidratado);
+  await dormir(400);
+
   await js(
     ses,
     `(() => {
@@ -124,7 +135,9 @@ try {
   for (let intento = 1; intento <= 2 && !hayFilas; intento++) {
     const tBusqueda = Date.now();
     await js(ses, `document.querySelector("#demo form").requestSubmit()`);
-    hayFilas = await esperar(`document.querySelectorAll("#demo ul li button").length > 0`, {
+    // Las filas de resultado son botones con "Reproducir o pausar: <título>";
+    // no van en un <ul> (eso es la cola del reproductor).
+    hayFilas = await esperar(`document.querySelectorAll('button[aria-label*="eproducir"]').length > 0`, {
       nombre: "resultados",
       tiempo: TOPE_BUSQUEDA_MS,
     });
@@ -136,7 +149,7 @@ try {
 
   const filas = await js(
     ses,
-    `[...document.querySelectorAll("#demo ul li button")].map((b) => b.innerText.replace(/\\s+/g, " ").trim())`,
+    `[...document.querySelectorAll('button[aria-label*="eproducir"]')].map((b) => b.innerText.replace(/\\s+/g, " ").trim())`,
   );
   check(
     "el tema pedido está en la lista",
@@ -145,7 +158,7 @@ try {
   );
 
   const tClic = Date.now();
-  await clicReal("#demo ul li button");
+  await clicReal('button[aria-label*="eproducir"]');
   const pidioPlay = await esperar(`window.__audio.length > 0`, { nombre: "play()", tiempo: TOPE_AUDIO_MS });
   check("el clic pide reproducir", pidioPlay);
   if (!pidioPlay) throw new Error("nunca se llamó a play()");
