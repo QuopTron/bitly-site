@@ -462,6 +462,13 @@ DEMO_URL=https://bitly-site.pages.dev CODIGO_USADO=<código> \
   CODIGO_ACTIVO=<código> node scripts/probar-premium.mjs
 ```
 
+Corrido el 2026-10-28 contra `bitly-site.pages.dev`: la demo da **23/23** (dos
+veces seguidas) y `/app` monta Flutter con canvaskit desde gstatic. La única
+que costó fue el karaoke: LRCLIB tarda 5–9 s desde el edge y contesta 429 por la
+IP compartida del Worker, así que `src/server/letras.ts` le da 9 s a la primera
+consulta, reintenta los 429/5xx y **no** cachea los fallos (si no, los tres
+reintentos del karaoke contestaban lo mismo y el «♪» quedaba pegado).
+
 El contrato de la cuenta con la app (alta, código, sesión, cuota, descarga y
 rescate) se prueba sin red ni base real: `pnpm probar:api-cuenta` (29
 aserciones, handlers reales de `/api/cuenta` y `/api/rescate`).
