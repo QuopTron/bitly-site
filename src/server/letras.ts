@@ -106,28 +106,46 @@ function limpiar(texto: string): string {
 
 async function consultar(p: PeticionLetras): Promise<Letras | null> {
   const limite = Date.now() + PRESUPUESTO_MS;
+  const esperar = (ms: number) => new Promise<void>((listo) => setTimeout(listo, ms));
 
   // Timeout POR consulta: con uno global, las variantes 3+ se abortaban antes
   // de intentarse y una canción con letra plana en la primera búsqueda podía
   // quedarse sin la versión sincronizada que sí estaba en LRCLIB.
+  //
+  // Reintento: LRCLIB limita por IP y un Worker de Cloudflare comparte la IP de
+  // salida con miles de sitios, así que un 429 suelto no significa «esta canción
+  // no tiene letra» sino «en un segundo sí» (medido en producción: la misma
+  // consulta devolvía la letra a la siguiente). Un 400/404, en cambio, es la
+  // consulta sin resultados y reintentarlo no cambia nada.
   const pedir = async (params: URLSearchParams, topeMs = TIMEOUT_MS): Promise<Candidato[]> => {
-    const restante = limite - Date.now();
-    if (restante <= 0) return [];
-    const control = new AbortController();
-    const reloj = setTimeout(() => control.abort(), Math.min(topeMs, restante));
-    try {
-      const res = await fetch(`${LRCLIB}?${params.toString()}`, {
-        signal: control.signal,
-        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-      });
-      if (!res.ok) return [];
-      const datos = (await res.json()) as Candidato[] | Candidato;
-      return Array.isArray(datos) ? datos : [datos];
-    } catch {
-      return [];
-    } finally {
-      clearTimeout(reloj);
+    for (let intento = 0; intento < 2; intento++) {
+      const restante = limite - Date.now();
+      if (restante < 1_000) return [];
+      const control = new AbortController();
+      const reloj = setTimeout(() => control.abort(), Math.min(topeMs, restante));
+      let reintentar = false;
+      try {
+        const res = await fetch(`${LRCLIB}?${params.toString()}`, {
+          signal: control.signal,
+          headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        });
+        if (res.ok) {
+          const datos = (await res.json()) as Candidato[] | Candidato;
+          return Array.isArray(datos) ? datos : [datos];
+        }
+        reintentar = res.status === 429 || res.status >= 500;
+      } catch {
+        // Red cortada o timeout: un segundo intento sólo tiene sentido si el
+        // presupuesto aguanta otro arranque completo.
+        reintentar = true;
+      } finally {
+        clearTimeout(reloj);
+      }
+      if (!reintentar) return [];
+      if (limite - Date.now() < topeMs) return [];
+      await esperar(600);
     }
+    return [];
   };
 
   {
