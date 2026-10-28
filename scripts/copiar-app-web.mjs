@@ -228,4 +228,4 @@ const { bytes, archivos } = pesar(destino);
 const megas = (bytes / 1024 / 1024).toFixed(1);
 console.log(`[app-web] la app real quedó en /app/ · ${archivos} archivos, ${megas} MB`);
 console.log(`[app-web] base del bundle: ${BASE} · manifiesto id "bitly-app" (PWA propia)`);
-console.log(`[app-web] la PWA del SITIO sigue siendo otra (site.webmanifest, id "/sitio")`);
+console.log(`[app-web] el manifiesto del sitio apunta a /app/ (instalar desde el sitio instala Bitly)`);

@@ -181,6 +181,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
       { rel: "icon", type: "image/png", sizes: "16x16", href: "/favicon-16x16.png" },
       { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
+      // El manifiesto del sitio apunta a /app/: quien toca «Instalar» en el
+      // sitio tiene que quedarse con BITLY, no con una copia de esta web.
+      // Antes declaraba id "/sitio" y start_url "/", así que instalaba «Bitly
+      // Sitio» (la landing, sin buscador ni descargas) y parecía otra app.
       { rel: "manifest", href: "/site.webmanifest" },
       { rel: "preload", href: "/fonts/inter-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
       // Titan One pinta los títulos grandes y el tag del fondo, que es el
