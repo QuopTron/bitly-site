@@ -160,6 +160,14 @@ export const Route = createFileRoute("/api/descargar")({
         if (!titulo || !artista) return jsonError("datos", 400);
 
         const calidad = premium ? "flac" : "estandar";
+        const id = url.searchParams.get("id");
+        // El id del cliente puede venir como "youtube:track:<videoId>". Sin
+        // derivar el videoId, la descarga volvía a buscar por nombre y podía
+        // resolver otra versión (o tardar de más).
+        const ultimo = (id ?? "").split(":").pop() ?? "";
+        const videoId =
+          url.searchParams.get("videoId") ||
+          (/^[A-Za-z0-9_-]{11}$/.test(ultimo) ? ultimo : undefined);
 
         const peticion: PeticionAudio = {
           titulo,
@@ -168,8 +176,8 @@ export const Route = createFileRoute("/api/descargar")({
           duracionMs: Number(url.searchParams.get("duracionMs")) || undefined,
           isrc: url.searchParams.get("isrc"),
           ext: url.searchParams.get("ext"),
-          id: url.searchParams.get("id"),
-          videoId: url.searchParams.get("videoId"),
+          id: id ?? undefined,
+          videoId,
           calidad,
         };
 

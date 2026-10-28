@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
   ShieldOff,
+  Smartphone,
   Trash2,
   UserRound,
   Users,
@@ -161,12 +162,13 @@ export default function AdminCuentas({ codigo }: { codigo: string }) {
       </div>
 
       {resumen && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-8">
           <Tarjeta valor={resumen.total} etiqueta={t("adminUsuariosTotal")} />
           <Tarjeta valor={resumen.enLinea} etiqueta={t("adminUsuariosOnline")} />
           <Tarjeta valor={resumen.anonimos} etiqueta={t("adminUsuariosAnonimos")} />
           <Tarjeta valor={resumen.premium} etiqueta={t("adminUsuariosPremium")} />
           <Tarjeta valor={resumen.invitadas} etiqueta={t("adminUsuariosInvitadas")} />
+          <Tarjeta valor={resumen.deLaApp} etiqueta={t("adminUsuariosDeLaApp")} />
           <Tarjeta valor={resumen.porConfirmar} etiqueta={t("adminUsuariosPorConfirmar")} />
           <Tarjeta valor={resumen.eliminadas} etiqueta={t("adminUsuariosEliminadas")} />
         </div>
@@ -375,6 +377,11 @@ export default function AdminCuentas({ codigo }: { codigo: string }) {
                 {c.origen === "invitada" && (
                   <span className="inline-flex items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground">
                     <Bot className="h-2.5 w-2.5" aria-hidden /> {t("adminUsuariosInvitada")}
+                  </span>
+                )}
+                {c.origen === "app" && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full border border-primary/40 bg-primary/5 px-1.5 py-0.5 text-[9px] text-primary">
+                    <Smartphone className="h-2.5 w-2.5" aria-hidden /> {t("adminUsuariosApp")}
                   </span>
                 )}
                 {c.premium && (

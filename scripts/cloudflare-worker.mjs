@@ -95,6 +95,33 @@ const CSP_FIJOS =
   " worker-src 'self';" +
   " upgrade-insecure-requests";
 
+// CSP de la APP servida en /app (la PWA real de Bitly, ver
+// scripts/copiar-app-web.mjs). Tiene que ser distinta a propósito:
+//   · el bundle de Flutter compila WebAssembly (canvaskit) → 'wasm-unsafe-eval';
+//   · el motor se baja de www.gstatic.com: flutter build web usa el CDN de
+//     Flutter para canvaskit POR DEFECTO (el bundle también trae su copia en
+//     canvaskit/, pero sólo la usa si se compila con --no-web-resources-cdn).
+//     Sin este host en script-src, la app quedaba con la pantalla en blanco
+//     ("Failed to fetch dynamically imported module: .../canvaskit.js") aunque
+//     el resto del bundle cargara: es lo que se vio al verificar /app con el
+//     navegador de verdad;
+//   · la app habla con el SERVIDOR QUE EL USUARIO CONFIGURE (bitly-backend
+//     --web), en cualquier host y puerto, así que connect-src no puede ser
+//     'self'. Es el propio cliente del usuario pidiendo su propio servidor;
+//   · el shell de Flutter usa guiones inline (registro del service worker) y
+//     upgrade-insecure-requests rompería un backend en http puerto 8080.
+//
+// OJO: este bloque vive DENTRO de un template literal (el worker se genera como
+// texto), así que sus comentarios no pueden llevar backticks.
+const CSP_APP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'" +
+  " https://www.gstatic.com blob:;" +
+  " style-src 'self' 'unsafe-inline'; font-src 'self' data:;" +
+  " img-src 'self' data: blob: https:;" +
+  " media-src 'self' blob: data: https: http:;" +
+  " connect-src *; worker-src 'self' blob:;" +
+  " frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';";
+
 async function sha256(texto) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto));
   const bytes = new Uint8Array(buf);
@@ -173,18 +200,24 @@ const CABECERAS_HTML = {
  * una CSP floja a ninguna o a una que bloquee los guiones y deje la página sin
  * hidratar.
  */
-async function conCsp(resp) {
+async function conCsp(resp, esApp = false) {
   const tipo = resp.headers.get("content-type") ?? "";
   if (!tipo.includes("text/html")) return resp;
   if (resp.headers.get("content-encoding") && resp.headers.get("content-encoding") !== "identity") {
     const cab = new Headers(resp.headers);
-    cab.set("Content-Security-Policy", CSP_FIJOS + "; script-src 'self' 'unsafe-inline'");
+    cab.set(
+      "Content-Security-Policy",
+      esApp ? CSP_APP : CSP_FIJOS + "; script-src 'self' 'unsafe-inline'",
+    );
     for (const [clave, valor] of Object.entries(CABECERAS_HTML)) cab.set(clave, valor);
     return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: cab });
   }
   const html = await resp.text();
   const cab = new Headers(resp.headers);
-  cab.set("Content-Security-Policy", await cspDeHtmlCacheado(html, resp.headers.get("etag") ?? ""));
+  cab.set(
+    "Content-Security-Policy",
+    esApp ? CSP_APP : await cspDeHtmlCacheado(html, resp.headers.get("etag") ?? ""),
+  );
   for (const [clave, valor] of Object.entries(CABECERAS_HTML)) cab.set(clave, valor);
   cab.delete("content-length");
   return new Response(html, { status: resp.status, statusText: resp.statusText, headers: cab });
@@ -196,6 +229,9 @@ export default {
     const { pathname } = new URL(request.url);
     const esRpc = pathname.startsWith("/_serverFn/");
     const esApi = pathname.startsWith("/api/");
+    // La app real servida en el sitio (public/app): su HTML lleva la CSP de
+    // PWA (/app) y no la del sitio.
+    const esApp = pathname === "/app" || pathname.startsWith("/app/");
 
     // Tope de cuerpo en el borde: el comprobante más grande permitido son 4 MB
     // de base64, así que nada legítimo pasa de 6 MB. Sin esto, un POST enorme
@@ -236,12 +272,12 @@ export default {
 
     if (!esRpc && request.method === "GET") {
       const estatico = await env.ASSETS.fetch(request);
-      if (estatico.status !== 404) return conCsp(estatico);
+      if (estatico.status !== 404) return conCsp(estatico, esApp);
     }
 
     const respuesta = await app.fetch(request, env, ctx);
     const salida = respuesta.status !== 404 ? respuesta : await env.ASSETS.fetch(request);
-    const final = await conCsp(salida);
+    const final = await conCsp(salida, esApp);
     // La RPC y la API de la app (descargas, audio) no se cachean ni se indexan,
     // y salen con las mismas cabeceras de seguridad que el resto del sitio: un
     // archivo descargado no se puede "adivinar" como HTML/JS (nosniff) ni leer

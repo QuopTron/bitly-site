@@ -20,6 +20,12 @@ export const stub = (nombre) => path.join(raiz, "scripts/pruebas/stubs", nombre)
 export const REPO_PRUEBA = "QuopTron/bitly-chats";
 export const ADMIN_CORREO = "floxdev2024@gmail.com";
 export const ADMIN_CLAVE = "clave-prueba-panel-2026";
+/**
+ * Secreto con el que las pruebas FIRMAN sus sesiones. El sitio no emite ninguna
+ * sin un secreto propio (`sin_secreto`), así que sin esto no se puede ni entrar;
+ * la clave es de mentira y sólo vive en el proceso de la prueba.
+ */
+export const SECRETO_SESION_PRUEBA = "secreto-de-sesion-de-prueba-2026";
 
 /** Lee `.env` a un objeto (no imprime valores). */
 export function leerEnv() {
@@ -50,6 +56,11 @@ export function entornoPrueba(extra = {}) {
     BITLY_ADMIN_EMAIL: ADMIN_CORREO,
     BITLY_ADMIN_CLAVE: ADMIN_CLAVE,
     BITLY_ADMIN_SECRET: "secreto-prueba-panel-2026",
+    // El sitio NO emite sesiones sin el secreto dedicado (responde
+    // `sin_secreto`, a propósito). La siembra de las pruebas crea cuentas y
+    // pide sesión, así que sin esto `verificar-panel` y `verificar-cambio`
+    // fallaban en el primer paso.
+    BITLY_SESSION_SECRET: SECRETO_SESION_PRUEBA,
     RESEND_API_KEY: "",
     BITLY_EMAIL_WEBHOOK: "",
     BITLY_SMTP_HOST: "",

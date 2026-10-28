@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "yt-dlp": "node scripts/backend-yt-dlp.mjs",
-    "build": "vite build && node scripts/cloudflare-worker.mjs",
+    "preparar:app": "node scripts/copiar-app-web.mjs",
+    "build": "node scripts/copiar-app-web.mjs && vite build && node scripts/cloudflare-worker.mjs",
     "preview": "pnpm build && npx --yes wrangler pages dev dist/client --port 8788",
     "preview:serve": "npx --yes wrangler pages dev dist/client --port 8788",
     "start": "node .output/server/index.mjs",
@@ -24,6 +25,9 @@
     "verificar:worker": "node scripts/verificar-worker.mjs",
     "verificar:produccion": "node scripts/auditoria-produccion.mjs",
     "probar:cuota": "node scripts/probar-cuota.mjs",
+    "probar:api-cuenta": "node scripts/probar-api-cuenta.mjs",
+    "verificar:rescate-cuenta": "node scripts/verificar-rescate-cuenta.mjs",
+    "reiniciar:cuota": "node scripts/reiniciar-cuota.mjs",
     "probar:opiniones": "node scripts/probar-opiniones.mjs",
     "probar:correo": "node scripts/probar-correo.mjs",
     "probar:demo": "node scripts/verificar-demo.mjs"

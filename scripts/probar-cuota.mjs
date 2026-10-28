@@ -55,9 +55,31 @@ try {
     logLevel: "error",
     // `demo-cuota` importa helpers del cliente (`@/lib/cuentas-cliente`) con el
     // alias del tsconfig, que esbuild no conoce. Las server functions se cargan
-    // con import() dinámico y acá no se llaman: quedan externas.
+    // con import() dinámico y acá no se llaman.
     alias: { "@": path.join(raiz, "src") },
-    external: ["@/server/cuentas", "@/lib/premium-check", "@tanstack/react-start"],
+    external: ["@tanstack/react-start"],
+    // Ojo: `external: ["@/server/cuentas"]` NO alcanza. Con `alias` configurado,
+    // esbuild resuelve el alias antes de comparar contra `external`, así que el
+    // import("@/server/cuentas") de `demo-cuota` entraba al bundle y arrastraba
+    // `correo.ts` → `worker-mailer` → `cloudflare:sockets` (módulo de Workers que
+    // en Node no existe): el script no compilaba más. Con el plugin (que corre
+    // ANTES del resolver) queda reemplazado por un doble, como en el resto de
+    // los scripts de `scripts/`.
+    plugins: [
+      {
+        name: "cuentas-falso",
+        setup(build) {
+          build.onResolve({ filter: /^@\/server\/cuentas$/ }, () => ({
+            path: "cuentas-falso",
+            namespace: "doble",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "doble" }, () => ({
+            contents: "export async function miCuenta() { return { ok: false }; }",
+            loader: "js",
+          }));
+        },
+      },
+    ],
   });
   const m = await import(pathToFileURL(salida).href + `?v=${Date.now()}`);
   const { REPRODUCCIONES, VENTANA_MS, calcularCuota } = m;

@@ -114,7 +114,17 @@ try {
         if (bruto && typeof bruto === "object" && "error" in bruto && bruto.error) {
           throw bruto.error instanceof Error ? bruto.error : new Error(String(bruto.error));
         }
-        if (bruto && typeof bruto === "object" && "result" in bruto && "context" in bruto) {
+        // El sobre de la server function trae `result` y, según la versión del
+        // serializador, `context` o no. Exigir `context` dejaba el payload sin
+        // desenvolver cuando faltaba: el JWK llegaba como `{ result: jwk }` y
+        // `importarPublica` cortaba con "Invalid keyData". Se desenvuelve si no
+        // hay ninguna otra clave además de esas dos.
+        if (
+          bruto &&
+          typeof bruto === "object" &&
+          "result" in bruto &&
+          Object.keys(bruto).every((clave) => clave === "result" || clave === "context")
+        ) {
           return bruto.result;
         }
         return bruto;

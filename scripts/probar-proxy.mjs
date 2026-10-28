@@ -72,6 +72,13 @@ try {
       "#tanstack-router-entry",
       "#tanstack-start-entry",
       "tanstack-start-manifest:*",
+      // `worker-mailer` (el cliente SMTP de `correo.ts`, que entra en el bundle
+      // por la cadena de imports) pide un módulo nativo de Cloudflare y un
+      // `node:tls` que acá no hacen falta: el correo automático va apagado
+      // porque `entornoPrueba()` borra las credenciales SMTP. Sin esto el build
+      // del bundle fallaba antes de correr una sola aserción.
+      "cloudflare:sockets",
+      "node:tls",
     ],
     logLevel: "warning",
   });

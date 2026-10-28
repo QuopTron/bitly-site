@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ApiCuentaRouteImport } from './routes/api/cuenta'
 import { Route as ApiDescargarRouteImport } from './routes/api/descargar'
 import { Route as ApiPresenteRouteImport } from './routes/api/presente'
+import { Route as ApiRescateRouteImport } from './routes/api/rescate'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCuentaRoute = ApiCuentaRouteImport.update({
+  id: '/api/cuenta',
+  path: '/api/cuenta',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDescargarRoute = ApiDescargarRouteImport.update({
@@ -34,39 +41,71 @@ const ApiPresenteRoute = ApiPresenteRouteImport.update({
   path: '/api/presente',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRescateRoute = ApiRescateRouteImport.update({
+  id: '/api/rescate',
+  path: '/api/rescate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
+  '/api/rescate': typeof ApiRescateRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
+  '/api/rescate': typeof ApiRescateRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
+  '/api/rescate': typeof ApiRescateRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/api/descargar' | '/api/presente'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/api/cuenta'
+    | '/api/descargar'
+    | '/api/presente'
+    | '/api/rescate'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/api/descargar' | '/api/presente'
-  id: '__root__' | '/' | '/admin' | '/api/descargar' | '/api/presente'
+  to:
+    | '/'
+    | '/admin'
+    | '/api/cuenta'
+    | '/api/descargar'
+    | '/api/presente'
+    | '/api/rescate'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/api/cuenta'
+    | '/api/descargar'
+    | '/api/presente'
+    | '/api/rescate'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ApiCuentaRoute: typeof ApiCuentaRoute
   ApiDescargarRoute: typeof ApiDescargarRoute
   ApiPresenteRoute: typeof ApiPresenteRoute
+  ApiRescateRoute: typeof ApiRescateRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +124,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cuenta': {
+      id: '/api/cuenta'
+      path: '/api/cuenta'
+      fullPath: '/api/cuenta'
+      preLoaderRoute: typeof ApiCuentaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/descargar': {
       id: '/api/descargar'
       path: '/api/descargar'
@@ -99,14 +145,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPresenteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/rescate': {
+      id: '/api/rescate'
+      path: '/api/rescate'
+      fullPath: '/api/rescate'
+      preLoaderRoute: typeof ApiRescateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ApiCuentaRoute: ApiCuentaRoute,
   ApiDescargarRoute: ApiDescargarRoute,
   ApiPresenteRoute: ApiPresenteRoute,
+  ApiRescateRoute: ApiRescateRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

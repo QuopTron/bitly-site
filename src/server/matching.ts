@@ -175,6 +175,37 @@ export function isNonOriginalTitle(rawTitle: string): boolean {
 }
 
 /**
+ * Marcadores de versión presentes en [texto], en el orden de la tabla.
+ *
+ * Sirve para dos cosas que el veto solo no resuelve:
+ *   · saber si la CONSULTA pide una versión concreta ("Andrea piano"), y
+ *   · desempatar entre candidatos cuando esa versión existe en varios canales.
+ */
+export function marcadoresDeVersion(texto: string): string[] {
+  const marc = tituloParaMarcadores(texto);
+  return nonOriginalMarkers.filter((m) => marcadorPresente(marc, m));
+}
+
+/** "version" acompaña a cualquier marcador ("Piano Version", "Remix Version"). */
+const marcadoresAcompanantes = new Set(["version"]);
+
+/**
+ * ¿La versión del candidato cumple lo que pide la consulta?
+ *
+ * Sin marcadores en la consulta sólo se acepta el original. Con marcadores se
+ * exige que el candidato los tenga TODOS y que no traiga otra variante
+ * incompatible; "version" no cuenta como incompatible porque casi siempre
+ * acompaña ("Andrea (Piano Version)" para la consulta "Andrea piano").
+ */
+export function versionPedidaCompatible(consulta: string, candidato: string): boolean {
+  const pedidas = marcadoresDeVersion(consulta);
+  const tiene = marcadoresDeVersion(candidato);
+  if (pedidas.length === 0) return !esMarcadorNoOriginal(tituloParaMarcadores(candidato));
+  if (!pedidas.every((m) => tiene.includes(m))) return false;
+  return tiene.every((m) => pedidas.includes(m) || marcadoresAcompanantes.has(m));
+}
+
+/**
  * ¿[texto] lleva un marcador de versión que la [consulta] NO lleva? Es la regla
  * por la que "MORNING DEW (DONK) REMIX" sigue siendo el original de Beyoncé: el
  * marcador solo cuenta si el pedido no lo trae.
@@ -638,6 +669,32 @@ const catTitulo = 2;
 const catArtistaAlbum = 3;
 const catUltimo = 4;
 const catDescartado = 5;
+
+/**
+ * Quita del LISTADO las versiones que la consulta NO pidió.
+ *
+ * `filtrarOriginales` sólo descarta variantes cuando además hay un original
+ * estricto; si el catálogo únicamente devolvió remixes, los dejaba pasar y el
+ * clic terminaba reproduciendo el remix. Acá la regla es explícita: sin
+ * marcador en la consulta, cualquier versión no original se va. Si la consulta
+ * sí lo trae ("Andrea piano"), se conserva esa versión y se descartan las
+ * demás variantes (un remix de la versión piano, por ejemplo).
+ *
+ * Los no-tracks se conservan siempre: el listado de álbumes/artistas sigue
+ * disponible aunque no quede ninguna canción que mostrar.
+ */
+export function sinVersionesNoPedidas<T extends ItemParaFiltrar>(
+  items: T[],
+  queryTitle: string,
+  queryArtist: string,
+): T[] {
+  const consulta = `${queryTitle} ${queryArtist}`.trim();
+  return items.filter((item) => {
+    if (item.tipo !== "track") return true;
+    const texto = `${item.titulo} ${item.artista} ${item.album}`.trim();
+    return versionPedidaCompatible(consulta, texto);
+  });
+}
 
 /**
  * `filtrarOriginales`: saca del LISTADO los tracks que no se relacionan con la

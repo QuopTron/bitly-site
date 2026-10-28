@@ -38,7 +38,14 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       tanstackStart({
         prerender: {
-          enabled: true
+          enabled: true,
+          // `/app` NO se prerenderiza: no es una ruta del sitio, es la app de
+          // Flutter copiada a public/app (ver scripts/copiar-app-web.mjs). El
+          // crawler seguía el enlace «Abrir la app (PWA)» de la sección de
+          // instalación, no encontraba la ruta y hacía fallar el build entero.
+          // En el navegador la sirve el estático (Vite en dev, el CDN en
+          // producción), así que no pierde nada.
+          filter: (page: { path?: string }) => !String(page?.path ?? "").startsWith("/app"),
         }
       }),
       react(),

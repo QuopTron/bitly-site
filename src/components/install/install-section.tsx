@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Apple, Download, Laptop, MessageCircle, Monitor, Smartphone, Tv, Wrench } from "lucide-react";
+import { Apple, Download, Globe, Laptop, MessageCircle, Monitor, Smartphone, Tv, Wrench } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 import { retraso } from "@/lib/reveal";
@@ -135,6 +135,17 @@ export default function InstallSection({ onDownload }: { onDownload?: (p: Descar
             {t(DESCARGA[activa].clave)}
           </button>
         )}
+
+        {/* La app de verdad, sin instalar nada: el bundle de Flutter servido en
+            /app (ver scripts/copiar-app-web.mjs). Es OTRA PWA que la del sitio:
+            la del sitio es esta web, la de /app es Bitly. */}
+        <a
+          href="/app/"
+          className="boton-fantasma px-5 py-3 text-center text-xs text-muted-foreground hover:text-foreground sm:text-sm"
+        >
+          <Globe className="h-4 w-4 text-primary" aria-hidden />
+          {t("installWebApp")}
+        </a>
 
         <a
           href="#contacto"

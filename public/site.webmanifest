@@ -1,8 +1,8 @@
 {
-  "name": "Bitly — Tu música, sin límites",
-  "short_name": "Bitly",
+  "name": "Bitly — Sitio web",
+  "short_name": "Bitly Sitio",
   "description": "Buscá música en Spotify, TIDAL, Qobuz, Deezer, YouTube Music y más, y descargala en FLAC sin pérdida. Gratis para Android, Windows, Mac, iOS y Smart TV.",
-  "id": "/",
+  "id": "/sitio",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

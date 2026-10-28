@@ -112,7 +112,7 @@ export type CuentaGuardada = CuentaPublica & {
   ultimaActividad?: string;
   /** El correo se confirmó con el código (o con la invitación). */
   correoConfirmado?: boolean;
-  origen?: "propia" | "invitada";
+  origen?: "propia" | "invitada" | "app";
   /** Contraseña generada por el sitio: hay que cambiarla al entrar. */
   clavePorDefecto?: boolean;
   /** Código Premium asignado a la cuenta. */
@@ -144,13 +144,22 @@ type ResultadoSesion =
   | { ok: true; token: string; cuenta: CuentaPublica }
   | {
       ok: false;
-      motivo: "datos" | "existe" | "limite" | "baneada" | "servidor" | "sin_confirmar" | "codigo" | "expirado";
+      motivo:
+        | "datos"
+        | "existe"
+        | "limite"
+        | "baneada"
+        | "servidor"
+        | "sin_confirmar"
+        | "codigo"
+        | "expirado"
+        | "sin_secreto";
     };
 
 export type ResultadoRegistro =
   | { ok: true; pendiente: true; correo: string; usuario: string; enviado: boolean }
   | { ok: true; pendiente: false; token: string; cuenta: CuentaPublica }
-  | { ok: false; motivo: "datos" | "existe" | "limite" | "baneada" | "servidor" };
+  | { ok: false; motivo: "datos" | "existe" | "limite" | "baneada" | "servidor" | "sin_secreto" };
 
 type ResultadoMiCuenta =
   | {
@@ -167,7 +176,7 @@ export type CuentaAdmin = {
   id: string;
   usuario: string;
   correo: string;
-  origen: "propia" | "invitada";
+  origen: "propia" | "invitada" | "app";
   premium: boolean;
   codigo: string | null;
   correoConfirmado: boolean;
@@ -190,6 +199,8 @@ export type ResumenCuentas = {
   anonimos: number;
   premium: number;
   invitadas: number;
+  /** Cuentas creadas desde la APP (ver /api/cuenta), no desde el sitio. */
+  deLaApp: number;
   porConfirmar: number;
   eliminadas: number;
   baneadas: number;
@@ -325,27 +336,45 @@ async function hashCodigo(id: string, codigo: string): Promise<string> {
 
 let avisoSecreto = false;
 
-function secretoSesion(): string {
-  const dedicado = process.env.BITLY_SESSION_SECRET;
-  const base = dedicado || process.env.BITLY_DATA_TOKEN || process.env.BITLY_CODES_TOKEN || "";
-  if (!base) throw new Error("Falta BITLY_SESSION_SECRET en el servidor");
-  // Usar un PAT de GitHub como clave HMAC funciona, pero mezcla dos secretos con
-  // vidas distintas: rotar el token (o revocarlo) cierra todas las sesiones, y
-  // el PAT queda expuesto a dos usos. Se avisa una vez por isolate.
-  if (!dedicado && !avisoSecreto) {
-    avisoSecreto = true;
-    console.warn(
-      "[cuentas] BITLY_SESSION_SECRET no está definido: las sesiones se firman con el token de GitHub. " +
-        "Definí un secreto propio (16+ caracteres) para separar las dos claves.",
-    );
-  }
-  return `bitly-session-v1:${base}`;
+/**
+ * El secreto DEDICADO de las sesiones (`BITLY_SESSION_SECRET`).
+ *
+ * Es el único con el que se FIRMA. Antes, si faltaba, se firmaba con el token
+ * de GitHub como clave HMAC: dos secretos con vidas distintas mezclados. Cuando
+ * ese PAT se rotó (o se revocó), TODAS las sesiones del sitio murieron de golpe
+ * y sin explicación — el síntoma fue "no puedo entrar con mi cuenta".
+ */
+function secretoDedicado(): string {
+  return (process.env.BITLY_SESSION_SECRET ?? "").trim();
 }
 
-async function llaveSesion(): Promise<CryptoKey> {
+/**
+ * Clave con la que se VERIFICAN las sesiones que ya están dando vueltas.
+ *
+ * Si el secreto dedicado todavía no está configurado, se acepta el respaldo
+ * (token de GitHub) para que nadie quede afuera mientras se configura; en
+ * cuanto se define el dedicado, las sesiones viejas dejan de valer y cada
+ * usuario vuelve a entrar una vez (que es lo que se quiere al rotar).
+ */
+function secretoVerificacion(): string {
+  const dedicado = secretoDedicado();
+  if (dedicado) return dedicado;
+  const respaldo = process.env.BITLY_DATA_TOKEN || process.env.BITLY_CODES_TOKEN || "";
+  if (respaldo && !avisoSecreto) {
+    avisoSecreto = true;
+    console.warn(
+      "[cuentas] BITLY_SESSION_SECRET no está definido: sólo se pueden VERIFICAR sesiones viejas " +
+        "(firmadas con el token de GitHub). No se emiten sesiones nuevas. Definí el secreto propio.",
+    );
+  }
+  return respaldo;
+}
+
+/** Llave HMAC de un secreto dado. */
+async function llaveDe(secreto: string): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(secretoSesion()),
+    new TextEncoder().encode(`bitly-session-v1:${secreto}`),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -354,11 +383,34 @@ async function llaveSesion(): Promise<CryptoKey> {
 
 type CargaSesion = { c: string; e: number };
 
-async function firmarToken(id: string): Promise<string> {
+/**
+ * Token de sesión, o el motivo por el que NO se puede emitir.
+ *
+ * Sin secreto dedicado no hay sesión nueva: preferimos decir «falta configurar
+ * el secreto» (motivo `sin_secreto`, la app lo traduce) a entregar un token
+ * firmado con un secreto prestado que va a morir en la próxima rotación.
+ */
+async function tokenDeSesion(
+  id: string,
+): Promise<{ ok: true; token: string } | { ok: false; motivo: "sin_secreto" }> {
+  const secreto = secretoDedicado();
+  if (!secreto) return { ok: false, motivo: "sin_secreto" };
   const carga: CargaSesion = { c: id, e: Date.now() + TTL_SESION_MS };
   const payload = new TextEncoder().encode(JSON.stringify(carga));
-  const firma = new Uint8Array(await crypto.subtle.sign("HMAC", await llaveSesion(), payload));
-  return `${b64url(payload)}.${b64url(firma)}`;
+  const firma = new Uint8Array(await crypto.subtle.sign("HMAC", await llaveDe(secreto), payload));
+  return { ok: true, token: `${b64url(payload)}.${b64url(firma)}` };
+}
+
+/**
+ * Firma la sesión o corta con el motivo estable.
+ *
+ * Envuelve a `tokenDeSesion` para que los cuatro caminos que entregan una
+ * sesión (alta, confirmar, entrar y cambio confirmado) respondan lo mismo.
+ */
+async function conTokenDeSesion(
+  id: string,
+): Promise<{ ok: true; token: string } | { ok: false; motivo: "sin_secreto" }> {
+  return tokenDeSesion(id);
 }
 
 async function idDeToken(token: string): Promise<string | null> {
@@ -368,9 +420,14 @@ async function idDeToken(token: string): Promise<string | null> {
   try {
     const payload = deB64url(partes[0]);
     const firma = deB64url(partes[1]);
+    const secreto = secretoVerificacion();
+    // Sin ningún secreto configurado no se puede verificar nada: la sesión se
+    // trata como vencida y la app pide entrar de nuevo. Es lo correcto — mejor
+    // que aceptar un token que no se puede comprobar.
+    if (!secreto) return null;
     const valida = await crypto.subtle.verify(
       "HMAC",
-      await llaveSesion(),
+      await llaveDe(secreto),
       firma as BufferSource,
       payload as BufferSource,
     );
@@ -768,7 +825,9 @@ async function enviarCodigo(
 
 export const registrarCuenta = createServerFn({ method: "POST" })
   .validator((d: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown }) => d)
-  .handler(async ({ data }): Promise<ResultadoRegistro> => {
+  .handler(async ({ data }): Promise<ResultadoRegistro> => registrarCuentaImpl(data));
+
+export async function registrarCuentaImpl(data: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown; origen?: unknown }): Promise<ResultadoRegistro> {
     const correo = limpiar(data?.correo, 120).toLowerCase();
     const clave = String(data?.clave ?? "");
     const pedidoUsuario = limpiar(data?.usuario, 20).toLowerCase();
@@ -798,6 +857,10 @@ export const registrarCuenta = createServerFn({ method: "POST" })
         const ahora = new Date().toISOString();
         const id = azar(12);
         const nombre = limpiar(data?.nombre, 60) || usuario;
+        // "app" solo si el llamador lo pide EXPLÍCITAMENTE (la ruta de la app);
+        // cualquier otro valor cae en "propia", que es el alta del sitio.
+        const origenCuenta: CuentaGuardada["origen"] =
+          limpiar(data?.origen, 12) === "app" ? "app" : "propia";
         const confirmado = !correoConfigurado();
         const codigo = codigoAzar();
         const cuenta: CuentaGuardada = {
@@ -813,7 +876,7 @@ export const registrarCuenta = createServerFn({ method: "POST" })
           ultimoAcceso: ahora,
           ultimaActividad: ahora,
           correoConfirmado: confirmado,
-          origen: "propia",
+          origen: origenCuenta,
           clavePorDefecto: false,
           codigo: null,
           pendiente: confirmado
@@ -830,7 +893,9 @@ export const registrarCuenta = createServerFn({ method: "POST" })
         if (!ok) return { ok: false, motivo: "servidor" };
 
         if (confirmado) {
-          return { ok: true, pendiente: false, token: await firmarToken(id), cuenta: publica(cuenta) };
+          const sesion = await conTokenDeSesion(id);
+          if (!sesion.ok) return { ok: false, motivo: sesion.motivo };
+          return { ok: true, pendiente: false, token: sesion.token, cuenta: publica(cuenta) };
         }
 
         const enviado = await enviarCodigo(cuenta, "alta", codigo);
@@ -840,12 +905,15 @@ export const registrarCuenta = createServerFn({ method: "POST" })
         return { ok: false, motivo: "servidor" };
       }
     });
-  });
+}
+
 
 /** Reenvía el código de confirmación de un alta que quedó a medias. */
 export const reenviarConfirmacion = createServerFn({ method: "POST" })
   .validator((d: { correo?: unknown }) => d)
-  .handler(async ({ data }): Promise<{ ok: boolean; motivo?: "datos" | "limite" | "servidor" }> => {
+  .handler(async ({ data }): Promise<{ ok: boolean; motivo?: "datos" | "limite" | "servidor" }> => reenviarConfirmacionImpl(data));
+
+export async function reenviarConfirmacionImpl(data: { correo?: unknown }): Promise<{ ok: boolean; motivo?: "datos" | "limite" | "servidor" }> {
     const correo = limpiar(data?.correo, 120).toLowerCase();
     if (!correoValido(correo)) return { ok: false, motivo: "datos" };
     if (!hayCupo(await claveDeIntento(`reenviar|${correo}`), 4)) return { ok: false, motivo: "limite" };
@@ -876,11 +944,14 @@ export const reenviarConfirmacion = createServerFn({ method: "POST" })
     } catch {
       return { ok: false, motivo: "servidor" };
     }
-  });
+}
+
 
 export const confirmarCuenta = createServerFn({ method: "POST" })
   .validator((d: { identificador?: unknown; correo?: unknown; codigo?: unknown }) => d)
-  .handler(async ({ data }): Promise<ResultadoSesion> => {
+  .handler(async ({ data }): Promise<ResultadoSesion> => confirmarCuentaImpl(data));
+
+export async function confirmarCuentaImpl(data: { identificador?: unknown; correo?: unknown; codigo?: unknown }): Promise<ResultadoSesion> {
     const identificador = limpiar(data?.identificador ?? data?.correo, 120).toLowerCase();
     const codigo = limpiar(data?.codigo, 10);
     if (!identificador || !/^\d{6}$/.test(codigo)) return { ok: false, motivo: "datos" };
@@ -895,7 +966,11 @@ export const confirmarCuenta = createServerFn({ method: "POST" })
       const cuenta = cuentas[indice];
       if (cuenta.eliminada) return { ok: false, motivo: "datos" };
       if (cuenta.baneada) return { ok: false, motivo: "baneada" };
-      if (cuenta.correoConfirmado) return { ok: true, token: await firmarToken(cuenta.id), cuenta: publica(cuenta) };
+      if (cuenta.correoConfirmado) {
+        const sesion = await conTokenDeSesion(cuenta.id);
+        if (!sesion.ok) return { ok: false, motivo: sesion.motivo };
+        return { ok: true, token: sesion.token, cuenta: publica(cuenta) };
+      }
 
       const pendiente = cuenta.pendiente;
       if (!pendiente || pendiente.tipo !== "alta") return { ok: false, motivo: "expirado" };
@@ -926,16 +1001,21 @@ export const confirmarCuenta = createServerFn({ method: "POST" })
       siguiente[indice] = actualizada;
       const ok = await guardar(siguiente, `cuenta ${cuenta.id}: correo confirmado`);
       if (!ok) return { ok: false, motivo: "servidor" };
-      return { ok: true, token: await firmarToken(cuenta.id), cuenta: publica(actualizada) };
+      const sesion = await conTokenDeSesion(cuenta.id);
+      if (!sesion.ok) return { ok: false, motivo: sesion.motivo };
+      return { ok: true, token: sesion.token, cuenta: publica(actualizada) };
     } catch (e) {
       console.error("[cuentas] no se pudo confirmar:", e instanceof Error ? e.message : e);
       return { ok: false, motivo: "servidor" };
     }
-  });
+}
+
 
 export const iniciarSesion = createServerFn({ method: "POST" })
   .validator((d: { identificador?: unknown; correo?: unknown; clave?: unknown }) => d)
-  .handler(async ({ data }): Promise<ResultadoSesion> => {
+  .handler(async ({ data }): Promise<ResultadoSesion> => iniciarSesionImpl(data));
+
+export async function iniciarSesionImpl(data: { identificador?: unknown; correo?: unknown; clave?: unknown }): Promise<ResultadoSesion> {
     const identificador = limpiar(data?.identificador ?? data?.correo, 120).toLowerCase();
     const clave = String(data?.clave ?? "");
     if (!identificador || clave.length < 1 || clave.length > 200) {
@@ -980,18 +1060,23 @@ export const iniciarSesion = createServerFn({ method: "POST" })
         siguiente[indice] = actualizada;
         await guardar(siguiente, `cuenta ${cuenta.id}: acceso`);
       }
-      return { ok: true, token: await firmarToken(cuenta.id), cuenta: publica(actualizada) };
+      const sesion = await conTokenDeSesion(cuenta.id);
+      if (!sesion.ok) return { ok: false, motivo: sesion.motivo };
+      return { ok: true, token: sesion.token, cuenta: publica(actualizada) };
     } catch (e) {
       console.error("[cuentas] no se pudo iniciar sesión:", e instanceof Error ? e.message : e);
       return { ok: false, motivo: "servidor" };
     }
-  });
+}
+
 
 /* ── Mi cuenta ────────────────────────────────────────────────────────── */
 
 export const miCuenta = createServerFn({ method: "POST" })
   .validator((d: { token?: unknown }) => d)
-  .handler(async ({ data }): Promise<ResultadoMiCuenta> => {
+  .handler(async ({ data }): Promise<ResultadoMiCuenta> => miCuentaImpl(data));
+
+export async function miCuentaImpl(data: { token?: unknown }): Promise<ResultadoMiCuenta> {
     const cuenta = await cuentaDeToken(limpiar(data?.token, 500));
     if (!cuenta) return { ok: false, motivo: "sesion" };
 
@@ -1062,7 +1147,8 @@ export const miCuenta = createServerFn({ method: "POST" })
     } catch {
       return { ok: false, motivo: "servidor" };
     }
-  });
+}
+
 
 /* ── Cambios de contraseña y de usuario (con código al correo) ────────── */
 
@@ -1132,7 +1218,15 @@ export type ResultadoCambio =
   | { ok: true; cuenta: CuentaPublica; token: string }
   | {
       ok: false;
-      motivo: "sesion" | "datos" | "codigo" | "expirado" | "ocupado" | "limite" | "servidor";
+      motivo:
+        | "sesion"
+        | "datos"
+        | "codigo"
+        | "expirado"
+        | "ocupado"
+        | "limite"
+        | "servidor"
+        | "sin_secreto";
     };
 
 export const confirmarCambio = createServerFn({ method: "POST" })
@@ -1210,7 +1304,9 @@ export const confirmarCambio = createServerFn({ method: "POST" })
         siguiente[indice] = actualizada;
         const ok = await guardar(siguiente, `cuenta ${actual.id}: ${tipo} cambiado`);
         if (!ok) return { ok: false, motivo: "servidor" };
-        return { ok: true, cuenta: publica(actualizada), token: await firmarToken(actual.id) };
+        const sesion = await conTokenDeSesion(actual.id);
+        if (!sesion.ok) return { ok: false, motivo: sesion.motivo };
+        return { ok: true, cuenta: publica(actualizada), token: sesion.token };
       } catch (e) {
         console.error("[cuentas] no se pudo confirmar el cambio:", e instanceof Error ? e.message : e);
         return { ok: false, motivo: "servidor" };
@@ -1412,6 +1508,7 @@ export const adminCuentas = createServerFn({ method: "POST" })
         anonimos,
         premium: cuentas.filter((c) => c.premium && !c.eliminada).length,
         invitadas: cuentas.filter((c) => c.origen === "invitada" && !c.eliminada).length,
+        deLaApp: cuentas.filter((c) => c.origen === "app" && !c.eliminada).length,
         porConfirmar: cuentas.filter((c) => !c.correoConfirmado && !c.eliminada).length,
         eliminadas: cuentas.filter((c) => c.eliminada).length,
         baneadas: cuentas.filter((c) => c.baneada && !c.eliminada).length,

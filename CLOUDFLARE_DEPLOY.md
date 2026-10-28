@@ -101,6 +101,35 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 > Ojo con el gestor: usá el `pnpm` instalado (hoy 10.x). `npx pnpm` puede bajar
 > una major nueva y romper por el campo `pnpm` de `package.json`.
 
+### La app real en `/app` (la PWA de Bitly)
+
+El sitio sirve **la app** —el bundle de Flutter— en `/app/`, para que instalarla
+desde acá instale Bitly y no la web del proyecto. La arma
+`node scripts/copiar-app-web.mjs`, que corre primero en `pnpm build` (antes del
+build de Vite, porque lo que copia es estático de `public/`).
+
+**De dónde saca el bundle**, en orden: `BITLY_APP_WEB` (ruta) → el `build/web`
+local del repo de la app → **la rama `gh-pages` de `QuopTron/bitly-releases`**
+(el `.tar.gz` público que publica el workflow `Deploy PWA`). El tercero es el
+único que existe en el builder de Cloudflare Pages, donde **no hay repo de la
+app**: sin él el deploy salía sin `/app`, `/app/` respondía **404** y el enlace
+«Abrir la app (PWA)» de la sección de instalación llevaba a la página de «no
+encontrada» — es decir, quien entraba desde un iPhone o una Mac terminaba
+instalando el sitio.
+
+**Orden de publicación al sacar una versión**: primero el `Deploy PWA` (deja el
+bundle en `gh-pages`), después el push a `master` del sitio. Si se hace al revés,
+el deploy del sitio copia la PWA anterior.
+
+La copia reescribe `<base href="/app/">` y fija el manifiesto en
+`id: bitly-app`, `start_url`/`scope` relativos. Es **otra PWA** que la del sitio
+(esta web): dos identidades distintas, así que las dos conviven.
+
+`public/app/` **no se versiona** (está en `.gitignore`): son decenas de MB de
+bundle que se regeneran en cada build. Y si los tres orígenes fallan, el script
+avisa y **el sitio se compila igual** sin `/app` (publicar el sitio no puede
+depender de que GitHub esté disponible).
+
 ## 4. Variables de entorno
 
 | Variable | Para qué |
@@ -111,14 +140,15 @@ DEMO_URL=http://127.0.0.1:8799 node scripts/verificar-demo.mjs   # 13/13
 | `BITLY_ADMIN_CLAVE` | **Obligatoria**: clave del panel del dueño (`/admin`). El panel pide correo + clave y devuelve un token firmado que vence a los 7 días. Sin ella el panel queda cerrado y el Worker registra «falta BITLY_ADMIN_CLAVE». Usá 16+ caracteres aleatorios. |
 | `BITLY_ADMIN_EMAIL`, `BITLY_ADMIN_SECRET` | Correo del dueño (por defecto `floxdev2024@gmail.com`) y, opcional, secreto propio para firmar el token del panel. Si falta el secreto se deriva de `BITLY_SESSION_SECRET`/el token de GitHub. |
 | `BITLY_DATA_SECRET` | **Recomendada**: cifra con AES-256-GCM todo lo que se guarda en el repo de datos (pedidos, cuentas, comprobantes, chats, contadores). Sin ella los archivos quedan en claro en cada commit. Tiene que ser **la misma** en local y en Cloudflare: si cambia, lo viejo deja de leerse. |
-| `BITLY_CODIGOS_CLAVE` | Clave privada Ed25519 con la que el sitio firma los códigos Premium que emite al validar un pedido. Acepta el PEM PKCS#8 o la semilla de 32 bytes en base64 (se envuelve en PKCS#8 al importarla). **Tiene que ser el par de la clave pública que verifica la app**: con una clave nueva los códigos se firman bien pero la app los rechaza hasta que actualice su pública. Sin ella, el panel cae al registro `bitly_codes_premium`. |
+| `BITLY_CODIGOS_CLAVE` | Clave privada Ed25519 con la que el sitio firma los códigos Premium que emite al validar un pedido. Acepta el **PEM tal como está `scripts/keys/private_key.pem`** (el sobre con la semilla cruda de 32 bytes), la semilla sola en base64/base64url, o un PKCS#8 real. **Tiene que ser el par de la clave pública que verifica la app**: con una clave nueva los códigos se firman bien pero la app los rechaza hasta que actualice su pública. Sin ella, el panel cae al registro `bitly_codes_premium`. Verificación de que el par coincide: `cargo test`/`go test ./internal/premium -run TestLaClaveDelSitio` (firma un código con esta clave y lo valida con la pública de la app) y `node scripts/probar-codigos-sitio.mjs`. |
 | `BITLY_VENTANA_PEDIDO_MIN` | Opcional: minutos para anular una compra recién hecha (por defecto 10 en producción y 1 en local). |
-| `BITLY_SESSION_SECRET` | **Cargada en producción**: secreto para firmar las sesiones de las cuentas del sitio. Si falta (por ejemplo en local), se deriva de `BITLY_DATA_TOKEN`/`BITLY_CODES_TOKEN` y el Worker lo avisa en el log. Cambiarlo cierra todas las sesiones. |
+| `BITLY_SESSION_SECRET` | **Obligatoria en producción**: es el único secreto con el que se FIRMAN las sesiones de las cuentas. Si falta, el sitio **no emite sesiones nuevas** (responde `sin_secreto`, que la app traduce con un mensaje claro) y sólo puede VERIFICAR las que se firmaron antes con un token de GitHub prestado — así una rotación de PAT no vuelve a matar todas las sesiones de golpe. Al definirlo o cambiarlo, los tokens anteriores dejan de valer y cada usuario entra de nuevo una vez (es el comportamiento buscado al rotar). Ver `node scripts/probar-sesion-cuenta.mjs`. |
 | `BITLY_SMTP_HOST`, `BITLY_SMTP_PORT`, `BITLY_SMTP_USER`, `BITLY_SMTP_PASS` | SMTP para los correos de pedidos. En Gmail: `smtp.gmail.com`, puerto `465` y una **contraseña de aplicación**. |
 | `BITLY_EMAIL_FROM`, `BITLY_ADMIN_EMAIL` | Remitente y destinatario de avisos (`floxdev2024@gmail.com`). |
 | `RESEND_API_KEY` | Alternativa a SMTP: API key de Resend. |
 | `BITLY_EMAIL_WEBHOOK` | Opcional: URL que recibe los correos por HTTP. |
 | `YATTEE_URL`, `YATTEE_AUTH` | Canal de YouTube de la demo (**producción**): yattee-server con yt-dlp y auth básica "usuario:contraseña". Sin ellas la demo funciona, pero el folklore de nicho queda sin audio. Ver 5.2. |
+| `YATTEE_URL_2`, `YATTEE_CONCURRENCIA` | Opcionales: segunda instancia Render para failover y cupo de extracciones simultáneas (por defecto 2). Ver 5.2. |
 | `YT_DLP_BACKEND_URL`, `YT_DLP_TOKEN` | Sólo desarrollo: backend local `pnpm yt-dlp`. No hay imagen publicada y no se cargan en Pages. |
 
 Se cargan en **Pages → Settings → Environment variables**. No hay que prefijar
@@ -318,6 +348,33 @@ dashboard de Render del servicio:
 El sitio no necesita ningún cambio en esos casos: apunta a la misma URL y el
 mismo token.
 
+### Dos servicios Render y "memoria llena" (OOM)
+
+Si tenés **dos servicios** apuntando al mismo repo de Yattee, usalos como
+principal y respaldo: `YATTEE_URL` y `YATTEE_URL_2`. El sitio prueba el primero
+y, si falla por red/5xx, pasa al segundo; una base caída queda en cuarentena 60 s
+para no pagar el timeout en cada canción. No hace falta balanceador.
+
+Para el OOM del plan free (512 MB), de más a menos efectivo:
+
+1. **Un solo servicio activo para audio.** El segundo debe quedar como respaldo
+   (sleep/scale a cero si se puede). Dos extractores yt-dlp/FastAPI compitiendo
+   por 512 MB es la causa más común.
+2. **Limitar la concurrencia.** El sitio ya encola las extracciones con
+   `YATTEE_CONCURRENCIA=2` (por defecto). En el Render del backend, si su
+   servidor lo permite, dejá también 1-2 workers; cada `/videos/:id` lanza un
+   proceso de yt-dlp + ffmpeg.
+3. **Reiniciar de verdad:** Manual Deploy → **Clear build cache & deploy**. Un
+   redeploy normal reusa la imagen y no libera nada.
+4. **Subir a Starter (2 GB)** si aun con concurrencia 1 el pico de memoria sigue
+   matando el proceso. El plan free no tiene swap.
+5. `MALLOC_ARENA_MAX=2` en el entorno del servicio reduce la fragmentación de
+   glibc; es barato y no cambia el comportamiento.
+
+El síntoma de OOM en Render suele ser el servicio reiniciándose solo y
+`/health` contestando 502/503 durante unos segundos; el failover a
+`YATTEE_URL_2` cubre ese hueco.
+
 ### Backend propio, sólo para desarrollo
 
 `scripts/backend-yt-dlp.mjs` (`pnpm yt-dlp`) sigue disponible para probar el
@@ -326,6 +383,49 @@ canal de YouTube sin depender de Yattee: levanta un proceso con `yt-dlp` en
 `YT_DLP_TOKEN` coincide). **No hay imagen publicada**: se quitaron
 `Dockerfile.backend` y el blueprint de Render porque el canal de producción es
 Yattee y no hace falta un segundo servicio.
+
+## 5.3 La app real en `/app` (PWA) y la PWA del sitio
+
+Son dos PWA distintas, a propósito:
+
+| Ruta | Qué instala | Manifiesto |
+|---|---|---|
+| `/` | **el sitio** (el catálogo, la demo, las guías) | `site.webmanifest` — «Bitly Sitio», `id: /sitio` |
+| `/app/` | **Bitly, la app** (el bundle de Flutter) | `app/manifest.json` — «Bitly», `id: bitly-app` |
+
+Antes, quien instalaba desde el sitio instalaba el sitio: el bundle de la app
+sólo vivía en GitHub Pages (`QuopTron/bitly-releases`). Ahora también sale de
+acá (`https://bitly-site.pages.dev/app/`), que es lo que pidió el dueño.
+
+El bundle **no se versiona**: `pnpm preparar:app` (lo llama `pnpm build`) copia
+`../bitly/build/web` a `public/app/` y reescribe `<base href="/app/">`. Si el
+build de la app no está en la máquina, el sitio compila igual sin `/app` (avisa
+y sigue), así un deploy del sitio solo no se traba.
+
+Dos cosas se rompen si no se respetan, y las dos están puestas:
+
+1. **CSP propia de `/app`** (`scripts/cloudflare-worker.mjs`): el bundle compila
+   WebAssembly (`'wasm-unsafe-eval'`) y habla con el servidor Go que configura el
+   usuario, en cualquier host (`connect-src *`). Con la CSP del sitio la app no
+   arranca; la de `/` queda igual de estricta que siempre.
+2. **`prerender.filter` en `vite.config.ts`**: el crawler seguía el enlace
+   «Abrir la app (PWA)» de la sección de instalación y hacía fallar el build
+   entero, porque `/app` no es una ruta del sitio.
+
+Para publicar una versión nueva de la app: `flutter build web --base-href=/app/`
+en el repo `bitly`, después `pnpm preparar:app` y el build del sitio.
+
+### Cuota de las 75: volver a 75 para todos
+
+```bash
+pnpm reiniciar:cuota --ver   # cómo está hoy (no escribe)
+pnpm reiniciar:cuota         # las deja a TODAS con las 75
+```
+
+Corre el mismo motor que el Worker (`reiniciarCuotaGlobal`) con el `.env` real,
+así que escribe `data/descargas.json` en `bitly-data` con el cifrado y la cola
+de siempre. **Conserva los eventos** del historial: sólo pone el contador en
+cero. Necesita `BITLY_DATA_TOKEN` (o `BITLY_CODES_TOKEN`) en `.env`.
 
 ## 6. Comprobar que quedó bien
 
@@ -336,6 +436,14 @@ curl -s -o /dev/null -w "%{http_code}\n" https://bitly-site.pages.dev/
 # 2. Las server functions existen (403 = existe y pide Origin; 405 = NO está)
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   "https://bitly-site.pages.dev/_serverFn/abc" -H "x-tsr-serverfn: true"
+
+# 2b. El contrato de la APP (405/404 = el sitio viejo, la app no puede entrar)
+curl -s -X POST https://bitly-site.pages.dev/api/cuenta \
+  -H 'content-type: application/json' -d '{"accion":"cuota"}'   # 401 sesion
+curl -s https://bitly-site.pages.dev/api/rescate                    # 401 sesion
+
+# 2c. La app real y su CSP propia (tiene que traer wasm-unsafe-eval)
+curl -s -D - -o /dev/null https://bitly-site.pages.dev/app/ | grep -i content-security
 
 # 3. La demo entera, en un Chrome de verdad
 DEMO_URL=https://bitly-site.pages.dev node scripts/verificar-demo.mjs
@@ -353,6 +461,18 @@ YATTEE_URL=https://yattee-server-2j61.onrender.com \
 DEMO_URL=https://bitly-site.pages.dev CODIGO_USADO=<código> \
   CODIGO_ACTIVO=<código> node scripts/probar-premium.mjs
 ```
+
+El contrato de la cuenta con la app (alta, código, sesión, cuota, descarga y
+rescate) se prueba sin red ni base real: `pnpm probar:api-cuenta` (29
+aserciones, handlers reales de `/api/cuenta` y `/api/rescate`).
+
+El panel de rescate de «Mi cuenta» —los canales sin pérdida administrables
+desde la web, los mismos que la app trae en Ajustes → Descargas → Rescate— se
+prueba en un Chrome real con una cuenta sembrada: `pnpm verificar:rescate-cuenta`
+abre el panel, guarda espejos e instancias propias, comprueba en la base del
+sitio que quedaron (normalizados y sin ningún secreto de la app), vuelve a
+abrirlo para ver lo guardado, lo borra y verifica que una URL inválida no deje
+un guardado a medias. Usa el repo de PRUEBA de datos y limpia lo que sembró.
 
 El punto 4 son 9 aserciones: las server functions responden 200 (no 500), el
 estado que devuelve el servidor es el real del registro, un código usado **no**

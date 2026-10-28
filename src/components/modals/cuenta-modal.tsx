@@ -16,6 +16,7 @@ import {
   Trash2,
   User,
   UserPlus,
+  Wrench,
 } from "lucide-react";
 import ModalWrapper from "@/components/ui/modal-wrapper";
 import { i18n, useI18n } from "@/lib/i18n";
@@ -44,6 +45,12 @@ import {
   type Asignada,
   type CodigoDeComprador,
 } from "@/server/asignaciones";
+import {
+  borrarRescate,
+  guardarRescate,
+  leerRescate,
+  type RescateGuardado,
+} from "@/lib/rescate-cuenta";
 
 type Props = {
   open: boolean;
@@ -71,6 +78,75 @@ type Asignacion = {
   ocupado: boolean;
   resultado: Asignada | null;
 };
+
+/**
+ * Formulario del rescate. `relay` es un tri-estado como el del contrato: "sin"
+ * es "no lo toquen" y NO es lo mismo que "off" (apagado).
+ */
+type Rescate = {
+  cargando: boolean;
+  guardando: boolean;
+  borrando: boolean;
+  espejos: string;
+  espejosApagados: boolean;
+  arcod: string;
+  arcodApagado: boolean;
+  monochrome: string;
+  monochromeApagado: boolean;
+  relay: "sin" | "on" | "off";
+  aviso: string | null;
+  error: string | null;
+};
+
+const RESCATE_VACIO: Omit<Rescate, "cargando" | "aviso" | "error"> = {
+  guardando: false,
+  borrando: false,
+  espejos: "",
+  espejosApagados: false,
+  arcod: "",
+  arcodApagado: false,
+  monochrome: "",
+  monochromeApagado: false,
+  relay: "sin",
+};
+
+/** Lo que la cuenta tiene guardado → el formulario del panel. */
+function formularioDesdeConfig(cfg: RescateGuardado): Omit<Rescate, "cargando" | "aviso" | "error"> {
+  const espejos = cfg.mirrors ?? [];
+  return {
+    ...RESCATE_VACIO,
+    espejos: espejos.join("\n"),
+    // Una lista VACÍA es "apagados", y se distingue de "no lo tocaron" (el
+    // campo no viene). El interruptor suelto hace lo mismo.
+    espejosApagados: (cfg.mirrors !== undefined && espejos.length === 0) || cfg.espejos === false,
+    arcod: cfg.arcodBase ?? "",
+    arcodApagado: cfg.arcod === false,
+    monochrome: cfg.monochromeBase ?? "",
+    monochromeApagado: cfg.monochrome === false,
+    relay: cfg.stashRelay === undefined ? "sin" : cfg.stashRelay ? "on" : "off",
+  };
+}
+
+/**
+ * El formulario → el contrato de la ruta. Sólo viaja lo DEFINIDO: un campo
+ * ausente es "no lo toquen". La instancia propia manda sobre el interruptor
+ * porque apuntar el canal ya es encenderlo (misma regla que la app).
+ */
+function contratoDeFormulario(e: Rescate): RescateGuardado {
+  const cfg: RescateGuardado = {};
+  const espejos = e.espejos
+    .split("\n")
+    .map((linea) => linea.trim())
+    .filter(Boolean);
+  if (espejos.length > 0) cfg.mirrors = espejos;
+  else if (e.espejosApagados) cfg.mirrors = [];
+  if (e.arcod.trim()) cfg.arcodBase = e.arcod.trim();
+  else if (e.arcodApagado) cfg.arcod = false;
+  if (e.monochrome.trim()) cfg.monochromeBase = e.monochrome.trim();
+  else if (e.monochromeApagado) cfg.monochrome = false;
+  if (e.relay !== "sin") cfg.stashRelay = e.relay === "on";
+  return cfg;
+}
 
 const COLOR: Record<string, string> = {
   pendiente: "border-amber-500/40 bg-amber-500/10 text-amber-500",
@@ -122,6 +198,10 @@ export default function CuentaModal({ open, onClose }: Props) {
 
   const [baja, setBaja] = useState<{ clave: string; error: string | null; ocupado: boolean } | null>(null);
 
+  // Panel del rescate: `null` = cerrado (no se pide nada al servidor hasta que
+  // el usuario lo abre).
+  const [rescate, setRescate] = useState<Rescate | null>(null);
+
   const cargar = useCallback(async (token: string) => {
     setCargando(true);
     try {
@@ -167,7 +247,76 @@ export default function CuentaModal({ open, onClose }: Props) {
     setRevocarId(null);
     setBaja(null);
     setEliminada(false);
+    setRescate(null);
   }
+
+  /**
+   * Abre el panel del rescate y trae lo que la cuenta tiene guardado.
+   *
+   * Se pide recién ahora a propósito: el modal se abre para muchas cosas
+   * (pedidos, códigos, seguridad) y no vale gastar una petición por cada una.
+   */
+  const abrirRescate = async () => {
+    setRescate({ ...RESCATE_VACIO, cargando: true, aviso: null, error: null });
+    const r = await leerRescate();
+    if (r.ok) {
+      setRescate({ ...formularioDesdeConfig(r.config), cargando: false, aviso: null, error: null });
+      return;
+    }
+    setRescate({
+      ...RESCATE_VACIO,
+      cargando: false,
+      aviso: null,
+      error: r.motivo === "sesion" ? t("cuentaRescateSinSesion") : t("cuentaRescateMal"),
+    });
+  };
+
+  const guardarRescateCuenta = async () => {
+    if (!rescate || rescate.guardando) return;
+    const config = contratoDeFormulario(rescate);
+    // Nada definido: la ruta lo tomaría como "borrar" y borraría lo que otro
+    // dispositivo de la cuenta haya puesto. Mejor avisar que guardar de más.
+    if (Object.keys(config).length === 0) {
+      setRescate({ ...rescate, aviso: null, error: t("cuentaRescateVacio") });
+      return;
+    }
+    setRescate({ ...rescate, guardando: true, aviso: null, error: null });
+    const r = await guardarRescate(config);
+    if (r.ok) {
+      setRescate({
+        ...formularioDesdeConfig(r.config),
+        cargando: false,
+        aviso: t("cuentaRescateGuardado"),
+        error: null,
+      });
+      return;
+    }
+    setRescate({
+      ...rescate,
+      guardando: false,
+      error:
+        r.motivo === "sesion"
+          ? t("cuentaRescateSinSesion")
+          : r.motivo === "datos"
+            ? t("cuentaRescateUrlMala")
+            : t("cuentaRescateMal"),
+    });
+  };
+
+  const borrarRescateCuenta = async () => {
+    if (!rescate || rescate.borrando) return;
+    setRescate({ ...rescate, borrando: true, aviso: null, error: null });
+    const r = await borrarRescate();
+    if (r.ok) {
+      setRescate({ ...RESCATE_VACIO, cargando: false, aviso: t("cuentaRescateBorrado"), error: null });
+      return;
+    }
+    setRescate({
+      ...rescate,
+      borrando: false,
+      error: r.motivo === "sesion" ? t("cuentaRescateSinSesion") : t("cuentaRescateMal"),
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -801,6 +950,190 @@ export default function CuentaModal({ open, onClose }: Props) {
               </ul>
             </div>
           )}
+
+          {/* Rescate sin pérdida: los canales de la app, administrables desde la
+              cuenta. Lo guardado se pide recién al abrir el panel. */}
+          <div className="rounded-2xl border border-border bg-background/40 p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              <Wrench className="h-3.5 w-3.5 text-primary" aria-hidden /> {t("cuentaRescateTitulo")}
+            </p>
+
+            {!rescate ? (
+              <>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("cuentaRescateDesc")}</p>
+                <button type="button" onClick={() => void abrirRescate()} className={`${chico} mt-2`}>
+                  <Wrench className="h-3 w-3" /> {t("cuentaRescateAbrir")}
+                </button>
+              </>
+            ) : rescate.cargando ? (
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> {t("cuentaRescateCargando")}
+              </p>
+            ) : (
+              <div className="mt-2 space-y-2.5">
+                <div>
+                  <label
+                    htmlFor="rescate-espejos"
+                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    {t("cuentaRescateEspejos")}
+                  </label>
+                  <textarea
+                    id="rescate-espejos"
+                    value={rescate.espejos}
+                    onChange={(e) => setRescate({ ...rescate, espejos: e.target.value })}
+                    rows={3}
+                    spellCheck={false}
+                    disabled={rescate.espejosApagados}
+                    className={`${input} mt-1 min-h-20 resize-y py-2 font-mono text-[11px] disabled:opacity-50`}
+                  />
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    {t("cuentaRescateEspejosAyuda")}
+                  </p>
+                  <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={rescate.espejosApagados}
+                      onChange={(e) =>
+                        setRescate({
+                          ...rescate,
+                          espejosApagados: e.target.checked,
+                          // Apagados y una lista propia se contradicen: la lista manda.
+                          espejos: e.target.checked ? "" : rescate.espejos,
+                        })
+                      }
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
+                    {t("cuentaRescateApagados")}
+                  </label>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="rescate-arcod"
+                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    {t("cuentaRescateArcod")}
+                  </label>
+                  <input
+                    id="rescate-arcod"
+                    type="url"
+                    inputMode="url"
+                    spellCheck={false}
+                    autoComplete="off"
+                    value={rescate.arcod}
+                    onChange={(e) => setRescate({ ...rescate, arcod: e.target.value, arcodApagado: false })}
+                    placeholder="https://mi-arcod.example"
+                    disabled={rescate.arcodApagado}
+                    className={`${input} mt-1 min-h-9 text-xs disabled:opacity-50`}
+                  />
+                  <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={rescate.arcodApagado}
+                      onChange={(e) =>
+                        setRescate({
+                          ...rescate,
+                          arcodApagado: e.target.checked,
+                          arcod: e.target.checked ? "" : rescate.arcod,
+                        })
+                      }
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
+                    {t("cuentaRescateApagado")}
+                  </label>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="rescate-monochrome"
+                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    {t("cuentaRescateMonochrome")}
+                  </label>
+                  <input
+                    id="rescate-monochrome"
+                    type="url"
+                    inputMode="url"
+                    spellCheck={false}
+                    autoComplete="off"
+                    value={rescate.monochrome}
+                    onChange={(e) =>
+                      setRescate({ ...rescate, monochrome: e.target.value, monochromeApagado: false })
+                    }
+                    placeholder="https://mi-monochrome.example"
+                    disabled={rescate.monochromeApagado}
+                    className={`${input} mt-1 min-h-9 text-xs disabled:opacity-50`}
+                  />
+                  <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={rescate.monochromeApagado}
+                      onChange={(e) =>
+                        setRescate({
+                          ...rescate,
+                          monochromeApagado: e.target.checked,
+                          monochrome: e.target.checked ? "" : rescate.monochrome,
+                        })
+                      }
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
+                    {t("cuentaRescateApagado")}
+                  </label>
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    {t("cuentaRescateInstanciaAyuda")}
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="rescate-relay"
+                    className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  >
+                    {t("cuentaRescateRelay")}
+                  </label>
+                  <select
+                    id="rescate-relay"
+                    value={rescate.relay}
+                    onChange={(e) => setRescate({ ...rescate, relay: e.target.value as Rescate["relay"] })}
+                    className={`${input} mt-1 min-h-9 text-xs`}
+                  >
+                    <option value="sin">{t("cuentaRescateSinTocar")}</option>
+                    <option value="on">{t("cuentaRescateEncendido")}</option>
+                    <option value="off">{t("cuentaRescateApagado")}</option>
+                  </select>
+                </div>
+
+                <p className="text-[10px] leading-relaxed text-muted-foreground">{t("cuentaRescateNota")}</p>
+
+                {rescate.aviso && (
+                  <p className="rounded-lg bg-primary/10 px-2 py-1.5 text-[10px] text-primary">{rescate.aviso}</p>
+                )}
+                {rescate.error && <p className="text-[10px] text-destructive">{rescate.error}</p>}
+
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void guardarRescateCuenta()}
+                    disabled={rescate.guardando}
+                    className="inline-flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[10px] font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                  >
+                    {rescate.guardando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    {t("cuentaRescateGuardar")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void borrarRescateCuenta()}
+                    disabled={rescate.borrando}
+                    className={chico}
+                  >
+                    {rescate.borrando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                    {t("cuentaRescateBorrar")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Seguridad: los dos cambios piden un código al correo. */}
           <div className="rounded-2xl border border-border bg-background/40 p-3">

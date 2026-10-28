@@ -63,10 +63,13 @@ import {
   esISRCValido,
   esProveedorAutoritativoISRC,
   fieldScore,
+  marcadoresDeVersion,
   normalizarISRC,
   preferirISRC,
+  QueryFiltro,
   sinCreditosParenteticos,
   splitSearchQuery,
+  versionPedidaCompatible,
   type TrackResult,
 } from "@/server/matching";
 import { tocaConsulta } from "@/server/relevancia";
@@ -147,16 +150,20 @@ function claveDe(p: PeticionAudio): string {
   // La calidad entra en la clave: el enlace FLAC de un Premium no puede
   // reutilizarlo una cuenta gratis (ni al revés, que se quedaría en estándar).
   return [
-    p.titulo,
-    p.artista,
-    p.album ?? "",
+    // Sólo los textos se pliegan: los id de YouTube distinguen mayúsculas y
+    // bajarlas podía mezclar dos videos distintos.
+    p.titulo.toLowerCase(),
+    p.artista.toLowerCase(),
+    (p.album ?? "").toLowerCase(),
     p.duracionMs ?? 0,
     p.isrc ?? "",
-    p.ext ?? "",
+    // Sin el id, dos versiones distintas con igual título/artista/duración
+    // compartían caché y una podía servir el audio de la otra (el remix).
+    p.id ?? "",
+    p.videoId ?? "",
+    (p.ext ?? "").toLowerCase(),
     p.calidad ?? "flac",
-  ]
-    .join("|")
-    .toLowerCase();
+  ].join("|");
 }
 
 /** Claves equivalentes: la exacta y, si hay ISRC, una canónica por código. */
@@ -759,14 +766,22 @@ async function audioPorInstanciaBandcamp(
   url: string,
 ): Promise<{ url: string; duracion: number } | null> {
   const cfg = configYouTube();
-  if (!cfg.yattee) return null;
-  const datos = await pedirYattee<{ ok?: boolean; mp3?: string; duracion?: number }>(
-    cfg,
-    `/api/v1/bandcamp/audio?url=${encodeURIComponent(url)}`,
-    20_000,
-  );
-  if (!datos?.ok || !datos.mp3) return null;
-  return { url: datos.mp3, duracion: Math.max(0, Math.round(datos.duracion ?? 0)) };
+  if (cfg.yattees.length === 0) return null;
+  for (const base of yatteesVivas()) {
+    ultimoEstadoYt = 0;
+    const datos = await conCupoYattee(() =>
+      pedirYattee<{ ok?: boolean; mp3?: string; duracion?: number }>(
+        { yattee: base, auth: cfg.auth },
+        `/api/v1/bandcamp/audio?url=${encodeURIComponent(url)}`,
+        20_000,
+      ),
+    );
+    if (datos?.ok && datos.mp3) {
+      return { url: datos.mp3, duracion: Math.max(0, Math.round(datos.duracion ?? 0)) };
+    }
+    if (!falloYattee()) break;
+  }
+  return null;
 }
 
 /** Lectura directa de la página (funciona desde una IP residencial). */
@@ -842,6 +857,7 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
   if (porId.size === 0) return null;
 
   const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
+  const consultaVersion = `${titulo} ${artista} ${p.album ?? ""}`.trim();
   let mejor: { url: string; nombre: string; punto: number } | null = null;
 
   for (const [url, r] of porId) {
@@ -849,6 +865,10 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
     // palabras, 3 = igual). Con 1 ("solape débil") se cuela cualquier cosa.
     const puntoTitulo = fieldScore(titulo, r.name ?? "");
     if (puntoTitulo < 2) continue;
+    // Bandcamp no publica versiones separadas como YouTube: el remix aparece
+    // con el nombre del original dentro ("Quta ... Jersey Club Remix"). Sin
+    // este veto, una búsqueda de nicho podía elegir justo el remix.
+    if (!versionPedidaCompatible(consultaVersion, `${r.name ?? ""} ${r.band_name ?? ""}`)) continue;
     // Y el artista tiene que coincidir (el canal de Bandcamp ES el artista).
     const puntoArtista = artista ? fieldScore(artista, r.band_name ?? "") : 0;
     if (artista && puntoArtista === 0) continue;
@@ -947,12 +967,46 @@ function cabecerasBackend(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function configYouTube(): { yattee: string; auth: string; local: string } {
+function configYouTube(): { yattee: string; yattees: string[]; auth: string; local: string } {
+  // Los dos servicios Render pueden apuntar al mismo repo: si el primero está
+  // dormido/caído, el segundo evita que el canal quede sin audio. Se aceptan
+  // `YATTEE_URL_2`, `YATTEE_URL_3` o una lista separada por comas.
+  const yattees = [
+    process.env.YATTEE_URL,
+    process.env.YATTEE_URL_2,
+    process.env.YATTEE_URL_3,
+  ]
+    .flatMap((url) => (url ?? "").split(","))
+    .map((url) => url.trim().replace(/\/+$/, ""))
+    .filter((url, i, todas) => !!url && todas.indexOf(url) === i);
+
   return {
-    yattee: (process.env.YATTEE_URL ?? "").replace(/\/+$/, ""),
+    yattee: yattees[0] ?? "",
+    yattees,
     auth: process.env.YATTEE_AUTH ?? "",
     local: (process.env.YT_DLP_BACKEND_URL ?? "").replace(/\/+$/, ""),
   };
+}
+
+/** Cuarentena por base: un Render en OOM no se reintenta en cada canción. */
+const YATTEE_CAIDO_MS = 60_000;
+const yatteeCaidos = new Map<string, number>();
+
+function yatteesVivas(): string[] {
+  const ahora = Date.now();
+  const { yattees } = configYouTube();
+  const vivas = yattees.filter((base) => (yatteeCaidos.get(base) ?? 0) <= ahora);
+  // Si todas están en cuarentena, se intenta igual: mejor reintentar que
+  // quedarse sin canal hasta que expire el plazo.
+  return vivas.length > 0 ? vivas : yattees;
+}
+
+function marcarYatteeCaido(base: string): void {
+  if (base) yatteeCaidos.set(base, Date.now() + YATTEE_CAIDO_MS);
+}
+
+function marcarYatteeVivo(base: string): void {
+  if (base) yatteeCaidos.delete(base);
 }
 
 // Techo GENEROSO a propósito: una búsqueda fría de yt-dlp tarda ~15-20 s
@@ -1036,8 +1090,8 @@ export function yatteeDespierto(): boolean {
 }
 
 export async function despertarYattee(esperaMs = DESPERTAR_MS): Promise<boolean> {
-  const { yattee, auth } = configYouTube();
-  if (!yattee) return false;
+  const { yattees, auth } = configYouTube();
+  if (yattees.length === 0) return false;
   if (yatteeDespierto()) return true;
   if (despertandoYattee) return despertandoYattee;
 
@@ -1045,8 +1099,21 @@ export async function despertarYattee(esperaMs = DESPERTAR_MS): Promise<boolean>
     const encabezados: Record<string, string> = { Accept: "application/json" };
     if (auth) encabezados.Authorization = `Basic ${btoa(auth)}`;
     try {
-      await fetch(`${yattee}/`, { headers: encabezados, signal: AbortSignal.timeout(esperaMs) });
-      // Si hubo respuesta, el host está despierto (el status no importa).
+      // En paralelo: los dos Render tardan lo mismo en arrancar y no queremos
+      // pagar el arranque de uno después del otro.
+      const respuestas = await Promise.all(
+        yattees.map(async (base) => {
+          try {
+            await fetch(`${base}/`, { headers: encabezados, signal: AbortSignal.timeout(esperaMs) });
+            // Si hubo respuesta, el host está despierto (el status no importa).
+            marcarYatteeVivo(base);
+            return true;
+          } catch {
+            return false;
+          }
+        }),
+      );
+      if (!respuestas.some(Boolean)) return false;
       yatteeDespiertoHasta = Date.now() + DESPIERTO_MS;
       return true;
     } catch {
@@ -1064,8 +1131,8 @@ export async function despertarYattee(esperaMs = DESPERTAR_MS): Promise<boolean>
  * backend propio. Es lo que llama el despertador del sitio al abrir la demo.
  */
 export async function despertarCanalYouTube(esperaMs = DESPERTAR_MS): Promise<boolean> {
-  const { yattee } = configYouTube();
-  if (yattee) return despertarYattee(esperaMs);
+  const { yattees } = configYouTube();
+  if (yattees.length > 0) return despertarYattee(esperaMs);
   return despertarBackendYouTube(esperaMs);
 }
 /**
@@ -1103,6 +1170,39 @@ type VideoYattee = {
 /** Último estado HTTP del canal de YouTube: explica un `null` en los logs. */
 let ultimoEstadoYt = 0;
 
+/** ¿Falló la BASE (red/5xx)? Un 200 vacío no justifica probar otra instancia. */
+function falloYattee(): boolean {
+  return ultimoEstadoYt < 0 || ultimoEstadoYt >= 500;
+}
+
+/**
+ * Cupo de extracciones simultáneas contra Yattee.
+ *
+ * Cada `/videos/:id` lanza yt-dlp (Python + ffmpeg) en el Render de 512 MB. Dos
+ * clics a la vez ya son dos procesos; una ráfaga de visitas los multiplica y el
+ * host muere por OOM ("memoria llena"). El cupo encola en vez de rechazar: el
+ * audio sale igual, sólo espera su turno.
+ */
+const MAX_YATTEE_AUDIO = Math.max(1, Math.min(8, Number(process.env.YATTEE_CONCURRENCIA) || 2));
+let yatteeActivos = 0;
+const yatteeEspera: Array<() => void> = [];
+
+async function conCupoYattee<T>(tarea: () => Promise<T>): Promise<T> {
+  if (yatteeActivos < MAX_YATTEE_AUDIO) {
+    yatteeActivos++;
+  } else {
+    // El turno se TRANSFIERE desde quien libera, así `yatteeActivos` no baja.
+    await new Promise<void>((resolver) => yatteeEspera.push(resolver));
+  }
+  try {
+    return await tarea();
+  } finally {
+    const siguiente = yatteeEspera.shift();
+    if (siguiente) siguiente();
+    else yatteeActivos--;
+  }
+}
+
 /** GET JSON contra yattee con auth básica. Nunca lanza: `null` es "falló". */
 async function pedirYattee<T>(
   cfg: { yattee: string; auth: string },
@@ -1111,6 +1211,7 @@ async function pedirYattee<T>(
 ): Promise<T | null> {
   const encabezados: Record<string, string> = { Accept: "application/json" };
   if (cfg.auth) encabezados.Authorization = `Basic ${btoa(cfg.auth)}`;
+  ultimoEstadoYt = 0;
 
   // Un 502/504 del relay (o un corte de red) es transitorio: se reintenta una
   // vez antes de declarar que la pista no está. Los 4xx no se reintentan.
@@ -1119,12 +1220,17 @@ async function pedirYattee<T>(
     const reloj = setTimeout(() => control.abort(), ms);
     try {
       const res = await fetch(`${cfg.yattee}${ruta}`, { signal: control.signal, headers: encabezados });
-      if (res.ok) return (await res.json()) as T;
+      if (res.ok) {
+        marcarYatteeVivo(cfg.yattee);
+        return (await res.json()) as T;
+      }
       ultimoEstadoYt = res.status;
+      if (res.status >= 500 && intento === 1) marcarYatteeCaido(cfg.yattee);
       if (res.status < 500 || intento === 1) return null;
     } catch (e) {
       ultimoEstadoYt = -1;
       if (intento === 1) {
+        marcarYatteeCaido(cfg.yattee);
         console.warn(`[yt] ${ruta.slice(0, 60)}: ${e instanceof Error ? e.message : e}`);
         return null;
       }
@@ -1147,12 +1253,34 @@ function puntuarCandidatoYattee(
   c: ResultadoBusquedaYattee,
   p: PeticionAudio,
   objetivo: number,
+  filtro: QueryFiltro,
 ): number {
-  // El título manda: YouTube devuelve covers, en vivo y "1 hour loop" para la
-  // misma búsqueda. El artista/canal es una señal más débil (muchos canales se
+  // YouTube devuelve el remix, el cover y el "1 hour loop" de la misma canción.
+  // Antes se puntuaban todos y el audio podía resolver justo la versión que el
+  // usuario NO pidió. Con el filtro de consulta, una variante no pedida queda
+  // fuera; si la consulta SÍ pide "remix"/"piano", esa versión se conserva.
+  if (
+    !versionPedidaCompatible(
+      `${p.titulo} ${p.artista} ${p.album ?? ""}`,
+      `${c.title ?? ""} ${c.author ?? ""}`,
+    )
+  ) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  // El título manda; el artista/canal es una señal más débil (muchos canales se
   // llaman "Canserbero - Topic" o suben la canción con otro nombre).
-  let punto = fieldScore(p.titulo, c.title ?? "") * 100;
-  if (p.artista) punto += fieldScore(p.artista, c.author ?? "") * 35;
+  let punto = filtro.scoreTitulo(c.title ?? "") * 100;
+  if (p.artista) punto += filtro.scoreArtista(c.author ?? "") * 35;
+
+  const pedidas = marcadoresDeVersion(`${p.titulo} ${p.artista} ${p.album ?? ""}`);
+  if (pedidas.length > 0) {
+    const tiene = marcadoresDeVersion(c.title ?? "");
+    const aciertos = pedidas.filter((m) => tiene.includes(m)).length;
+    punto += aciertos * 80;
+    if (aciertos === 0) punto -= 200;
+  }
+
   const dur = Number(c.lengthSeconds ?? 0);
   if (objetivo > 0 && dur > 0) {
     const dif = Math.abs(dur - objetivo);
@@ -1203,30 +1331,40 @@ async function buscarCandidatosYattee(
     return (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
   };
 
-  const candidatos = await pedir(consulta);
-  if (candidatos.length === 0) console.warn(`[yt] búsqueda sin resultados (estado ${ultimoEstadoYt})`);
+  const candidatos: ResultadoBusquedaYattee[] = [];
+  const vistos = new Set<string>();
   const sumar = (mas: ResultadoBusquedaYattee[]) => {
-    const vistos = new Set(candidatos.map((c) => c.videoId));
     for (const c of mas) {
-      if (!vistos.has(c.videoId)) {
+      if (!vistos.has(String(c.videoId))) {
         candidatos.push(c);
-        vistos.add(c.videoId);
+        vistos.add(String(c.videoId));
       }
     }
   };
   const mejorTitulo = () =>
     candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
 
+  // La consulta cruda y la limpia van EN PARALELO: antes se pagaban dos
+  // búsquedas secuenciales (~3 s cada una) para el mismo título con
+  // calificativos. El título solo se pide después, y sólo si hizo falta.
+  const limpia = consultaYouTube(p.titulo);
+  const paralelas = [consulta];
+  if (
+    limpia &&
+    limpia.toLowerCase() !== p.titulo.trim().toLowerCase() &&
+    limpia.toLowerCase() !== consulta.toLowerCase()
+  ) {
+    paralelas.push(limpia);
+  }
+  const listas = await Promise.all(paralelas.map((q) => pedir(q)));
+  for (const lista of listas) sumar(lista);
+
+  if (candidatos.length === 0) console.warn(`[yt] búsqueda sin resultados (estado ${ultimoEstadoYt})`);
+
   // Si el canal/artista ensució la búsqueda (re-subidos), el título solo suele
   // encontrar la grabación. Se suman sin duplicar por videoId.
   if (p.titulo && (candidatos.length === 0 || mejorTitulo() < 2)) {
     sumar(await pedir(p.titulo));
-  }
-  // Y si el título tampoco encuentra nada, se prueba sin los calificativos
-  // («remix», «live», @handles): ver `consultaYouTube`.
-  const limpia = consultaYouTube(p.titulo);
-  if (limpia && limpia.toLowerCase() !== p.titulo.trim().toLowerCase() && (candidatos.length === 0 || mejorTitulo() < 2)) {
-    sumar(await pedir(limpia));
   }
   return candidatos;
 }
@@ -1263,30 +1401,43 @@ async function rescatarEnYattee(
   // buscar nada (y en folklore de nicho la búsqueda puede no encontrarlo).
   const videoIdDirecto = (p.videoId ?? "").trim();
   if (/^[A-Za-z0-9_-]{11}$/.test(videoIdDirecto)) {
-    const directo = await pedirYattee<VideoYattee>(
-      cfg,
-      `/api/v1/videos/${encodeURIComponent(videoIdDirecto)}?proxy=true&proxy_mode=relay`,
-      TIMEOUT_YT_RESOLVER_MS,
+    const directo = await conCupoYattee(() =>
+      pedirYattee<VideoYattee>(
+        cfg,
+        `/api/v1/videos/${encodeURIComponent(videoIdDirecto)}?proxy=true&proxy_mode=relay`,
+        TIMEOUT_YT_RESOLVER_MS,
+      ),
     );
     const elegido = formatoDe(directo);
     if (elegido) return elegido;
   }
 
+  // Sin originales disponibles no se resuelve un remix: es preferible que el
+  // canal devuelva null y el llamador pruebe otra fuente antes que reproducir
+  // una versión que el usuario no pidió.
+  const filtro = new QueryFiltro(p.titulo, p.artista, p.album ?? "");
   const ordenados = candidatos
-    .map((c) => ({ c, punto: puntuarCandidatoYattee(c, p, objetivo) }))
+    .map((c) => ({ c, punto: puntuarCandidatoYattee(c, p, objetivo, filtro) }))
+    .filter((x) => Number.isFinite(x.punto))
     .sort((a, b) => b.punto - a.punto);
+  if (ordenados.length === 0) {
+    console.warn(`[yt] «${p.titulo}» sólo tenía versiones no pedidas · ${candidatos.length} candidatos`);
+    return null;
+  }
 
   // Si el primer video no tiene formatos de audio (en vivo, age-gated o el
   // extractor falló), se prueba el siguiente: devolver null al primer intento
   // hacía que la misma canción fallara de forma intermitente.
-  for (const { c: elegida } of ordenados.slice(0, 4)) {
-    const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
-    if (restante < 3_000) break;
-    const video = await pedirYattee<VideoYattee>(
-      cfg,
-      `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
-      restante,
-    );
+  for (const { c: elegida } of ordenados.slice(0, 5)) {
+    if (TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio) < 3_000) break;
+    const video = await conCupoYattee(() => {
+      const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
+      return pedirYattee<VideoYattee>(
+        cfg,
+        `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?proxy=true&proxy_mode=relay`,
+        Math.max(3_000, restante),
+      );
+    });
     const elegido = formatoDe(video);
     if (elegido) return elegido;
     console.warn(
@@ -1389,9 +1540,17 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
     const propio = await rescatarEnBackendPropio(p, cfg.local);
     if (propio) return propio;
   }
-  if (!cfg.yattee) return null;
+  if (cfg.yattees.length === 0) return null;
   await despertarYattee();
-  return rescatarEnYattee(p, cfg);
+  for (const base of yatteesVivas()) {
+    ultimoEstadoYt = 0;
+    const resuelto = await rescatarEnYattee(p, { yattee: base, auth: cfg.auth });
+    if (resuelto) return resuelto;
+    // Si la base contestó bien (200) pero no tenía la pista, la otra instancia
+    // del mismo repo tampoco la va a tener: no se paga otro timeout.
+    if (!falloYattee()) break;
+  }
+  return null;
 }
 
 /**
@@ -1404,41 +1563,45 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
   const cfg = configYouTube();
   const tope = Math.max(1, Math.min(24, limite));
 
-  if (cfg.yattee) {
+  if (cfg.yattees.length > 0) {
     // Gracia corta: si el servidor de Yattee está dormido, el ping lo despierta
     // sin hacer esperar la búsqueda entera (el catálogo contesta igual).
     await despertarYattee(6_000);
-    const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
-      cfg,
-      `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
-      TIMEOUT_YT_BUSQUEDA_MS,
-    );
-    const encontrados = (Array.isArray(resultados) ? resultados : [])
-      .filter((r) => {
-        const dur = Number(r.lengthSeconds ?? 0);
-        return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
-      })
-      .slice(0, tope)
-      .map((r) => {
-        const id = String(r.videoId ?? "");
-        const miniaturas = r.videoThumbnails ?? [];
-        return {
-          id,
-          tipo: "track" as const,
-          titulo: r.title ?? "",
-          artista: r.author ?? "",
-          album: "",
-          caratula:
-            miniaturas.find((t) => t.quality === "high")?.url ??
-            miniaturas[miniaturas.length - 1]?.url ??
-            `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
-          duracionMs: Math.max(0, Math.round(Number(r.lengthSeconds ?? 0) * 1000)),
-          isrc: null,
-        };
-      });
-    // Yattee no encontró nada (o no contestó): si hay backend propio, se prueba
-    // ahí. Es justo el caso del folklore que el índice de Yattee no cubre.
-    if (encontrados.length > 0) return encontrados;
+    for (const base of yatteesVivas()) {
+      ultimoEstadoYt = 0;
+      const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
+        { yattee: base, auth: cfg.auth },
+        `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
+        TIMEOUT_YT_BUSQUEDA_MS,
+      );
+      const encontrados = (Array.isArray(resultados) ? resultados : [])
+        .filter((r) => {
+          const dur = Number(r.lengthSeconds ?? 0);
+          return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
+        })
+        .slice(0, tope)
+        .map((r) => {
+          const id = String(r.videoId ?? "");
+          const miniaturas = r.videoThumbnails ?? [];
+          return {
+            id,
+            tipo: "track" as const,
+            titulo: r.title ?? "",
+            artista: r.author ?? "",
+            album: "",
+            caratula:
+              miniaturas.find((t) => t.quality === "high")?.url ??
+              miniaturas[miniaturas.length - 1]?.url ??
+              `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+            duracionMs: Math.max(0, Math.round(Number(r.lengthSeconds ?? 0) * 1000)),
+            isrc: null,
+          };
+        });
+      // Yattee no encontró nada (o no contestó): si hay backend propio, se
+      // prueba ahí. Es justo el caso del folklore que el índice no cubre.
+      if (encontrados.length > 0) return encontrados;
+      if (!falloYattee()) break;
+    }
     if (!cfg.local) return null;
   }
 

@@ -37,7 +37,13 @@ import {
   llamarExtension,
   normalizarItems,
 } from "@/server/extensions";
-import { fieldScore, filtrarOriginales, splitSearchQuery } from "@/server/matching";
+import {
+  fieldScore,
+  filtrarOriginales,
+  marcadoresDeVersion,
+  sinVersionesNoPedidas,
+  splitSearchQuery,
+} from "@/server/matching";
 import {
   buscarBandcampItems,
   buscarYouTubeBackend,
@@ -137,26 +143,122 @@ type PeticionBusqueda = {
 };
 
 /**
- * Filtro de relevancia del LISTADO, igual que el de la app
- * (`filtrarOriginales` con la consulta partida por `splitSearchQuery`): los
- * tracks que no se relacionan con lo pedido se van y las versiones no
- * originales quedan al final.
+ * Mejor puntaje de un candidato contra TODOS los cortes posibles de la consulta.
  *
- * Primera desviación deliberada de la app: si el filtro dejaría el marco SIN
- * ningún track habiendo tracks, se devuelve el orden de la fuente. La app no
- * necesita esta red porque ahí el usuario pide una CANCIÓN; esta caja también
- * busca "jazz" o "guitarra" (las sugerencias del marco), y quedarse sin
- * resultados no sería una mejora sino un buscador roto. La segunda desviación
- * está en `priorizarArtistaElegido`.
+ * "get lucky daft punk" es "Get Lucky" de "Daft Punk", pero `splitSearchQuery`
+ * —que sólo entiende separadores explícitos— lo deja entero como título. Puntuar
+ * esa consulta contra el texto del candidato premiaba a la PORTADA cuyo título
+ * lleva la consulta completa ("Get Lucky (Daft Punk)" de Charlie Parra Del
+ * Riego, que gana por tener las cuatro palabras en el título) por delante del
+ * original, que sólo dice "Get Lucky" y acredita el artista aparte. Probando cada
+ * corte y quedándose con el mejor, el original gana: es el único candidato donde
+ * el artista coincide ENTERO con lo que el usuario escribió.
+ */
+function puntajeDeConsulta(consulta: string, it: Item): number {
+  const palabras = consulta.trim().split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return 0;
+  let mejor = 0;
+  for (let corte = 1; corte <= palabras.length; corte++) {
+    const titulo = palabras.slice(0, corte).join(" ");
+    const artista = palabras.slice(corte).join(" ");
+    // El artista pesa MÁS que el título: es la señal que el filtro por título no
+    // puede ver y la que separa la grabación pedida de su portada.
+    const punto =
+      fieldScore(titulo, it.titulo) * 60 + (artista ? fieldScore(artista, it.artista) * 100 : 0);
+    if (punto > mejor) mejor = punto;
+  }
+  return mejor;
+}
+
+/**
+ * Ordena el LISTADO por lo que el usuario escribió y por la versión pedida.
+ *
+ * La consulta libre suele ser "título artista calificativo" ("andrea bad bunny
+ * piano"): no hay separador, así que `splitSearchQuery` deja todo como título y
+ * el filtro por título de la app descarta justo la versión que se pidió. Acá se
+ * puntúa el candidato contra cada corte de la consulta (ver `puntajeDeConsulta`)
+ * y se premia el marcador de versión que la consulta trae, sin depender de que
+ * las palabras estén contiguas.
+ */
+function ordenarPorConsulta(items: Item[], consulta: string): Item[] {
+  const tracks = items.filter((i) => i.tipo === "track");
+  if (tracks.length < 2) return items;
+
+  const pedidas = marcadoresDeVersion(consulta);
+  const puntuados = tracks.map((it, idx) => {
+    const texto = `${it.titulo} ${it.artista} ${it.album}`;
+    let punto = puntajeDeConsulta(consulta, it);
+
+    if (pedidas.length > 0) {
+      const tiene = marcadoresDeVersion(texto);
+      const aciertos = pedidas.filter((m) => tiene.includes(m)).length;
+      punto += aciertos * 120;
+      // Un candidato que no tiene NINGUNA versión pedida va detrás de uno que sí.
+      if (aciertos === 0) punto -= 200;
+    } else {
+      // Sin marcador pedido, a igualdad gana el título más corto: el original
+      // suele ser "Andrea" y la versión "Andrea (Live at ...)".
+      punto -= Math.min(20, it.titulo.length / 10);
+    }
+    return { it, idx, punto };
+  });
+
+  puntuados.sort((a, b) => b.punto - a.punto || a.idx - b.idx);
+  return [...items.filter((i) => i.tipo !== "track"), ...puntuados.map((x) => x.it)];
+}
+
+/**
+ * Filtro de relevancia del LISTADO, igual que el de la app
+ * (`filtrarOriginales` con la consulta partida por `splitSearchQuery`), más dos
+ * reglas que la landing necesita para no servir la canción equivocada:
+ *
+ *  1. Si el catálogo SOLO devolvió remixes/live/covers, no se devuelve la lista
+ *     cruda: se deja sin tracks para que el llamador busque el ORIGINAL en el
+ *     respaldo/Bandcamp/YouTube. Antes esa red de "no quedar vacío" era
+ *     justamente la que reproducía remixes.
+ *  2. Si la consulta pide una versión ("piano", "remix"), se conserva esa
+ *     versión y se descartan las demás variantes.
  */
 function ordenarResultados(items: Item[], consulta: string): Item[] {
   const { title, artist } = splitSearchQuery(consulta);
   if (!title) return items;
-  const filtrados = filtrarOriginales(items, title, artist);
+
+  const pedidas = marcadoresDeVersion(consulta);
+  const filtrados =
+    pedidas.length > 0
+      ? sinVersionesNoPedidas(items, title, artist)
+      : sinVersionesNoPedidas(filtrarOriginales(items, title, artist), title, artist);
+
   const tracksAntes = items.filter((i) => i.tipo === "track").length;
   const tracksDespues = filtrados.filter((i) => i.tipo === "track").length;
-  if (tracksAntes > 0 && tracksDespues === 0) return items;
-  return priorizarArtistaElegido(filtrados, consulta);
+  // El filtro de relevancia vació los tracks. Si es porque SÓLO había
+  // remixes/live/covers, no se devuelve nada (el llamador busca el original en
+  // otra fuente). Si hay tracks sin variantes -una búsqueda de género como
+  // "jazz" cuyo título no coincide literalmente-, se conservan: antes esa red
+  // era la que mantenía vivo el buscador de sugerencias.
+  if (pedidas.length === 0 && tracksAntes > 0 && tracksDespues === 0) {
+    const sinVariantes = sinVersionesNoPedidas(items, title, artist);
+    if (sinVariantes.some((i) => i.tipo === "track")) {
+      return ordenarPorConsulta(priorizarArtistaElegido(sinVariantes, consulta), consulta);
+    }
+    return items.filter((i) => i.tipo !== "track");
+  }
+
+  return ordenarPorConsulta(priorizarArtistaElegido(filtrados, consulta), consulta);
+}
+
+/**
+ * ¿Hay algo que valga la pena devolver? Para la categoría de canciones se exige
+ * al menos un track: un listado de sólo álbumes cuando se buscó una canción no
+ * es un resultado, es el catálogo desviado.
+ */
+function utilizable(items: Item[], consulta: string, filtro: string | null): boolean {
+  if (items.length === 0) return false;
+  const categoria = filtro ? categoriaDeFiltro(filtro) : null;
+  if ((!categoria || categoria === "tracks") && !items.some((i) => i.tipo === "track")) {
+    return false;
+  }
+  return !pareceDesvio(items, consulta) && tocaConsulta(items, consulta);
 }
 
 /**
@@ -177,11 +279,21 @@ function ordenarResultados(items: Item[], consulta: string): Item[] {
  * la señal que el usuario dio y que el filtro por título no pudo ver. El resto
  * conserva su orden relativo y los no-tracks siguen primero. Si nadie del listado
  * acredita al artista, no se toca nada ("jazz" o "guitarra" quedan igual).
+ *
+ * La comparación va en las DOS direcciones: el artista suele ser MÁS CORTO que la
+ * consulta ("daft punk" dentro de "get lucky daft punk"). Con la consulta como
+ * `q`, `fieldScorePre` mide cuánta consulta cabe en el artista —2 de 4 palabras,
+ * 0.5, por debajo del umbral— y nadie quedaba adelantado: la corrección existía
+ * en el papel pero no cambiaba el orden real.
  */
 function priorizarArtistaElegido(items: Item[], consulta: string): Item[] {
   const tracks = items.filter((i) => i.tipo === "track");
   const conArtista = tracks
-    .map((it, idx) => ({ it, idx, score: fieldScore(consulta, it.artista) }))
+    .map((it, idx) => ({
+      it,
+      idx,
+      score: Math.max(fieldScore(consulta, it.artista), fieldScore(it.artista, consulta)),
+    }))
     .filter((c) => c.score >= 1);
   if (conArtista.length === 0) return items;
 
@@ -399,14 +511,14 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     aviso = String((e as Error)?.message ?? e).slice(0, 200);
   }
 
-  if (items.length > 0 && !pareceDesvio(items, consulta) && tocaConsulta(items, consulta)) {
+  if (utilizable(items, consulta, peticion.filtro)) {
     return cerrar(data, { origen: "extension", items, aviso, fuente });
   }
   if (items.length > 0) {
-    // El catálogo contestó con el disco de otro artista o con resultados que
-    // no comparten NINGUNA palabra significativa: se guardan por si no hay
-    // nada mejor y se sigue buscando donde de verdad puede estar.
-    debiles = items;
+    // El catálogo contestó con el disco de otro artista, con resultados que
+    // no comparten NINGUNA palabra significativa o con sólo versiones no
+    // pedidas: se guardan por si no hay nada mejor y se sigue buscando.
+    debiles = ordenarResultados(items, consulta);
     items = [];
   }
 
@@ -421,20 +533,25 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   // El respaldo también puede devolver otro artista o no tocar la consulta.
   // Antes de aceptarlo se prueba Bandcamp -donde vive el folklore y los sellos
   // independientes- y después YouTube para lo re-subido.
-  const respaldoUtil =
-    items.length > 0 && !pareceDesvio(items, consulta) && tocaConsulta(items, consulta);
-  if (!respaldoUtil) {
+  if (!utilizable(items, consulta, peticion.filtro)) {
     const categoria = peticion.filtro ? categoriaDeFiltro(peticion.filtro) : null;
     if (!categoria || categoria === "tracks") {
-      const bc = await buscarBandcampItems(consulta, limite);
+      // Bandcamp: el orden y el filtro de versiones también aplican. Antes se
+      // devolvía crudo y un tributo/remix podía quedar primero.
+      const bc = ordenarResultados(await buscarBandcampItems(consulta, limite), consulta);
       // Los items de Bandcamp se etiquetan como "deezer" sólo por el contrato
       // del cliente (los tracks no se abren como álbum/artista y así el audio
       // sigue el camino normal); no publican ISRC, así que no acreditan
       // identidad de Deezer ni de ninguna otra fuente.
-      if (bc.length > 0) return cerrar(data, { origen: "respaldo", items: bc, aviso, fuente: "deezer" });
+      if (utilizable(bc, consulta, peticion.filtro)) {
+        return cerrar(data, { origen: "respaldo", items: bc, aviso, fuente: "deezer" });
+      }
     }
-    const yt = await buscarYouTubeBackend(consulta, limite);
-    if (yt && yt.length > 0) return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
+    const ytCrudo = await buscarYouTubeBackend(consulta, limite);
+    const yt = ytCrudo ? ordenarResultados(ytCrudo, consulta) : [];
+    if (utilizable(yt, consulta, peticion.filtro)) {
+      return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
+    }
   }
 
   // Nada mejor: se devuelven los resultados débiles antes que una lista vacía.

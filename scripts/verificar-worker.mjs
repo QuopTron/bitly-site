@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import {
   ADMIN_CLAVE,
   ADMIN_CORREO,
+  SECRETO_SESION_PRUEBA,
   dormir,
   entornoPrueba,
   liberarPuerto,
@@ -55,7 +56,7 @@ fs.writeFileSync(
     `BITLY_DATA_TOKEN=${env.BITLY_CODES_TOKEN ?? ""}`,
     `BITLY_CODES_TOKEN=${env.BITLY_CODES_TOKEN ?? ""}`,
     `BITLY_DATA_SECRET=${env.BITLY_DATA_SECRET ?? ""}`,
-    `BITLY_SESSION_SECRET=secreto-de-sesion-de-prueba-2026`,
+    `BITLY_SESSION_SECRET=${SECRETO_SESION_PRUEBA}`,
     `BITLY_ADMIN_EMAIL=${ADMIN_CORREO}`,
     `BITLY_ADMIN_CLAVE=${ADMIN_CLAVE}`,
     `BITLY_ADMIN_SECRET=secreto-prueba-panel-2026`,

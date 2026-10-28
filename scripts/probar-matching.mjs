@@ -212,6 +212,47 @@ try {
     ["Discovery", "One More Time"],
   );
 
+  /* ── Versiones pedidas vs. versiones coladas ─────────────────── */
+  igual("marcadores de la consulta", m.marcadoresDeVersion("andrea bad bunny piano"), ["piano"]);
+  igual("marcadores de una versión", m.marcadoresDeVersion("Andrea (Piano Version)"), ["piano", "version"]);
+  igual("sin marcadores", m.marcadoresDeVersion("Los Thuthanaka"), []);
+
+  const item = (titulo, artista) => ({ tipo: "track", titulo, artista, album: "", isrc: null });
+  const andrea = [
+    item("Andrea", "Bad Bunny"),
+    item("Andrea (Remix)", "Bad Bunny"),
+    item("Andrea (Piano Version)", "Bad Bunny"),
+  ];
+  igual(
+    "sin versión pedida se va el remix y el piano",
+    m.sinVersionesNoPedidas(andrea, "Andrea", "Bad Bunny").map((i) => i.titulo),
+    ["Andrea"],
+  );
+  igual(
+    "con piano pedido se conserva sólo esa versión",
+    m.sinVersionesNoPedidas(andrea, "andrea bad bunny piano", "").map((i) => i.titulo),
+    ["Andrea (Piano Version)"],
+  );
+
+  const badBunny = [
+    t("remix", { title: "Andrea (Remix)", artist: "Bad Bunny" }),
+    t("piano", { title: "Andrea (Piano Version)", artist: "Bad Bunny" }),
+    t("original", { title: "Andrea", artist: "Bad Bunny" }),
+  ];
+  igual("Andrea sin calificativo prefiere el original", m.bestOriginal("Andrea", "Bad Bunny", badBunny)?.id, "original");
+  igual("Andrea piano resuelve la versión pedida", m.bestOriginal("Andrea (Piano Version)", "Bad Bunny", badBunny)?.id, "piano");
+
+  const thuthanaka = [
+    t("remix", { title: "LOS THUTHANAKA - Quta (capo-kullawada) JERSEY CLUB REMIX", artist: "Los Thuthanaka" }),
+    t("original", { title: "Quta (capo-kullawada)", artist: "Los Thuthanaka", durationMs: 244_000 }),
+    t("cover", { title: "Quta (capo-kullawada)", artist: "Some Cover Band" }),
+  ];
+  igual(
+    "nicho: original y no el remix",
+    m.bestOriginalDuracion("Quta (capo-kullawada)", "Los Thuthanaka", 244_000, thuthanaka)?.id,
+    "original",
+  );
+
   console.log(`\n${pruebas - fallos}/${pruebas} aserciones OK${fallos ? ` · ${fallos} FALLARON` : ""}`);
   process.exit(fallos ? 1 : 0);
 } finally {

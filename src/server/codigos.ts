@@ -81,23 +81,32 @@ async function clavePrivada(): Promise<CryptoKey | null> {
   if (!crudo) return null;
 
   try {
-    if (crudo.includes("BEGIN")) {
-      const cuerpo = crudo.replace(/\\n/g, "\n").replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+    const cuerpo = crudo.includes("BEGIN")
+      ? crudo.replace(/\\n/g, "\n").replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")
+      : crudo;
+    const bytes = deB64url(cuerpo);
+    // Un PKCS#8 de verdad empieza con 0x30 (SEQUENCE). Lo que hay en
+    // `scripts/keys/private_key.pem` NO: es la SEMILLA cruda de 32 bytes dentro
+    // del sobre PEM (así la lee `generar_codigo.py`). Tomarla como PKCS#8 hacía
+    // que WebCrypto la rechazara, `clavePrivada()` devolviera null y el sitio
+    // NUNCA pudiera firmar códigos: quedaba el respaldo del registro y, si no
+    // había códigos libres, el panel no entregaba nada ("no da el código").
+    if (bytes.length !== 32 && bytes.length !== 64) {
+      // Cualquier otra cosa tiene que ser un PKCS#8 de verdad (empieza con 0x30).
+      if (bytes[0] !== 0x30) return null;
       return await crypto.subtle.importKey(
         "pkcs8",
-        deB64(cuerpo) as BufferSource,
+        bytes as BufferSource,
         { name: "Ed25519" },
         false,
         ["sign"],
       );
     }
-    const semilla = deB64url(crudo);
-    if (semilla.length < 32) return null;
     // Con 64 bytes el primero es la semilla; el resto es la pública (se ignora).
     // PKCS#8 de una Ed25519: 30 2e 02 01 00 30 05 06 03 2b 65 70 04 22 04 20 + semilla.
     const sobre = new Uint8Array(16 + 32);
     sobre.set(deB64("MC4CAQAwBQYDK2VwBCIEIA=="), 0);
-    sobre.set(semilla.slice(0, 32), 16);
+    sobre.set(bytes.slice(0, 32), 16);
     return await crypto.subtle.importKey("pkcs8", sobre as BufferSource, { name: "Ed25519" }, false, [
       "sign",
     ]);

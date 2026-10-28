@@ -59,6 +59,9 @@ export async function descargarPista(
   if (p.album) parametros.set("album", p.album);
   if (p.duracion > 0) parametros.set("duracionMs", String(Math.round(p.duracion * 1000)));
   if (p.isrc) parametros.set("isrc", p.isrc);
+  // El id es lo que permite resolver EXACTAMENTE el mismo video que se escuchó
+  // (YouTube Music) en vez de buscar de nuevo y arriesgar otra versión.
+  if (p.id) parametros.set("id", p.id);
   if (codigo) parametros.set("codigo", codigo);
 
   let respuesta: Response;
