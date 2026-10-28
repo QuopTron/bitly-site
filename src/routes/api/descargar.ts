@@ -25,6 +25,15 @@ function jsonError(error: string, status: number, extra?: Record<string, string>
   });
 }
 
+/**
+ * Este endpoint sólo descarga con GET. Antes, un POST/PUT caía en la página del
+ * sitio: contestaba 200 con el HTML de la SPA y el cliente se comía un cuerpo
+ * que no era JSON (ni audio), en vez de enterarse de que el método estaba mal.
+ */
+function metodoNoPermitido() {
+  return jsonError("metodo", 405, { allow: "GET" });
+}
+
 function limpiarNombre(valor: string): string {
   return valor
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ")
@@ -238,6 +247,10 @@ export const Route = createFileRoute("/api/descargar")({
 
         return new Response(cuerpo, { status: 200, headers });
       },
+      POST: async () => metodoNoPermitido(),
+      PUT: async () => metodoNoPermitido(),
+      PATCH: async () => metodoNoPermitido(),
+      DELETE: async () => metodoNoPermitido(),
     },
   },
 });
