@@ -266,8 +266,11 @@ try {
 
   // La letra se pide al servidor (LRCLIB) y puede tardar; no se exige que la
   // línea actual ya esté pintada, pero sí que el verso exista (no el ♪ solo).
+  // En producción la primera consulta a LRCLIB paga DNS y TLS desde el edge de
+  // Cloudflare: se le da al servidor su presupuesto entero (18 s) antes de dar
+  // la letra por perdida, si no la prueba falla por impaciencia y no por un bug.
   let letra = "";
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 100; i++) {
     letra = await js(
       ses,
       `(document.querySelector("#demo [data-karaoke]")?.innerText ?? "").replace(/\\s+/g, " ").trim()`,

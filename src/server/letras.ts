@@ -26,8 +26,15 @@ export type Letras = {
 const LRCLIB = "https://lrclib.net/api/search";
 const USER_AGENT = "bitly-site-demo/1.0 (music demo)";
 const TIMEOUT_MS = 4_000;
+/**
+ * La PRIMERA consulta paga DNS y TLS desde el edge: en Cloudflare, con 4 s
+ * muchas veces se abortaba antes de que LRCLIB contestara y el karaoke se
+ * quedaba en «♪» (medido en producción: una de cada dos veces). Las variantes
+ * siguientes ya van sobre la conexión abierta y les alcanza con 4 s.
+ */
+const TIMEOUT_PRIMERA_MS = 9_000;
 /** Presupuesto total entre todas las variantes de búsqueda. */
-const PRESUPUESTO_MS = 10_000;
+const PRESUPUESTO_MS = 18_000;
 const TTL_MS = 6 * 60 * 60 * 1000;
 /** Un fallo suele ser transitorio (LRCLIB lento o rate-limit): se recuerda
  *  muy poco para que el siguiente clic/reintento pueda encontrar la letra. */
@@ -103,11 +110,11 @@ async function consultar(p: PeticionLetras): Promise<Letras | null> {
   // Timeout POR consulta: con uno global, las variantes 3+ se abortaban antes
   // de intentarse y una canción con letra plana en la primera búsqueda podía
   // quedarse sin la versión sincronizada que sí estaba en LRCLIB.
-  const pedir = async (params: URLSearchParams): Promise<Candidato[]> => {
+  const pedir = async (params: URLSearchParams, topeMs = TIMEOUT_MS): Promise<Candidato[]> => {
     const restante = limite - Date.now();
     if (restante <= 0) return [];
     const control = new AbortController();
-    const reloj = setTimeout(() => control.abort(), Math.min(TIMEOUT_MS, restante));
+    const reloj = setTimeout(() => control.abort(), Math.min(topeMs, restante));
     try {
       const res = await fetch(`${LRCLIB}?${params.toString()}`, {
         signal: control.signal,
@@ -158,9 +165,9 @@ async function consultar(p: PeticionLetras): Promise<Letras | null> {
     agregar(new URLSearchParams({ q: titulo }));
 
     let plana: Candidato | null = null;
-    for (const params of consultas) {
+    for (const [i, params] of consultas.entries()) {
       if (Date.now() >= limite) break;
-      const lista = await pedir(params);
+      const lista = await pedir(params, i === 0 ? TIMEOUT_PRIMERA_MS : TIMEOUT_MS);
       if (lista.length === 0) continue;
 
       // La primera búsqueda que devuelva letra SINCRONIZADA gana: es la que
