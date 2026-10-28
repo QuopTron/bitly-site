@@ -36,9 +36,7 @@ const TIMEOUT_PRIMERA_MS = 9_000;
 /** Presupuesto total entre todas las variantes de búsqueda. */
 const PRESUPUESTO_MS = 18_000;
 const TTL_MS = 6 * 60 * 60 * 1000;
-/** Un fallo suele ser transitorio (LRCLIB lento o rate-limit): se recuerda
- *  muy poco para que el siguiente clic/reintento pueda encontrar la letra. */
-const TTL_FALLO_MS = 20 * 1000;
+/** Un acierto se guarda un rato largo (la letra de una canción no cambia). */
 const MAX_CACHE = 200;
 
 type Entrada = { valor: Letras | null; expira: number };
@@ -233,10 +231,11 @@ export async function letrasImpl(p: PeticionLetras): Promise<Letras | null> {
 
   const tarea = consultar(peticion)
     .then((valor) => {
-      cache.set(clave, {
-        valor,
-        expira: Date.now() + (valor ? TTL_MS : TTL_FALLO_MS),
-      });
+      // Un fallo NO se guarda: LRCLIB contesta 429 por IP compartida y el
+      // karaoke reintenta tres veces en dos segundos. Con el fallo cacheado
+      // esos reintentos contestaban al instante lo mismo y el «♪» se quedaba
+      // toda la sesión; sin caché el reintento vuelve a preguntar de verdad.
+      if (valor) cache.set(clave, { valor, expira: Date.now() + TTL_MS });
       podar();
       return valor;
     })
