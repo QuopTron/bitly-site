@@ -181,9 +181,40 @@ async function consultar(p: PeticionLetras): Promise<Letras | null> {
     agregar(new URLSearchParams({ q: titulo }));
 
     let plana: Candidato | null = null;
-    for (const [i, params] of consultas.entries()) {
-      if (Date.now() >= limite) break;
-      const lista = await pedir(params, i === 0 ? TIMEOUT_PRIMERA_MS : TIMEOUT_MS);
+
+    // De a TRES a la vez, y gana la primera que traiga letra sincronizada.
+    // En serie, una pista cuya coincidencia exacta vuelve VACÍA pagaba el
+    // timeout de esa variante antes de llegar a la que sí la tenía: medido en
+    // producción, 5-9 s hasta que aparecía el verso. En paralelo la latencia es
+    // la de la mejor variante, no la suma de las que fallaron. Tres (y no las
+    // ocho) porque LRCLIB limita por IP y el Worker comparte la suya.
+    const CONCURRENTES = 3;
+    const abiertas = new Map<number, Promise<Candidato[]>>();
+    let siguiente = 0;
+    // Mientras ninguna consulta haya vuelto, todas siguen pagando DNS y TLS
+    // desde el edge: el tope corto aborta antes de que el handshake termine.
+    let caliente = false;
+
+    const lanzar = () => {
+      while (abiertas.size < CONCURRENTES && siguiente < consultas.length && Date.now() < limite) {
+        const i = siguiente++;
+        const promesa = pedir(consultas[i]!, caliente ? TIMEOUT_MS : TIMEOUT_PRIMERA_MS).finally(
+          () => {
+            caliente = true;
+          },
+        );
+        abiertas.set(i, promesa);
+      }
+    };
+
+    while (Date.now() < limite) {
+      lanzar();
+      if (abiertas.size === 0) break;
+
+      const [i, lista] = (await Promise.race(
+        [...abiertas].map(([idx, promesa]) => promesa.then((l) => [idx, l] as [number, Candidato[]])),
+      )) as [number, Candidato[]];
+      abiertas.delete(i);
       if (lista.length === 0) continue;
 
       // La primera búsqueda que devuelva letra SINCRONIZADA gana: es la que
