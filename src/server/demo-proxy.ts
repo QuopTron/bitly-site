@@ -120,11 +120,15 @@ function crearCupo(maxPorIp: number, maxGlobal: number) {
   };
 }
 
-const dentroDeCupo = crearCupo(12, 150);
+// 30 por minuto: un visitante que busca y cambia de fuente una y otra vez
+// llegaba a 12 y veía «demasiadas búsquedas» con el buscador en la mano. Treinta
+// sigue siendo anti-abuso (un script hace eso en un segundo) y no molesta a
+// quien está probando la demo de verdad.
+const dentroDeCupo = crearCupo(30, 240);
 /** El rescate es más caro (mint firmado) y tiene caché, así que su techo es menor. */
 const dentroDeCupoRescate = crearCupo(20, 240);
 /** Letras: una consulta por pista a LRCLIB; sin cupo era un proxy abierto. */
-const dentroDeCupoLetras = crearCupo(30, 200);
+const dentroDeCupoLetras = crearCupo(45, 240);
 
 async function quienSolicita(): Promise<string> {
   return obtenerIPCliente();
