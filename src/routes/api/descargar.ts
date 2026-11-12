@@ -106,7 +106,7 @@ function cuerpoConPrimero(
  * pista no tiene audio (429 del catálogo, 403 del relay, enlace vencido).
  */
 async function traerAudio(peticion: PeticionAudio, signal: AbortSignal) {
-  const audio = await resolverAudio(peticion).catch(() => null);
+  const { audio } = await resolverAudio(peticion).catch(() => ({ audio: null, motivo: null }));
   if (!audio) return { audio: null, upstream: null, tipo: null, cuerpo: null };
 
   const upstream = await fetch(audio.url, {

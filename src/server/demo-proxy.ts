@@ -668,14 +668,15 @@ export async function abrirContenidoImpl(carga: Carga): Promise<Cifrado> {
 /* ── Audio ───────────────────────────────────────────────────────── */
 
 type RespuestaAudio = {
-  url: string;
-  duracion: number;
-  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
-  proveedor: string;
-  id: string | null;
-  isrc: string | null;
+  url?: string;
+  duracion?: number;
+  canal?: "monochrome" | "stash-relay" | "stash-tidal" | "bandcamp" | "youtube";
+  proveedor?: string;
+  id?: string | null;
+  isrc?: string | null;
   bitDepth?: number;
   sampleRate?: number;
+  motivo?: string;
 } | null;
 
 /**
@@ -719,9 +720,11 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
   peticion = { ...peticion, calidad: premium ? "flac" : "estandar", videoId };
 
   try {
-    return await resolverAudio(peticion);
+    const r = await resolverAudio(peticion);
+    if (!r.audio) return { motivo: r.motivo ?? undefined };
+    return { ...r.audio, motivo: r.motivo ?? undefined };
   } catch {
-    return null;
+    return { motivo: "error" };
   }
 }
 

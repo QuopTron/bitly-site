@@ -515,7 +515,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
       // Tres intentos como máximo: el canal inicial y dos respaldos. Sumar un
       // cuarto alarga la espera y casi no suma chances (los canales restantes
       // suelen compartir la misma caída de red o de identidad).
-      for (let intento = 0; intento < 3 && audio; intento++) {
+      for (let intento = 0; intento < 3 && audio?.url; intento++) {
         el.pause();
         el.preload = "auto";
         el.src = audio.url;
@@ -587,7 +587,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
       // eso obligaba a pulsar la fila otra vez; ahora se reintenta una vez
       // sola, sin que el visitante tenga que contar clics.
       let audioResuelto = await audioDe(p);
-      if (!audioResuelto) {
+      if (!audioResuelto || !audioResuelto.url) {
         await new Promise((listo) => setTimeout(listo, 600));
         if (orden !== pendiente.current) {
           clearTimeout(lento);
@@ -600,10 +600,10 @@ export default function DemoPlayer({ onCuenta }: Props) {
         return;
       }
 
-      if (!audioResuelto) {
+      if (!audioResuelto || !audioResuelto.url) {
         clearTimeout(lento);
         setPreparando(null);
-        setAvisoAudio(t("demoAudioNone"));
+        setAvisoAudio(audioResuelto?.motivo ? `${t("demoAudioNone")} (${audioResuelto.motivo})` : t("demoAudioNone"));
         return;
       }
 
@@ -1325,7 +1325,9 @@ export default function DemoPlayer({ onCuenta }: Props) {
                       {pista.artista || "\u00a0"}
                       {pista.canal === "stash-relay"
                        ? " · FLAC"
-                       : pista.canal === "monochrome" || pista.canal === "bandcamp"
+                       : pista.canal === "stash-tidal"
+                         ? " · AAC 320"
+                         : pista.canal === "monochrome" || pista.canal === "bandcamp"
                          ? " · audio"
                          : pista.canal === "youtube"
                            ? ` · ${t("demoCalidadEstandar")}`

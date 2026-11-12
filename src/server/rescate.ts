@@ -144,7 +144,7 @@ const MAX_ENLACES = 400;
  *  resolución (idea tomada de monochrome: pendingRequests por clave). No se
  *  cachean los FALLOS: un corte del relay o de YouTube es transitorio y el
  *  siguiente clic debe poder reintentar de inmediato. */
-const enVuelo = new Map<string, Promise<AudioResuelto | null>>();
+const enVuelo = new Map<string, Promise<{ audio: AudioResuelto | null; motivo: string | null }>>();
 
 function claveDe(p: PeticionAudio): string {
   // La calidad entra en la clave: el enlace FLAC de un Premium no puede
@@ -222,6 +222,17 @@ const USER_AGENT =
 
 type RelayStash = { bases: string[]; clave: string; tidalBase: string; tidalToken: string };
 let configCache: { valor: RelayStash; expira: number } | null = null;
+
+/**
+ * Motivo del último rescate fallido (solo diagnóstico temporal). Lo anota
+ * `resolverAudioInterno` en cada canal que se rinde, para leerlo desde el
+ * cliente y saber exactamente por qué queda sin audio en producción.
+ */
+let motivoUltimoRescate: string | null = null;
+
+export function ultimoMotivoRescate(): string | null {
+  return motivoUltimoRescate;
+}
 
 function bytesAHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -2274,7 +2285,10 @@ async function resolverAudioInterno(
   const artista = (p.artista ?? "").trim();
   const album = (p.album ?? "").trim();
   const duracionMs = Math.max(0, Math.round(p.duracionMs ?? 0));
-  if (!titulo && !p.isrc) return null;
+  if (!titulo && !p.isrc) {
+    motivoUltimoRescate = "sin-titulo";
+    return null;
+  }
 
   // Traza de canales para poder explicar un "no hay audio" desde los logs del
   // worker. Sin esto, un fallo en producción era indistinguible de otro: sólo
@@ -2499,8 +2513,10 @@ async function resolverAudioInterno(
     pista: null,
   }));
   if (monoInicial.pista && (await monochromeDisponible(monoInicial.pista.url))) {
+    motivoUltimoRescate = null;
     return devolverMonochrome(monoInicial.pista);
   }
+  motivoUltimoRescate = monoInicial.pista ? "mono-isrc-sin-audio" : "mono-isrc-sin-match";
   anotar(monoInicial.pista ? "mono-isrc-sin-audio" : "mono-isrc-sin-match");
 
   const [candidatosResueltos, monoPorNombre] = await Promise.all([candidatosPromise, monoNombre]);
@@ -2526,8 +2542,10 @@ async function resolverAudioInterno(
   // (ver resolverMonochromePorNombre); después se prueban los ISRC que
   // acreditaron Qobuz/Deezer.
   if (monoPorNombre && (await monochromeDisponible(monoPorNombre.url))) {
+    motivoUltimoRescate = null;
     return devolverMonochrome(monoPorNombre);
   }
+  motivoUltimoRescate = monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match";
   anotar(monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match");
 
   // Devolver el FLAC del relay con los datos del candidato que lo resolvió.
@@ -2626,10 +2644,12 @@ async function resolverAudioInterno(
     dormir(PRESUPUESTO_SIN_PERDIDA_MS).then((): null => null),
   ]);
   if (ganador) {
+    motivoUltimoRescate = null;
     anotar(`gana=${ganador.canal}`);
     if (ganador.canal === "monochrome") return devolverMonochrome(ganador.mono);
     return devolverStash(ganador.mint, ganador.c);
   }
+  motivoUltimoRescate = "mono-stash-sin-audio";
   anotar(`mono/stash sin audio (${candidatos.length} cands)`);
 
   // Tidal entrega AAC 320 progresivo (su FLAC es DASH y el navegador no lo
@@ -2637,14 +2657,22 @@ async function resolverAudioInterno(
   // y antes de Bandcamp/YouTube: mejor codec y catálogo de nicho.
   if (!evitar.has("stash-tidal") && titulo) {
     const tidal = await conTope(rescatarStashTidal(pedido), PRESUPUESTO_TIDAL_MS).catch(() => null);
-    if (tidal) return devolverStashTidal(tidal);
+    if (tidal) {
+      motivoUltimoRescate = null;
+      return devolverStashTidal(tidal);
+    }
+    motivoUltimoRescate = "tidal-sin-audio";
     anotar("tidal-sin-audio");
   }
 
   // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
   // YouTube porque no depende de un backend externo ni de credenciales.
   const bandcamp = await bandcampParalelo;
-  if (bandcamp) return devolverBandcamp(bandcamp);
+  if (bandcamp) {
+    motivoUltimoRescate = null;
+    return devolverBandcamp(bandcamp);
+  }
+  motivoUltimoRescate = "bandcamp-sin-match";
   anotar("bandcamp-sin-match");
 
   // Último recurso: el audio COMPLETO vía el backend local de yt-dlp. El enlace
@@ -2654,15 +2682,18 @@ async function resolverAudioInterno(
   // petición arrancó al entrar en la función (ver `ytParalelo`), así que acá
   // solo se espera el resultado, ya avanzado.
   if (evitar.has("youtube")) {
+    motivoUltimoRescate = "youtube-descartado";
     console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · youtube descartado`);
     return null;
   }
   const yt = await conTope(ytParalelo, TOPE_YT_FINAL_MS).catch(() => null);
   if (!yt) {
+    motivoUltimoRescate = "youtube-sin-audio";
     anotar("youtube-sin-audio");
     console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · ${Date.now() - t0}ms`);
     return null;
   }
+  motivoUltimoRescate = null;
   return devolverYouTube(yt);
 }
 
@@ -2761,28 +2792,25 @@ export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
  * Punto de entrada con caché positiva/negativa y *single-flight*: clics
  * simultáneos sobre la misma pista comparten una única resolución.
  */
-export async function resolverAudio(p: PeticionAudio): Promise<AudioResuelto | null> {
+export async function resolverAudio(p: PeticionAudio): Promise<{ audio: AudioResuelto | null; motivo: string | null }> {
   const claves = clavesDe(p);
   const evitar = new Set((Array.isArray(p.evitar) ? p.evitar : []).map((c) => String(c)));
 
-  // Un enlace cacheado del canal que el navegador acaba de fallar no sirve:
-  // se resuelve de nuevo para pedir OTRO canal.
+  // Un enlace cacheado del canal que el navegador ya intentó y no abrió: no se
+  // devuelve el enlace roto, se resuelve de nuevo para pedir otro canal.
   const cacheado = enlaceCacheado(claves);
   if (cacheado && !evitar.has(cacheado.canal)) {
-    return {
-      url: cacheado.url,
-      duracion: cacheado.duracion,
-      canal: cacheado.canal,
-      proveedor: cacheado.proveedor,
-      id: cacheado.id,
-      isrc: cacheado.isrc,
-    };
+    motivoUltimoRescate = null;
+    return { audio: cacheado, motivo: null };
   }
   const vueloKey = `${claves[0]}|${[...evitar].sort().join(",")}`;
   const enCurso = enVuelo.get(vueloKey);
   if (enCurso) return enCurso;
 
-  const tarea = resolverAudioInterno(p, claves, evitar).finally(() => {
+  const tarea = (async () => {
+    const audio = await resolverAudioInterno(p, claves, evitar);
+    return { audio, motivo: motivoUltimoRescate };
+  })().finally(() => {
     if (enVuelo.get(vueloKey) === tarea) enVuelo.delete(vueloKey);
   });
   enVuelo.set(vueloKey, tarea);

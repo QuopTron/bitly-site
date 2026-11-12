@@ -69,9 +69,11 @@ export type AudioRescatado = {
   /** Segundos. */
   duracion: number;
   /** "stash-relay" = FLAC completo; "youtube" = audio completo vía backend local. */
-  canal?: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
+  canal?: "monochrome" | "stash-relay" | "stash-tidal" | "bandcamp" | "youtube";
   proveedor?: string;
   isrc?: string | null;
+  /** Motivo del fallo cuando no hay audio (solo diagnóstico temporal). */
+  motivo?: string;
 };
 
 export type RespuestaBusqueda = {
