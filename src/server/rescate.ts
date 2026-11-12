@@ -1155,7 +1155,7 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
   const artista = p.artista.trim();
   if (!titulo) return null;
 
-  const consultas = [`${artista} ${titulo}`, `${titulo} ${artista}`, artista]
+  const consultas = [`${artista} ${titulo}`, artista]
     .map((c) => c.replace(/\s+/g, " ").trim())
     .filter((c, i, todas) => c !== "" && todas.indexOf(c) === i);
   const listas = await Promise.all(consultas.map((c) => buscarBandcamp(c)));
@@ -2242,9 +2242,9 @@ const PRESUPUESTO_SIN_PERDIDA_MS = 6_000;
  * canal debe tener su propio reloj y rendirse solo.
  */
 // Con el PO token provider externo, la primera extracción de un video tarda
-// ~20 s (mint del token + yt-dlp + relay); con 15 s el nicho que solo existe en
+// ~20 s (mint del token + yt-dlp + relay); con 25 s el nicho que solo existe en
 // YouTube se quedaba sin audio justo cuando ya empezaba a resolverse.
-const TOPE_YT_FINAL_MS = 32_000;
+const TOPE_YT_FINAL_MS = 25_000;
 
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {
@@ -2666,13 +2666,15 @@ async function resolverAudioInterno(
   }
 
   // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
-  // YouTube porque no depende de un backend externo ni de credenciales.
-  const bandcamp = await bandcampParalelo;
+  // YouTube porque no depende de un backend externo ni de credenciales. Tiene
+  // su propio tope: el reto de Fastly desde el Worker puede demorarse, y no
+  // vale la pena bloquear el rescate entero esperando la página de Bandcamp.
+  motivoUltimoRescate = "bandcamp-sin-audio";
+  const bandcamp = await conTope(bandcampParalelo, 20_000).catch(() => null);
   if (bandcamp) {
     motivoUltimoRescate = null;
     return devolverBandcamp(bandcamp);
   }
-  motivoUltimoRescate = "bandcamp-sin-match";
   anotar("bandcamp-sin-match");
 
   // Último recurso: el audio COMPLETO vía el backend local de yt-dlp. El enlace
