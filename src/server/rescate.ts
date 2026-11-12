@@ -124,7 +124,7 @@ export type AudioResuelto = {
   url: string;
   /** Segundos (se usa en la barra del reproductor). */
   duracion: number;
-  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube";
+  canal: "monochrome" | "stash-relay" | "stash-tidal" | "bandcamp" | "youtube";
   /** De dónde salió la identidad: "qobuz-web" o el catálogo del respaldo. */
   proveedor: string;
   /** Id de la pista en el catálogo que resolvió. */
@@ -136,7 +136,7 @@ export type AudioResuelto = {
 
 /* ── Caché de enlaces ────────────────────────────────────────────── */
 
-type Enlace = { url: string; duracion: number; canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
+type Enlace = { url: string; duracion: number; canal: "monochrome" | "stash-relay" | "stash-tidal" | "bandcamp" | "youtube"; proveedor: string; id: string | null; isrc: string | null; expira: number };
 
 const enlaces = new Map<string, Enlace>();
 const MAX_ENLACES = 400;
@@ -220,7 +220,7 @@ const TIMEOUT_CONFIG_MS = 5_000;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-type RelayStash = { bases: string[]; clave: string };
+type RelayStash = { bases: string[]; clave: string; tidalBase: string; tidalToken: string };
 let configCache: { valor: RelayStash; expira: number } | null = null;
 
 function bytesAHex(bytes: ArrayBuffer): string {
@@ -258,6 +258,8 @@ async function descargarConfigStash(): Promise<RelayStash | null> {
     const datos = (await res.json()) as {
       relays?: Array<{ base?: string; priority?: number }>;
       relay_key?: string;
+      tidal_relay_url?: string;
+      tidal_relay_token?: string;
     };
     const bases = (datos.relays ?? [])
       .slice()
@@ -265,8 +267,12 @@ async function descargarConfigStash(): Promise<RelayStash | null> {
       .map((r) => r.base ?? "")
       .filter((b) => b.startsWith("http"));
     const clave = typeof datos.relay_key === "string" ? datos.relay_key : "";
-    if (bases.length === 0 || clave.length === 0) return null;
-    configCache = { valor: { bases, clave }, expira: Date.now() + TTL_CONFIG_MS };
+    const tidalBase = typeof datos.tidal_relay_url === "string" ? datos.tidal_relay_url.replace(/\/+$/, "") : "";
+    const tidalToken = typeof datos.tidal_relay_token === "string" ? datos.tidal_relay_token : "";
+    // El relay de Qobuz puede estar pausado (sin `relays`) mientras el de Tidal
+    // sigue vivo: exigir ambos dejaría sin audio a la demo.
+    if (clave.length === 0 || (bases.length === 0 && (!tidalBase || !tidalToken))) return null;
+    configCache = { valor: { bases, clave, tidalBase, tidalToken }, expira: Date.now() + TTL_CONFIG_MS };
     return configCache.valor;
   } catch {
     return null;
@@ -317,6 +323,48 @@ const PRESUPUESTO_MINT_MS = 5_500;
 
 function dormir(ms: number): Promise<void> {
   return new Promise((ok) => setTimeout(ok, ms));
+}
+
+/**
+ * Espera vitalicia: se resuelve SOLO si [p] devuelve algo. Con `null` queda
+ * pendiente para siempre, así un canal que no tiene la pista no "gana" una
+ * carrera por haber contestado primero que no.
+ *
+ * Se usa para competir dos canales con `Promise.race` sin que el que falla
+ * rápido (que es lo normal) decida el resultado. Las promesas pendientes no
+ * retienen nada: sus temporizadores internos ya vencieron.
+ */
+function cuandoHaya<T>(p: Promise<T | null>): Promise<T> {
+  return new Promise<T>((listo) => {
+    void p.then((valor) => {
+      if (valor != null) listo(valor);
+    });
+  });
+}
+
+/**
+ * Carrera HEDGED sobre una lista de intentos: el primero arranca ya y los
+ * siguientes a los [escalonMs], así una base lenta no bloquea a una sana y el
+ * proveedor no recibe N peticiones a la vez en el caso normal (el primero
+ * resuelve). Devuelve el primer resultado no nulo, o null si ninguno dio nada.
+ */
+async function primeroQueResponda<T>(
+  tareas: Array<() => Promise<T | null>>,
+  escalonMs: number,
+): Promise<T | null> {
+  if (tareas.length === 0) return null;
+  const intentos = tareas.map((tarea, i) =>
+    dormir(i * escalonMs).then(async () => {
+      const valor = await tarea();
+      if (valor == null) throw new Error("sin resultado");
+      return valor;
+    }),
+  );
+  try {
+    return await Promise.any(intentos);
+  } catch {
+    return null;
+  }
 }
 
 /** Espera del reintento: la del encabezado si el relay la manda, si no la fija. */
@@ -420,6 +468,7 @@ async function mintearEn(
 async function mintaStash(trackId: string): Promise<Mint | null> {
   const limite = Date.now() + PRESUPUESTO_MINT_MS;
   let config = await traerConfigStash();
+  if (!config || config.bases.length === 0) return null;
   for (let intento = 0; intento < 2 && config; intento++) {
     const control = new AbortController();
     const corredores = config.bases.map((base, i) =>
@@ -442,6 +491,192 @@ async function mintaStash(trackId: string): Promise<Mint | null> {
     config = intento === 0 ? await traerConfigStash(true) : null;
   }
   return null;
+}
+
+/* ── Canal stash-tidal (Tidal relay del proyecto Stash) ──────────── */
+
+/**
+ * El relay de Tidal de Stash entrega dos caras:
+ *   · `/search?q=` devuelve catálogo (id `td:…`, ISRC, duración) sin firma.
+ *   · `/stream/td:<id>?aac=only` devuelve el AAC 320 PROGRESIVO (un .mp4 de
+ *     Tidal) que un `<audio>` sí reproduce. El FLAC solo sale como DASH, que
+ *     el navegador no puede abrir sin MSE; por eso este canal es AAC.
+ *
+ * El enlace es de un CDN de Tidal con token propio (`token=<unix>~…`), no del
+ * relay: el navegador lo pide directo y no pasa por el Worker. Eso evita gastar
+ * ancho de Cloudflare y mantiene el Range del CDN.
+ */
+const TIMEOUT_TIDAL_MS = 6_000;
+const PRESUPUESTO_TIDAL_MS = 8_000;
+
+function ttlDeTokenTidal(enlace: string): number {
+  const m = /[?&]token=(\d+)~/.exec(enlace);
+  if (!m) return 10 * 60 * 1000;
+  const vence = Number(m[1]) * 1000;
+  if (!Number.isFinite(vence)) return 10 * 60 * 1000;
+  const ttl = vence - Date.now() - MARGEN_ENLACE_MS;
+  if (ttl <= 0) return 0;
+  return Math.min(ttl, TTL_ENLACE_MAX_MS);
+}
+
+/** Mismo contrato que auth.js del relay: HMAC(key, "<install>:td:<id>:<ts>"). */
+async function firmarStashTidal(claveTexto: string, trackId: string, ts: number): Promise<string> {
+  const clave = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(claveTexto),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mensaje = new TextEncoder().encode(`${INSTALL}:td:${trackId}:${ts}`);
+  return bytesAHex(await crypto.subtle.sign("HMAC", clave, mensaje));
+}
+
+async function mintaStashTidal(trackId: string, limite: number): Promise<Mint | null> {
+  const config = await traerConfigStash();
+  if (!config || !config.tidalBase || !config.tidalToken) return null;
+  const id = trackId.replace(/^td:/, "");
+  if (!/^\d+$/.test(id)) return null;
+  const url = `${config.tidalBase}/stream/td:${id}?aac=only`;
+
+  for (let intento = 0; intento <= REINTENTOS_BUSY; intento++) {
+    if (Date.now() >= limite) return null;
+    const ts = Math.floor(Date.now() / 1000);
+    const firma = await firmarStashTidal(config.clave, id, ts);
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), Math.min(TIMEOUT_TIDAL_MS, Math.max(1000, limite - Date.now())));
+    try {
+      const res = await fetch(url, {
+        signal: control.signal,
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "application/json",
+          "X-Access-Token": config.tidalToken,
+          "X-Stash-Version": "1",
+          "X-Stash-Install": INSTALL,
+          "X-Stash-Ts": String(ts),
+          "X-Stash-Auth": firma,
+          "X-Stash-Purpose": "stream",
+        },
+      });
+      if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
+        const espera = esperaDeBusy(res, intento);
+        if (intento < REINTENTOS_BUSY && Date.now() + espera < limite) {
+          await dormir(espera);
+          continue;
+        }
+        return null;
+      }
+      if (!res.ok) return null;
+      const cuerpo = (await res.json()) as {
+        url?: string;
+        codec?: string;
+        sampleRate?: number;
+      };
+      const audio = String(cuerpo.url ?? "");
+      // `?aac=only` puede degradar a FLAC/DASH en algunas pistas: el `<audio>`
+      // no lo reproduce, así que se descarta en vez de devolver un enlace mudo.
+      if (!audio.startsWith("https://") || String(cuerpo.codec ?? "") !== "aac") return null;
+      const ttl = ttlDeTokenTidal(audio);
+      if (ttl <= 0) return null;
+      return {
+        url: audio,
+        bitDepth: 0,
+        sampleRate: Number(cuerpo.sampleRate ?? 44100) || 44100,
+        ttl,
+      };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(reloj);
+    }
+  }
+  return null;
+}
+
+type PistaTidal = TrackResult;
+
+async function buscarStashTidal(p: PeticionAudio): Promise<{ pista: PistaTidal; isrc: string } | null> {
+  const config = await traerConfigStash();
+  if (!config || !config.tidalBase || !config.tidalToken) return null;
+  const consulta = `${p.titulo} ${p.artista}`.trim();
+  if (!consulta) return null;
+
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_TIDAL_MS);
+  try {
+    const res = await fetch(`${config.tidalBase}/search?q=${encodeURIComponent(consulta)}`, {
+      signal: control.signal,
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "application/json",
+        "X-Access-Token": config.tidalToken,
+      },
+    });
+    if (!res.ok) return null;
+    const cuerpo = (await res.json()) as {
+      tracks?: Array<{
+        id?: string;
+        title?: string;
+        artist?: string;
+        album?: string;
+        duration?: number;
+        artwork?: string;
+        isrc?: string;
+      }>;
+    };
+    const pistas: PistaTidal[] = (cuerpo.tracks ?? [])
+      .map((t) => ({
+        id: String(t.id ?? ""),
+        title: String(t.title ?? ""),
+        artist: String(t.artist ?? ""),
+        album: String(t.album ?? ""),
+        coverUrl: String(t.artwork ?? ""),
+        durationMs: Number(t.duration ?? 0) * 1000,
+        isrc: normalizarISRC(t.isrc ?? ""),
+        provider: "tidal",
+      }))
+      .filter((t) => /^td:\d+$/.test(t.id) && t.title !== "");
+    if (pistas.length === 0) return null;
+
+    // El ISRC es exacto y manda; el resto usa el mismo matching estricto del
+    // backend (título + artista + álbum + duración) para no servir un cover.
+    const isrcPedido = normalizarISRC(p.isrc);
+    const porIsrc = isrcPedido
+      ? pistas.find((t) => t.isrc !== "" && t.isrc === isrcPedido) ?? null
+      : null;
+    const pista = porIsrc ?? bestOriginalAlbumDuracion(p.titulo, p.artista, p.album ?? "", p.duracionMs ?? 0, pistas);
+    if (!pista) return null;
+    return { pista, isrc: pista.isrc || isrcPedido };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+async function rescatarStashTidal(
+  p: PeticionAudio,
+): Promise<{ url: string; duracion: number; id: string; isrc: string; sampleRate: number; ttl: number } | null> {
+  const limite = Date.now() + PRESUPUESTO_TIDAL_MS;
+  const match = await buscarStashTidal(p);
+  if (!match) return null;
+  const mint = await mintaStashTidal(match.pista.id, limite);
+  if (!mint) return null;
+  const duracion =
+    match.pista.durationMs > 0
+      ? Math.round(match.pista.durationMs / 1000)
+      : p.duracionMs
+        ? Math.round(p.duracionMs / 1000)
+        : 0;
+  return {
+    url: mint.url,
+    duracion,
+    id: match.pista.id,
+    isrc: match.isrc,
+    sampleRate: mint.sampleRate,
+    ttl: mint.ttl,
+  };
 }
 
 /* ── Canal monochrome (provider/flacrescue/monochrome.go) ────────── */
@@ -729,22 +964,51 @@ function desescaparHtml(texto: string): string {
     .replace(/&amp;/g, "&");
 }
 
+let cacheCookiesBandcamp: { valor: string; expira: number } | null = null;
+
+/**
+ * POST al buscador. Fastly contesta con un reto HTML de 3 KB (200) y una cookie
+ * `_fs_ch_st_*`; repetir el POST con esa cookie devuelve el JSON. Sin el
+ * handshake, las tres consultas de `resolverBandcamp` caían al `catch` y la
+ * pista de nicho quedaba como "sin coincidencia".
+ */
 async function buscarBandcamp(consulta: string): Promise<ResultadoBandcamp[]> {
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  const cuerpo = JSON.stringify({ search_text: consulta, search_filter: "t", full_page: false });
+  const base = {
+    method: "POST",
+    signal: control.signal,
+    headers: {
+      "User-Agent": USER_AGENT,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: cuerpo,
+  } as const;
   try {
-    const res = await fetch(BANDCAMP_BUSQUEDA, {
-      method: "POST",
-      signal: control.signal,
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ search_text: consulta, search_filter: "t", full_page: false }),
+    const guardadas =
+      cacheCookiesBandcamp && cacheCookiesBandcamp.expira > Date.now()
+        ? cacheCookiesBandcamp.valor
+        : "";
+    let res = await fetch(BANDCAMP_BUSQUEDA, {
+      ...base,
+      headers: guardadas ? { ...base.headers, Cookie: guardadas } : base.headers,
     });
     if (!res.ok) return [];
-    const datos = (await res.json()) as { auto?: { results?: ResultadoBandcamp[] } };
+    let texto = await res.text();
+    if (!texto.trimStart().startsWith("{")) {
+      const cookies = cookiesDeRespuesta(res);
+      if (!cookies) return [];
+      cacheCookiesBandcamp = { valor: cookies, expira: Date.now() + 8_000 };
+      res = await fetch(BANDCAMP_BUSQUEDA, {
+        ...base,
+        headers: { ...base.headers, Cookie: cookies },
+      });
+      if (!res.ok) return [];
+      texto = await res.text();
+    }
+    const datos = JSON.parse(texto) as { auto?: { results?: ResultadoBandcamp[] } };
     return datos.auto?.results ?? [];
   } catch {
     return [];
@@ -784,27 +1048,64 @@ async function audioPorInstanciaBandcamp(
   return null;
 }
 
-/** Lectura directa de la página (funciona desde una IP residencial). */
-async function leerPaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
-  const control = new AbortController();
-  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+/**
+ * Cookies del primer GET. Bandcamp/Fastly contesta el HTML con un reto de 3 KB
+ * y `Set-Cookie: BACKENDID3=...`; repetir la petición con esas cookies devuelve
+ * la página completa. Sin este segundo paso `data-tralbum` nunca aparece y la
+ * pista de nicho quedaba sin audio.
+ */
+function cookiesDeRespuesta(res: Response): string {
+  const cabeceras = res.headers as Headers & { getSetCookie?: () => string[] };
+  const crudas = cabeceras.getSetCookie?.() ?? [];
+  if (crudas.length > 0) {
+    return crudas.map((c) => c.split(";")[0]?.trim()).filter(Boolean).join("; ");
+  }
+  // Fallback para runtimes sin getSetCookie(): separa por comas que inician una
+  // cookie nueva, no las de "Expires=Wed, 21 Oct...".
+  const unica = res.headers.get("set-cookie") ?? "";
+  return unica
+    .split(/,(?=\s*[A-Za-z0-9_\-]+=)/)
+    .map((c) => c.split(";")[0]?.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function audioDeTralbum(html: string): { url: string; duracion: number } | null {
+  const atributo = /data-tralbum="([^"]+)"/.exec(html)?.[1];
+  if (!atributo) return null;
   try {
-    const res = await fetch(url, {
-      signal: control.signal,
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const atributo = /data-tralbum="([^"]+)"/.exec(html)?.[1];
-    if (!atributo) return null;
     const datos = JSON.parse(desescaparHtml(atributo)) as {
       trackinfo?: Array<{ file?: Record<string, string>; duration?: number }>;
     };
     const pista = datos.trackinfo?.[0];
     const audio = pista?.file?.["mp3-128"] ?? pista?.file?.["mp3-v0"];
     if (!audio) return null;
-    const duracion = Math.max(0, Math.round(pista?.duration ?? 0));
-    return { url: desescaparHtml(audio), duracion };
+    return { url: desescaparHtml(audio), duracion: Math.max(0, Math.round(pista?.duration ?? 0)) };
+  } catch {
+    return null;
+  }
+}
+
+/** Lectura directa de la página, con el handshake de cookies de Fastly. */
+async function leerPaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  try {
+    const cabeceras = { "User-Agent": USER_AGENT, Accept: "text/html" };
+    const res = await fetch(url, { signal: control.signal, headers: cabeceras });
+    if (!res.ok) return null;
+
+    const directo = audioDeTralbum(await res.text());
+    if (directo) return directo;
+
+    const cookies = cookiesDeRespuesta(res);
+    if (!cookies) return null;
+    const res2 = await fetch(url, {
+      signal: control.signal,
+      headers: { ...cabeceras, Cookie: cookies },
+    });
+    if (!res2.ok) return null;
+    return audioDeTralbum(await res2.text());
   } catch {
     return null;
   } finally {
@@ -1902,6 +2203,28 @@ async function idPorCatalogoQobuz(
  */
 const TOPE_RUTA_MS = 3_500;
 /**
+ * Cuánto se espera al catálogo de monochrome (y al respaldo de ISRC por Deezer)
+ * ANTES de arrancar el resto de los canales.
+ *
+ * Era `TOPE_RUTA_MS * 2` (7 s) y bloqueaba a TODOS los canales siguientes: el
+ * clic pagaba 7 s antes de que el relay intentara nada, aunque el FLAC estuviera
+ * servido al toque. 2,5 s alcanza para un catálogo que responde en ~1 s; si no
+ * contestó, el relay es otra infraestructura y puede tener la misma pista.
+ */
+const TOPE_MONO_INICIAL_MS = 2_500;
+/**
+ * Ventaja de monochrome en la carrera contra el relay: su catálogo no gasta
+ * cupo de terceros, así que gana los empates y, si contesta dentro de esta
+ * ventana, el relay ni arranca.
+ */
+const CORTESIA_MONO_MS = 400;
+/**
+ * Reloj del tramo sin pérdida (monochrome + relay). Pasado este tiempo sin
+ * audio se sigue con Bandcamp y YouTube en vez de quedarse esperando: con 6 s
+ * alcanza para el presupuesto del mint (5,5 s) y su sonda `etsp`.
+ */
+const PRESUPUESTO_SIN_PERDIDA_MS = 6_000;
+/**
  * Techo del ÚLTIMO intento (YouTube) cuando ya fallaron los canales sin
  * pérdida. Sin esto, un yattee caído o despertándose dejaba al visitante
  * esperando hasta 60 s por una pista que ningún otro canal va a rescatar: cada
@@ -2167,11 +2490,11 @@ async function resolverAudioInterno(
     return resolverBandcamp(pedido);
   })();
 
-  // Con techo propio: si el respaldo de ISRC (Deezer) o el catálogo de monochrome
-  // se cuelgan, el rescate sigue igual con el relay y Bandcamp. Antes esta
-  // espera era libre y podía comerse el presupuesto entero antes de preguntarle
-  // a ningún otro canal.
-  const monoInicial = await conTope(monoParalelo, TOPE_RUTA_MS * 2).catch((): MonoInicial => ({
+  // Con techo propio y CORTO: si el respaldo de ISRC (Deezer) o el catálogo de
+  // monochrome se cuelgan, el rescate sigue igual con el relay y Bandcamp. Antes
+  // esta espera era de 7 s y estaba DELANTE de todo: ningún otro canal podía
+  // intentarlo hasta que venciera.
+  const monoInicial = await conTope(monoParalelo, TOPE_MONO_INICIAL_MS).catch((): MonoInicial => ({
     isrc: null,
     pista: null,
   }));
@@ -2207,26 +2530,14 @@ async function resolverAudioInterno(
   }
   anotar(monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match");
 
-  let mono = null as Awaited<ReturnType<typeof resolverMonochrome>>;
-  const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
-  for (const c of evitar.has("monochrome") ? [] : candidatos) {
-    const isrc = normalizarISRC(c.isrc ?? "");
-    if (!isrc || isrcsMonochrome.has(isrc)) continue;
-    isrcsMonochrome.add(isrc);
-    mono = await resolverMonochrome(isrc, 2_500);
-    if (mono) break;
-  }
-  if (mono && (await monochromeDisponible(mono.url))) return devolverMonochrome(mono);
-  anotar(mono ? "mono-isrc-cands-sin-audio" : "mono-isrc-cands-sin-match");
-
-  let mintsFallidos = 0;
-  for (const c of evitar.has("stash-relay") ? [] : candidatos) {
-    const mint = await mintaStash(c.id);
-    if (!mint) {
-      mintsFallidos++;
-      continue;
-    }
-    const duracion = c.duracionMs > 0 ? Math.round(c.duracionMs / 1000) : p.duracionMs ? Math.round(p.duracionMs / 1000) : 0;
+  // Devolver el FLAC del relay con los datos del candidato que lo resolvió.
+  const devolverStash = (mint: Mint, c: Cand): AudioResuelto => {
+    const duracion =
+      c.duracionMs > 0
+        ? Math.round(c.duracionMs / 1000)
+        : p.duracionMs
+          ? Math.round(p.duracionMs / 1000)
+          : 0;
     const enlace: Enlace = {
       url: mint.url,
       duracion,
@@ -2247,9 +2558,88 @@ async function resolverAudioInterno(
       bitDepth: mint.bitDepth,
       sampleRate: mint.sampleRate,
     };
-  }
+  };
 
-  anotar(`stash-fallos=${mintsFallidos}/${candidatos.length}`);
+  /** AAC 320 progresivo del relay de Tidal: suena en `<audio>`, no es FLAC. */
+  const devolverStashTidal = (t: NonNullable<Awaited<ReturnType<typeof rescatarStashTidal>>>): AudioResuelto => {
+    const enlace: Enlace = {
+      url: t.url,
+      duracion: t.duracion,
+      canal: "stash-tidal",
+      proveedor: "tidal",
+      id: t.id,
+      isrc: t.isrc,
+      expira: Date.now() + Math.max(t.ttl, TTL_ENLACE_MIN_MS),
+    };
+    guardarEnlace(claves, enlace);
+    return {
+      url: enlace.url,
+      duracion: enlace.duracion,
+      canal: "stash-tidal",
+      proveedor: enlace.proveedor,
+      id: enlace.id,
+      isrc: enlace.isrc,
+      sampleRate: t.sampleRate,
+    };
+  };
+
+  // Los ISRC que acreditaron Qobuz/Deezer, sin repetir, contra el catálogo de
+  // monochrome. En PARALELO (hedged): antes era un `for` con `await` dentro, así
+  // que cada ISRC sin match costaba 2,5 s antes de probar el siguiente y el clic
+  // se iba a los 20-30 s con unos pocos candidatos.
+  const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
+  const tareasMonochrome: Array<() => Promise<Awaited<ReturnType<typeof resolverMonochrome>>>> = [];
+  for (const c of evitar.has("monochrome") ? [] : candidatos) {
+    const isrc = normalizarISRC(c.isrc ?? "");
+    if (!isrc || isrcsMonochrome.has(isrc)) continue;
+    isrcsMonochrome.add(isrc);
+    tareasMonochrome.push(() => resolverMonochrome(isrc, 2_500));
+  }
+  // La sonda de "¿el host sirve el archivo AHORA?" entra en la misma cadena:
+  // el ganador de la carrera tiene que estar ya verificado, no descubrirse
+  // muerto al devolverlo.
+  const monoCarrera = cuandoHaya(
+    primeroQueResponda(tareasMonochrome, 250).then(async (m) =>
+      m && (await monochromeDisponible(m.url)) ? m : null,
+    ),
+  );
+
+  const tareasMint =
+    evitar.has("stash-relay") || candidatos.length === 0
+      ? []
+      : candidatos.map((c) => () => mintaStash(c.id).then((mint) => (mint ? { mint, c } : null)));
+  // El relay arranca CORTESIA_MONO_MS después: si monochrome ya resolvió, no se
+  // gasta cupo ajeno. Si no, corre igual y gana el que entregue audio primero.
+  const mintCarrera = cuandoHaya(
+    dormir(CORTESIA_MONO_MS).then(() => primeroQueResponda(tareasMint, 300)),
+  );
+
+  type Ganador =
+    | { canal: "monochrome"; mono: NonNullable<Awaited<ReturnType<typeof resolverMonochrome>>> }
+    | { canal: "stash-relay"; mint: Mint; c: Cand };
+  // El reloj del tramo sin pérdida: sin él, dos canales que no tienen la pista
+  // dejaban el `race` pendiente para siempre (nunca se llegaría a Bandcamp ni a
+  // YouTube, que es justo el fallback que rescata el nicho).
+  const ganador = await Promise.race([
+    monoCarrera.then((m): Ganador => ({ canal: "monochrome", mono: m })),
+    mintCarrera.then((r): Ganador => ({ canal: "stash-relay", mint: r.mint, c: r.c })),
+    dormir(PRESUPUESTO_SIN_PERDIDA_MS).then((): null => null),
+  ]);
+  if (ganador) {
+    anotar(`gana=${ganador.canal}`);
+    if (ganador.canal === "monochrome") return devolverMonochrome(ganador.mono);
+    return devolverStash(ganador.mint, ganador.c);
+  }
+  anotar(`mono/stash sin audio (${candidatos.length} cands)`);
+
+  // Tidal entrega AAC 320 progresivo (su FLAC es DASH y el navegador no lo
+  // abre). Va después del tramo sin pérdida -no compite con monochrome/Qobuz-
+  // y antes de Bandcamp/YouTube: mejor codec y catálogo de nicho.
+  if (!evitar.has("stash-tidal") && titulo) {
+    const tidal = await conTope(rescatarStashTidal(pedido), PRESUPUESTO_TIDAL_MS).catch(() => null);
+    if (tidal) return devolverStashTidal(tidal);
+    anotar("tidal-sin-audio");
+  }
 
   // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
   // YouTube porque no depende de un backend externo ni de credenciales.
@@ -2320,7 +2710,15 @@ export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
     medir("stash-relay", async () => {
       const cfg = await traerConfigStash(true);
       if (!cfg) throw new Error("no se pudo leer lossless.json");
+      if (cfg.bases.length === 0) throw new Error("relay de Qobuz pausado (sin bases)");
       return `${cfg.bases.length} relay(s) · ${cfg.bases.map((b) => new URL(b).host).join(", ")}`;
+    }),
+    medir("stash-tidal", async () => {
+      const match = await buscarStashTidal(pedido);
+      if (!match) throw new Error("el catálogo de Tidal no devolvió la pista");
+      const mint = await mintaStashTidal(match.pista.id, Date.now() + PRESUPUESTO_TIDAL_MS);
+      if (!mint) throw new Error("el relay no entregó AAC progresivo");
+      return `${match.pista.title} · ${new URL(mint.url).host}`;
     }),
     medir("bandcamp", async () => {
       const bc = await resolverBandcamp(pedido);
