@@ -2246,6 +2246,10 @@ const PRESUPUESTO_SIN_PERDIDA_MS = 6_000;
 // YouTube se quedaba sin audio justo cuando ya empezaba a resolverse.
 const TOPE_YT_FINAL_MS = 25_000;
 
+/** Techo del rescate entero: aunque un camino externo se cuelgue, la demo
+ * devuelve rápido (con su motivo) en vez de dejar al visitante 90 s a la espera. */
+const TOPE_RESCATE_MS = 50_000;
+
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {
     const reloj = setTimeout(() => mal(new Error("la ruta de identidad tardó demasiado")), ms);
@@ -2810,8 +2814,8 @@ export async function resolverAudio(p: PeticionAudio): Promise<{ audio: AudioRes
   if (enCurso) return enCurso;
 
   const tarea = (async () => {
-    const audio = await resolverAudioInterno(p, claves, evitar);
-    return { audio, motivo: motivoUltimoRescate };
+    const resuelto = await conTope(resolverAudioInterno(p, claves, evitar), TOPE_RESCATE_MS).catch(() => null);
+    return { audio: resuelto, motivo: resuelto ? null : (motivoUltimoRescate ?? "rescate-tiempo-agotado") };
   })().finally(() => {
     if (enVuelo.get(vueloKey) === tarea) enVuelo.delete(vueloKey);
   });
