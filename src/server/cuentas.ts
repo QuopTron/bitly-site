@@ -37,6 +37,7 @@ import {
 } from "@/server/correo-cuenta";
 import { registrarEmitidos, soltarEmitido, soltarEmitidosDeCuenta } from "@/server/codigos-emitidos";
 import { conCerrojo } from "@/server/cerrojo";
+import { revendedorActivoPorSlug } from "@/server/revendedores-store";
 
 const ARCHIVO = "data/cuentas.json";
 const ARCHIVO_PEDIDOS = "data/pedidos.json";
@@ -73,6 +74,13 @@ export type CuentaPublica = {
   correo: string;
   creado: string;
   actualizado: string;
+  /**
+   * Foto de perfil como `data:image/…;base64,…` ('' = sin foto).
+   *
+   * Viaja en la cuenta, no en un archivo aparte: una foto achicada a 320 px
+   * entra de sobra en `bitly-data` y la app la pinta sin pedir otra cosa.
+   */
+  foto?: string;
 };
 
 export type PedidoDeCuenta = {
@@ -122,6 +130,13 @@ export type CuentaGuardada = CuentaPublica & {
   /** Quién la invitó (id de cuenta) y con qué pedido. */
   invitadaPor?: string | null;
   pedidoOrigen?: string | null;
+  /**
+   * Revendedor por cuyo enlace llegó esta cuenta.
+   *
+   * Es la cadena que usa el baneo en cascada: si el revendedor abusa, se dan de
+   * baja todas las cuentas que compraron o se registraron con su `?ref=`.
+   */
+  revendedorId?: string | null;
   /** Confirmación pendiente (alta, cambio de clave o de usuario). */
   pendiente?: Pendiente;
   /**
@@ -190,6 +205,7 @@ export type CuentaAdmin = {
   invitadaPor: string | null;
   pedidoPremium: string | null;
   codigoLiberado: string | null;
+  revendedorId: string | null;
 };
 
 export type ResumenCuentas = {
@@ -464,6 +480,7 @@ function publica(c: CuentaGuardada): CuentaPublica {
     correo: c.correo,
     creado: c.creado,
     actualizado: c.actualizado,
+    foto: String(c.foto ?? ""),
   };
 }
 
@@ -557,7 +574,9 @@ export async function cuentaDeToken(token: string | null | undefined): Promise<C
   const id = await idDeToken(limpio);
   if (!id) return null;
   const cuenta = (await leerCuentas()).find((c) => c.id === id);
-  if (!cuenta || cuenta.eliminada) return null;
+  // Una cuenta baneada deja de tener sesión en el acto: sus tokens viejos ya
+  // no sirven, no hace falta esperar a que venzan.
+  if (!cuenta || cuenta.eliminada || cuenta.baneada) return null;
   return cuenta;
 }
 
@@ -699,6 +718,35 @@ export async function banearCuenta(id: string, motivo: string): Promise<boolean>
   }
 }
 
+/**
+ * Marca a qué revendedor pertenece una cuenta ya existente.
+ *
+ * Se usa cuando el revendedor reparte un código a alguien que ya tenía cuenta:
+ * así el baneo en cascada también alcanza a esa persona. No pisa una atribución
+ * anterior (una cuenta pertenece a un solo revendedor).
+ */
+export async function atribuirRevendedorACuenta(
+  cuentaId: string,
+  revendedorId: string | null,
+): Promise<boolean> {
+  if (!cuentaId || !revendedorId) return false;
+  try {
+    const cuentas = await leerCuentas();
+    const indice = cuentas.findIndex((c) => c.id === cuentaId);
+    if (indice < 0) return false;
+    if (cuentas[indice].revendedorId) return true;
+    const siguiente = cuentas.slice();
+    siguiente[indice] = {
+      ...cuentas[indice],
+      revendedorId,
+      actualizado: new Date().toISOString(),
+    };
+    return guardar(siguiente, `cuenta ${cuentaId}: atribuida al revendedor`);
+  } catch {
+    return false;
+  }
+}
+
 /* ── Premium de la cuenta ─────────────────────────────────────────────── */
 
 /**
@@ -824,10 +872,12 @@ async function enviarCodigo(
 /* ── Registro, confirmación e inicio de sesión ────────────────────────── */
 
 export const registrarCuenta = createServerFn({ method: "POST" })
-  .validator((d: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown }) => d)
+  .validator(
+    (d: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown; ref?: unknown }) => d,
+  )
   .handler(async ({ data }): Promise<ResultadoRegistro> => registrarCuentaImpl(data));
 
-export async function registrarCuentaImpl(data: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown; origen?: unknown }): Promise<ResultadoRegistro> {
+export async function registrarCuentaImpl(data: { nombre?: unknown; usuario?: unknown; correo?: unknown; clave?: unknown; origen?: unknown; ref?: unknown }): Promise<ResultadoRegistro> {
     const correo = limpiar(data?.correo, 120).toLowerCase();
     const clave = String(data?.clave ?? "");
     const pedidoUsuario = limpiar(data?.usuario, 20).toLowerCase();
@@ -841,6 +891,7 @@ export async function registrarCuentaImpl(data: { nombre?: unknown; usuario?: un
     // esta entra en fila con las demás que tocan la misma cuenta.
     return conCerrojo(`alta:${correo}`, async () => {
       try {
+        const refRevendedor = await revendedorActivoPorSlug(data?.ref);
         const cuentas = await leerCuentas();
         // Un correo dado de baja no se puede volver a registrar: si no, el baneo
         // se esquiva creando la cuenta de nuevo con el mismo correo.
@@ -879,6 +930,7 @@ export async function registrarCuentaImpl(data: { nombre?: unknown; usuario?: un
           origen: origenCuenta,
           clavePorDefecto: false,
           codigo: null,
+          revendedorId: refRevendedor?.id ?? null,
           pendiente: confirmado
             ? undefined
             : {
@@ -1150,6 +1202,59 @@ export async function miCuentaImpl(data: { token?: unknown }): Promise<Resultado
 }
 
 
+/* ── Foto de perfil ────────────────────────────────────────────────────── */
+
+/** Tope del `data:` ya codificado; el mismo número que corta la app. */
+const MAX_FOTO = 200_000;
+
+export type ResultadoFoto =
+  | { ok: true; cuenta: CuentaPublica }
+  | { ok: false; motivo: "sesion" | "datos" | "servidor" };
+
+/**
+ * Cambia la foto de perfil de la cuenta dueña del token (`''` la quita).
+ *
+ * La imagen YA viene achicada y codificada por la app (320 px de ancho, PNG).
+ * El sitio no abre archivos ni multipart: valida el prefijo `data:image/`, el
+ * tope de tamaño y la guarda en la cuenta, en el mismo JSON versionado de
+ * `bitly-data` que el resto de los datos. Así la foto de la app y la de «Mi
+ * cuenta» son la misma, sin un almacén de binarios aparte.
+ */
+export async function cambiarFotoImpl(data: {
+  token?: unknown;
+  foto?: unknown;
+}): Promise<ResultadoFoto> {
+  const cuenta = await cuentaDeToken(limpiar(data?.token, 500));
+  if (!cuenta) return { ok: false, motivo: "sesion" };
+
+  const foto = String(data?.foto ?? "").trim();
+  const esImagen =
+    foto.startsWith("data:image/") && foto.includes(";base64,") && foto.length <= MAX_FOTO;
+  if (foto && !esImagen) return { ok: false, motivo: "datos" };
+
+  try {
+    const cuentas = await leerCuentas();
+    const indice = cuentas.findIndex((c) => c.id === cuenta.id);
+    if (indice < 0) return { ok: false, motivo: "sesion" };
+    const actualizada: CuentaGuardada = {
+      ...cuentas[indice],
+      foto,
+      actualizado: new Date().toISOString(),
+    };
+    const siguiente = cuentas.slice();
+    siguiente[indice] = actualizada;
+    const guardada = await guardar(siguiente, `cuenta ${cuenta.id}: foto de perfil`);
+    if (!guardada) return { ok: false, motivo: "servidor" };
+    return { ok: true, cuenta: publica(actualizada) };
+  } catch {
+    return { ok: false, motivo: "servidor" };
+  }
+}
+
+export const cambiarFoto = createServerFn({ method: "POST" })
+  .validator((d: { token?: unknown; foto?: unknown }) => d)
+  .handler(async ({ data }): Promise<ResultadoFoto> => cambiarFotoImpl(data));
+
 /* ── Cambios de contraseña y de usuario (con código al correo) ────────── */
 
 export type ResultadoSolicitud =
@@ -1407,6 +1512,8 @@ export async function crearCuentaInvitada(datos: {
   folio: string;
   invitadaPor: string | null;
   usuarioSugerido?: string;
+  /** Revendedor que la invitó, para el baneo en cascada. */
+  revendedorId?: string | null;
 }): Promise<ResultadoInvitada> {
   const correo = limpiar(datos.correo, 120).toLowerCase();
   if (!correoValido(correo)) return { ok: false, motivo: "datos" };
@@ -1447,6 +1554,7 @@ export async function crearCuentaInvitada(datos: {
       premiumPedido: datos.folio,
       invitadaPor: datos.invitadaPor,
       pedidoOrigen: datos.folio,
+      revendedorId: datos.revendedorId ?? null,
     };
 
     const ok = await guardar([cuenta, ...cuentas], `cuenta ${id}: invitada`);
@@ -1493,6 +1601,7 @@ export const adminCuentas = createServerFn({ method: "POST" })
             invitadaPor: c.invitadaPor ?? null,
             pedidoPremium: c.premiumPedido ?? null,
             codigoLiberado: c.codigoLiberado ?? null,
+            revendedorId: c.revendedorId ?? null,
           };
         })
         .sort((a, b) => (a.creado < b.creado ? 1 : -1));

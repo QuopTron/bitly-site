@@ -34,6 +34,11 @@ import type { Item } from "@/server/extensions";
 const VACIAS = new Set([
   "los", "las", "les", "del", "de", "desde", "para", "por", "que", "con", "una",
   "uno", "unos", "unas", "the", "and", "for", "with", "from", "vol", "feat",
+  // Palabras de contexto que no identifican una grabación. Sin esto, buscar
+  // «Meet Los Thuthanaka Pitchfork» daba por buena «Meet The Flinstones» (solo
+  // coincidía «meet») y YouTube nunca se consultaba.
+  "meet", "album", "review", "interview", "concert", "show", "full", "official",
+  "video", "audio", "music", "song", "songs", "mix",
 ]);
 
 /** ¿Algún resultado contiene una palabra significativa de la consulta? */

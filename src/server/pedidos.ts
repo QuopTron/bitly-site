@@ -36,12 +36,14 @@ import {
   asignarPremiumACuenta,
   banearCuenta,
   cuentaDeToken,
+  cuentaPorCorreo,
   soltarPremiumDePedido,
 } from "@/server/cuentas";
 import { leerRegistroCodigos } from "@/lib/premium-check";
 import { getFaseActual, PRECIO_NORMAL } from "@/lib/pricing";
 import { MAX_CODIGOS, emitirCodigos, firmaConfigurada } from "@/server/codigos";
 import { avisoNuevoPedido, correoDePrueba, cuerpoCorreo } from "@/server/correo-compra";
+import { revendedorActivoPorSlug } from "@/server/revendedores-store";
 
 const ARCHIVO = "data/pedidos.json";
 const CARPETA = "data/comprobantes";
@@ -90,6 +92,8 @@ type PedidoGuardado = {
   nota: string;
   /** Cuenta del sitio que hizo el pedido (null en compras de invitado). */
   cuentaId: string | null;
+  /** Revendedor cuyo enlace de referido originó la compra, si hubo. */
+  revendedorId?: string | null;
   creado: string;
   actualizado: string;
 };
@@ -129,7 +133,13 @@ type ResultadoRecuperar =
 type ResultadoAdmin =
   | {
       ok: true;
-      pedidos: Array<PedidoPublico & { comprobante: string; tipoComprobante: string }>;
+      pedidos: Array<
+        PedidoPublico & {
+          comprobante: string;
+          tipoComprobante: string;
+          revendedorId: string | null;
+        }
+      >;
     }
   | { ok: false; motivo: "admin" | "servidor" };
 
@@ -372,6 +382,7 @@ export const crearPedido = createServerFn({ method: "POST" })
       web?: unknown;
       sesionCuenta?: unknown;
       cantidad?: unknown;
+      ref?: unknown;
     }) => d,
   )
   .handler(async ({ data }): Promise<ResultadoCrear> => {
@@ -383,6 +394,7 @@ export const crearPedido = createServerFn({ method: "POST" })
     const celularCrudo = limpiar(data?.celular, 30);
     const comprobante = String(data?.comprobante ?? "").replace(/\s+/g, "");
     const cuenta = await cuentaDeToken(limpiar(data?.sesionCuenta, 500));
+    const refRevendedor = await revendedorActivoPorSlug(data?.ref);
     // `Number(null)` es 0 y `Number(undefined)` es NaN: los dos caen en 1, que es
     // el comportamiento de siempre para quien no manda cantidad.
     const cantidadCruda = Math.trunc(Number(data?.cantidad));
@@ -390,7 +402,12 @@ export const crearPedido = createServerFn({ method: "POST" })
       ? Math.min(cantidadCruda, MAX_CODIGOS)
       : 1;
 
-    if (cuenta?.baneada) return { ok: false, motivo: "baneado" };
+    // El baneo también cubre la compra de invitado con el mismo correo: si no,
+    // una cuenta dada de baja vuelve a entrar comprando sin iniciar sesión.
+    const cuentaCorreo = await cuentaPorCorreo(correo);
+    if (cuenta?.baneada || cuentaCorreo?.baneada) {
+      return { ok: false, motivo: "baneado" };
+    }
     if (!correoValido(correo)) return { ok: false, motivo: "datos" };
     if (!celularValido(celularCrudo)) return { ok: false, motivo: "datos" };
     const tipo = archivoValido(comprobante);
@@ -439,6 +456,7 @@ export const crearPedido = createServerFn({ method: "POST" })
         ventanaFin: new Date(ahoraMs + VENTANA_ANULACION_MS).toISOString(),
         nota: "",
         cuentaId: cuenta?.id ?? null,
+        revendedorId: refRevendedor?.id ?? null,
         creado: ahora,
         actualizado: ahora,
       };
@@ -621,6 +639,7 @@ export const adminPedidos = createServerFn({ method: "POST" })
           ...publico(p),
           comprobante: p.comprobante,
           tipoComprobante: p.tipoComprobante,
+          revendedorId: p.revendedorId ?? null,
         })),
       };
     } catch {

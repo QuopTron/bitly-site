@@ -11,10 +11,12 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as RevendedorRouteImport } from './routes/revendedor'
 import { Route as ApiCuentaRouteImport } from './routes/api/cuenta'
 import { Route as ApiDescargarRouteImport } from './routes/api/descargar'
 import { Route as ApiPresenteRouteImport } from './routes/api/presente'
 import { Route as ApiRescateRouteImport } from './routes/api/rescate'
+import { Route as RSlugRouteImport } from './routes/r.$slug'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -24,6 +26,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RevendedorRoute = RevendedorRouteImport.update({
+  id: '/revendedor',
+  path: '/revendedor',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCuentaRoute = ApiCuentaRouteImport.update({
@@ -46,66 +53,85 @@ const ApiRescateRoute = ApiRescateRouteImport.update({
   path: '/api/rescate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RSlugRoute = RSlugRouteImport.update({
+  id: '/r/$slug',
+  path: '/r/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/revendedor': typeof RevendedorRoute
   '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
+  '/r/$slug': typeof RSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/revendedor': typeof RevendedorRoute
   '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
+  '/r/$slug': typeof RSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/revendedor': typeof RevendedorRoute
   '/api/cuenta': typeof ApiCuentaRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
+  '/r/$slug': typeof RSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/admin'
+    | '/revendedor'
     | '/api/cuenta'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
+    | '/r/$slug'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
+    | '/revendedor'
     | '/api/cuenta'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
+    | '/r/$slug'
   id:
     | '__root__'
     | '/'
     | '/admin'
+    | '/revendedor'
     | '/api/cuenta'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
+    | '/r/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  RevendedorRoute: typeof RevendedorRoute
   ApiCuentaRoute: typeof ApiCuentaRoute
   ApiDescargarRoute: typeof ApiDescargarRoute
   ApiPresenteRoute: typeof ApiPresenteRoute
   ApiRescateRoute: typeof ApiRescateRoute
+  RSlugRoute: typeof RSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -122,6 +148,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/revendedor': {
+      id: '/revendedor'
+      path: '/revendedor'
+      fullPath: '/revendedor'
+      preLoaderRoute: typeof RevendedorRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/cuenta': {
@@ -152,16 +185,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiRescateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/r/$slug': {
+      id: '/r/$slug'
+      path: '/r/$slug'
+      fullPath: '/r/$slug'
+      preLoaderRoute: typeof RSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  RevendedorRoute: RevendedorRoute,
   ApiCuentaRoute: ApiCuentaRoute,
   ApiDescargarRoute: ApiDescargarRoute,
   ApiPresenteRoute: ApiPresenteRoute,
   ApiRescateRoute: ApiRescateRoute,
+  RSlugRoute: RSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

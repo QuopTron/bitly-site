@@ -138,6 +138,42 @@ export async function soltarEmitidosDeCuenta(cuentaId: string): Promise<boolean>
   }
 }
 
+/**
+ * Suelta en lote los códigos de varias cuentas (baneo de un revendedor).
+ *
+ * Hace UNA escritura en vez de una por cuenta: un revendedor puede tener
+ * decenas de referidos y cada `putJson` es un commit en GitHub.
+ */
+export async function soltarEmitidosDeCuentas(
+  cuentaIds: string[],
+  codigos: string[] = [],
+): Promise<boolean> {
+  const cuentas = new Set(cuentaIds.filter(Boolean));
+  const exactos = new Set(codigos.filter(Boolean));
+  if (cuentas.size === 0 && exactos.size === 0) return true;
+  try {
+    const lista = await leerCrudo();
+    const afectados = lista.filter(
+      (e) => e.a && (exactos.has(e.c) || (e.u !== null && cuentas.has(e.u))),
+    );
+    if (afectados.length === 0) return true;
+    const siguiente = lista.map((e) =>
+      exactos.has(e.c) || (e.u !== null && cuentas.has(e.u)) ? { ...e, a: false } : e,
+    );
+    const ok = await putJson(
+      "datos",
+      ARCHIVO,
+      siguiente,
+      `códigos liberados: ${afectados.length} de ${cuentas.size} cuenta(s)`,
+    );
+    if (ok) cachear(siguiente);
+    return ok;
+  } catch (e) {
+    console.error("[codigos-emitidos] no se pudo liberar en lote:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
 /** Suelta el código exacto que se quitó de una cuenta. */
 export async function soltarEmitido(codigo: string): Promise<boolean> {
   if (!codigo) return true;

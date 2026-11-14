@@ -13,6 +13,7 @@ import {
   Receipt,
   RefreshCw,
   ShoppingBag,
+  Store,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import AdminCuentas from "@/components/modals/admin-cuentas";
 import AdminPedidos from "@/components/modals/admin-pedidos";
+import AdminRevendedores from "@/components/modals/admin-revendedores";
 import { guardarSesionAdmin, leerSesionAdmin, olvidarSesionAdmin, type SesionAdmin } from "@/lib/admin-cliente";
 import { entrarPanel } from "@/server/admin";
 import {
@@ -630,12 +632,13 @@ function Egresos({ token, onCambio }: { token: string; onCambio: () => void }) {
 
 /* ── Panel ──────────────────────────────────────────────────────────────── */
 
-type Tab = "resumen" | "pedidos" | "usuarios" | "egresos";
+type Tab = "resumen" | "pedidos" | "usuarios" | "revendedores" | "egresos";
 
 const TABS: { id: Tab; label: string; Icono: ComponentType<{ className?: string }> }[] = [
   { id: "resumen", label: "Resumen", Icono: LayoutDashboard },
   { id: "pedidos", label: "Pedidos", Icono: ShoppingBag },
   { id: "usuarios", label: "Usuarios", Icono: Users },
+  { id: "revendedores", label: "Revendedores", Icono: Store },
   { id: "egresos", label: "Egresos", Icono: Receipt },
 ];
 
@@ -758,6 +761,12 @@ function Panel({ sesion, onSalir }: { sesion: SesionAdmin; onSalir: () => void }
         {tab === "usuarios" && (
           <section className="rounded-2xl border border-border/70 bg-card/60 p-4">
             <AdminCuentas codigo={sesion.token} />
+          </section>
+        )}
+
+        {tab === "revendedores" && (
+          <section className="rounded-2xl border border-border/70 bg-card/60 p-4">
+            <AdminRevendedores codigo={sesion.token} />
           </section>
         )}
 

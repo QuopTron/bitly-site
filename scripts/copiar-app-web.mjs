@@ -207,6 +207,47 @@ if (fs.existsSync(rutaManifiesto)) {
 
 /* ── Reporte ────────────────────────────────────────────────────────────── */
 
+/* Bootstrap: CanvasKit local y sin el SW deprecado de Flutter */
+
+const rutaBootstrap = path.join(destino, "flutter_bootstrap.js");
+if (fs.existsSync(rutaBootstrap)) {
+  let bootstrap = fs.readFileSync(rutaBootstrap, "utf8");
+  const antes = bootstrap;
+
+  // El bundle de gh-pages puede traer `useLocalCanvasKit` apagado y pedir
+  // CanvasKit a gstatic.com. En redes donde ese CDN está bloqueado la app queda
+  // en blanco; el build incluye `canvaskit/`, así que se fuerza el local.
+  if (fs.existsSync(path.join(destino, "canvaskit"))) {
+    bootstrap = bootstrap.replace(
+      /(_flutter\.buildConfig\s*=\s*\{)/,
+      '$1"useLocalCanvasKit":true,',
+    );
+  }
+
+  // `index.html` registra NUESTRO `service_worker.js` (scope /app/). Si el
+  // bootstrap viejo también registra `flutter_service_worker.js`, los dos SW
+  // compiten por el mismo scope y puede quedar activo el de rutas absolutas.
+  bootstrap = bootstrap.replace(
+    /_flutter\.loader\.load\(\{\s*serviceWorkerSettings:[\s\S]*?\}\);/,
+    '_flutter.loader.load({ config: { canvasKitBaseUrl: "canvaskit/" } });',
+  );
+
+  if (bootstrap !== antes) {
+    fs.writeFileSync(rutaBootstrap, bootstrap);
+    console.log("[app-web] bootstrap ajustado: CanvasKit local y sin SW de Flutter");
+  }
+}
+
+/* Service Worker propio: rutas relativas al scope /app/ */
+
+const rutaSwPropio = path.join(raiz, "scripts", "app-service-worker.js");
+if (fs.existsSync(rutaSwPropio)) {
+  fs.copyFileSync(rutaSwPropio, path.join(destino, "service_worker.js"));
+  console.log("[app-web] service_worker.js del sitio instalado (rutas por scope)");
+}
+
+/* Reporte */
+
 function pesar(carpeta) {
   let total = 0;
   let archivos = 0;

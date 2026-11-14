@@ -21,6 +21,7 @@ import { useFaseActual } from "@/lib/use-pricing";
 import { enlaceWhatsApp } from "@/lib/contacto";
 import { guardarPedidoLocal, hoyISO } from "@/lib/pedidos-cliente";
 import { leerTokenCuenta, useHayCuenta } from "@/lib/cuentas-cliente";
+import { referidoActual } from "@/lib/referidos";
 import { anularPedido, crearPedido } from "@/server/pedidos";
 import { miCuenta } from "@/server/cuentas";
 
@@ -205,6 +206,7 @@ export default function PagoModal({ open, onClose, onVerEstado, onCuenta }: Prop
           web,
           cantidad,
           sesionCuenta: leerTokenCuenta() ?? "",
+          ref: referidoActual() ?? "",
         },
       });
       if (!r.ok) {

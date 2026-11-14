@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
+  cambiarFotoImpl,
   confirmarCuentaImpl,
   cuentaDeToken,
   iniciarSesionImpl,
@@ -102,6 +103,15 @@ export const Route = createFileRoute("/api/cuenta")({
               // El `!estado.ok` no es decorativo: `motivo` sólo existe en el
               // fallo, así que sin él TypeScript no deja leerlo.
               return json(estado, !estado.ok && estado.motivo === "sesion" ? 401 : 200);
+            }
+            case "foto": {
+              // La foto de perfil de la cuenta ('' = quitarla). La app la manda
+              // ya achicada; acá sólo se guarda en la cuenta.
+              const foto = await cambiarFotoImpl({
+                token: tokenDe(request, datos),
+                foto: datos.foto,
+              });
+              return json(foto, foto.ok ? 200 : foto.motivo === "sesion" ? 401 : 400);
             }
             case "cuota": {
               const cuenta = await cuentaDeToken(tokenDe(request, datos));

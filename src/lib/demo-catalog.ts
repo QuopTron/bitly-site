@@ -42,7 +42,7 @@ export type Pista = {
    * "youtube" = audio completo vía el backend local de yt-dlp. Null hasta que
    * se pide reproducir.
    */
-  canal: "monochrome" | "stash-relay" | "bandcamp" | "youtube" | null;
+  canal: "monochrome" | "stash-relay" | "stash-tidal" | "bandcamp" | "youtube" | null;
   /** Vino del catálogo de respaldo (la extensión no pudo responder). */
   respaldada: boolean;
 };
@@ -195,7 +195,11 @@ function canalesCaidosAhora(): string[] {
   return [...canalesCaidos.keys()];
 }
 
-async function resolverAudio(p: Pista, evitar: string[] = []): Promise<AudioRescatado | null> {
+async function resolverAudio(
+  p: Pista,
+  evitar: string[] = [],
+  topeMs?: number,
+): Promise<AudioRescatado | null> {
   const audio = await rescatarDemo({
     titulo: p.titulo,
     artista: p.artista,
@@ -209,7 +213,7 @@ async function resolverAudio(p: Pista, evitar: string[] = []): Promise<AudioResc
     codigo: codigoPremiumGuardado(),
     token: leerTokenCuenta(),
     evitar,
-  });
+  }, topeMs);
   if (!audio) return null;
   p.audioUrl = audio.url;
   p.canal = audio.canal ?? null;
@@ -225,7 +229,11 @@ async function resolverAudio(p: Pista, evitar: string[] = []): Promise<AudioResc
  * Con `codigo` viaja el código Premium guardado: el servidor lo verifica y
  * decide si esta pista viene en FLAC o en calidad estándar (ver `demo-proxy`).
  */
-export function audioDe(p: Pista, evitar: string[] = []): Promise<AudioRescatado | null> {
+export function audioDe(
+  p: Pista,
+  evitar: string[] = [],
+  topeMs?: number,
+): Promise<AudioRescatado | null> {
   // Los canales que fallaron en otras pistas también se descartan acá.
   const descartados = [...new Set([...evitar, ...canalesCaidosAhora()])];
   if (p.audioUrl && descartados.length === 0) {
@@ -236,7 +244,7 @@ export function audioDe(p: Pista, evitar: string[] = []): Promise<AudioRescatado
   const clave = descartados.length > 0 ? `${p.id}|${descartados.sort().join(",")}` : p.id;
   const pendiente = enCurso.get(clave);
   if (pendiente) return pendiente;
-  const promesa = resolverAudio(p, descartados).finally(() => enCurso.delete(clave));
+  const promesa = resolverAudio(p, descartados, topeMs).finally(() => enCurso.delete(clave));
   enCurso.set(clave, promesa);
   return promesa;
 }

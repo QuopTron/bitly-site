@@ -147,18 +147,30 @@ try {
   check("la búsqueda trae resultados", hayFilas, `${(msBusqueda / 1000).toFixed(1)} s`);
   if (!hayFilas) throw new Error("la búsqueda no trajo filas");
 
-  const filas = await js(
+  // Las filas pueden llegar primero de la fuente débil y ser reemplazadas por
+  // el fallback (Bandcamp/YouTube) un instante después. Se elige la fila que
+  // contiene TODAS las palabras significativas de la consulta: antes bastaba
+  // con la primera palabra ("Los") y la prueba hacía clic en "Los Angeles".
+  await dormir(1500);
+  const palabras = CONSULTA.split(/\s+/).filter((p) => p.length >= 3 && !/^(los|las|del|the|and)$/i.test(p));
+  const clave = palabras.length > 0 ? palabras : CONSULTA.split(/\s+/).filter(Boolean);
+  const elegida = await js(
     ses,
-    `[...document.querySelectorAll('button[aria-label*="eproducir"]')].map((b) => b.innerText.replace(/\\s+/g, " ").trim())`,
+    `(() => {
+      const norm = (s) => s.normalize("NFD").replace(/\\p{Diacritic}/gu, "").toLowerCase();
+      const palabras = ${JSON.stringify(clave)}.map(norm);
+      const botones = [...document.querySelectorAll('button[aria-label*="eproducir"]')];
+      const b = botones.find((x) => palabras.every((p) => norm(x.innerText).includes(p)));
+      if (!b) return null;
+      b.setAttribute("data-nicho-elegida", "1");
+      return b.innerText.replace(/\\s+/g, " ").trim();
+    })()`,
   );
-  check(
-    "el tema pedido está en la lista",
-    filas.some((f) => new RegExp(CONSULTA.split(" ")[0], "i").test(f)),
-    filas[0],
-  );
+  check("el tema pedido está en la lista", Boolean(elegida), elegida ?? "no aparece ninguna fila con la consulta");
+  if (!elegida) throw new Error("la búsqueda no trajo el tema pedido");
 
   const tClic = Date.now();
-  await clicReal('button[aria-label*="eproducir"]');
+  await clicReal('button[data-nicho-elegida="1"]');
   const pidioPlay = await esperar(`window.__audio.length > 0`, { nombre: "play()", tiempo: TOPE_AUDIO_MS });
   check("el clic pide reproducir", pidioPlay);
   if (!pidioPlay) throw new Error("nunca se llamó a play()");

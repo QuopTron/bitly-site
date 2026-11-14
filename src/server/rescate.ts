@@ -953,10 +953,15 @@ async function resolverMonochromePorNombre(
  */
 const BANDCAMP_BUSQUEDA = "https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic";
 const TIMEOUT_BANDCAMP_MS = 6_000;
+const TIMEOUT_JINA_MS = 15_000;
 const TTL_BANDCAMP_MS = 15 * 60 * 1000;
 
 type ResultadoBandcamp = {
   type?: string;
+  id?: number;
+  band_id?: number;
+  album_id?: number;
+  duration?: number;
   name?: string;
   band_name?: string;
   album_name?: string;
@@ -1081,6 +1086,55 @@ function cookiesDeRespuesta(res: Response): string {
     .join("; ");
 }
 
+/**
+ * Une cookies por nombre, conservando el valor más nuevo. Fastly entrega el
+ * reto `_fs_ch_st_*` y, en la respuesta siguiente, `BACKENDID3`; para que
+ * `stream_redirect` devuelva el 302 a `t4.bcbits.com` hacen falta LAS DOS. Si
+ * se guarda sólo la primera, el redirect vuelve a caer en el reto de 3 KB.
+ */
+function fusionarCookies(...listas: string[]): string {
+  const porNombre = new Map<string, string>();
+  for (const lista of listas) {
+    for (const par of lista.split(";")) {
+      const limpio = par.trim();
+      if (!limpio) continue;
+      const separador = limpio.indexOf("=");
+      if (separador <= 0) continue;
+      porNombre.set(limpio.slice(0, separador), limpio.slice(separador + 1));
+    }
+  }
+  return [...porNombre].map(([nombre, valor]) => `${nombre}=${valor}`).join("; ");
+}
+
+/**
+ * Pide HTML a un lector externo y reintenta una vez si contesta 429/5xx.
+ * Google Translate y Jina se saturan con ráfagas de pruebas; un reintento
+ * corto evita que una pista de nicho quede muda por un límite temporal.
+ */
+async function pedirHtmlBandcamp(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  intentos = 2,
+): Promise<string | null> {
+  for (let intento = 0; intento < intentos; intento++) {
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { headers, signal: control.signal });
+      if (res.ok) return await res.text();
+      if (res.status !== 429 && res.status < 500) return null;
+      const espera = Number(res.headers.get("retry-after")) || 0;
+      await new Promise((listo) => setTimeout(listo, Math.min(1_500, Math.max(300, espera * 1_000))));
+    } catch {
+      // Se reintenta una vez; si el host no contesta, el siguiente canal decide.
+    } finally {
+      clearTimeout(reloj);
+    }
+  }
+  return null;
+}
+
 function audioDeTralbum(html: string): { url: string; duracion: number } | null {
   const atributo = /data-tralbum="([^"]+)"/.exec(html)?.[1];
   if (!atributo) return null;
@@ -1095,6 +1149,71 @@ function audioDeTralbum(html: string): { url: string; duracion: number } | null 
   } catch {
     return null;
   }
+}
+
+/**
+ * Lectura de la página con Jina Reader, que devuelve el HTML crudo.
+ *
+ * Fastly bloquea las IPs de Cloudflare y la API móvil sigue devolviendo el
+ * reto aunque se reenvíen sus cookies. Jina pide la página desde otra IP y con
+ * `X-Return-Format: html` entrega el HTML completo, con `data-tralbum` y la URL
+ * firmada de `t4.bcbits.com`. Es el camino que funciona en producción; el
+ * proxy de Google Translate queda como segundo intento porque se satura
+ * (429) con facilidad.
+ */
+async function leerPaginaBandcampJina(
+  url: string,
+): Promise<{ url: string; duracion: number } | null> {
+  let destino: URL;
+  try {
+    const original = new URL(url);
+    if (!/\.bandcamp\.com$/i.test(original.hostname)) return null;
+    destino = new URL(`https://r.jina.ai/${original.toString()}`);
+  } catch {
+    return null;
+  }
+  const html = await pedirHtmlBandcamp(
+    destino.toString(),
+    {
+      "User-Agent": USER_AGENT,
+      Accept: "text/html",
+      "X-Return-Format": "html",
+    },
+    TIMEOUT_JINA_MS,
+  );
+  return html ? audioDeTralbum(html) : null;
+}
+
+/**
+ * Lectura de la página a través del proxy de Google Translate.
+ *
+ * Fastly bloquea las IPs de Cloudflare con un reto que no se resuelve con
+ * cookies (probado: 6 peticiones seguidas siguen devolviendo el HTML de 3 KB).
+ * Google Translate sí recibe la página completa, con `data-tralbum` y la URL
+ * firmada de `t4.bcbits.com`, pero se satura con facilidad (429); por eso va
+ * después de Jina.
+ */
+async function leerPaginaBandcampTraducida(
+  url: string,
+): Promise<{ url: string; duracion: number } | null> {
+  let destino: URL;
+  try {
+    const original = new URL(url);
+    if (!/\.bandcamp\.com$/i.test(original.hostname)) return null;
+    original.hostname = original.hostname.replace(/\./g, "-") + ".translate.goog";
+    original.searchParams.set("_x_tr_sl", "auto");
+    original.searchParams.set("_x_tr_tl", "en");
+    original.searchParams.set("_x_tr_hl", "en");
+    destino = original;
+  } catch {
+    return null;
+  }
+  const html = await pedirHtmlBandcamp(
+    destino.toString(),
+    { "User-Agent": USER_AGENT, Accept: "text/html" },
+    TIMEOUT_BANDCAMP_MS,
+  );
+  return html ? audioDeTralbum(html) : null;
 }
 
 /** Lectura directa de la página, con el handshake de cookies de Fastly. */
@@ -1125,6 +1244,129 @@ async function leerPaginaBandcamp(url: string): Promise<{ url: string; duracion:
 }
 
 /**
+ * GET JSON a Bandcamp con el mismo handshake de cookies que el buscador.
+ * La API móvil (`/api/mobile/...`) entrega `streaming_url` sin pedir parsear la
+ * página, que es justo lo que Fastly bloquea desde las IPs de Cloudflare.
+ */
+async function pedirBandcampJson<T>(url: string): Promise<T | null> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  const cabeceras = { "User-Agent": USER_AGENT, Accept: "application/json" };
+  let cookie =
+    cacheCookiesBandcamp && cacheCookiesBandcamp.expira > Date.now()
+      ? cacheCookiesBandcamp.valor
+      : "";
+  try {
+    let res = await fetch(url, {
+      signal: control.signal,
+      headers: cookie ? { ...cabeceras, Cookie: cookie } : cabeceras,
+    });
+    if (!res.ok) return null;
+    let texto = await res.text();
+    if (!texto.trimStart().startsWith("{")) {
+      const reto = cookiesDeRespuesta(res);
+      if (!reto) return null;
+      cookie = fusionarCookies(cookie, reto);
+      cacheCookiesBandcamp = { valor: cookie, expira: Date.now() + 8_000 };
+      res = await fetch(url, {
+        signal: control.signal,
+        headers: { ...cabeceras, Cookie: cookie },
+      });
+      if (!res.ok) return null;
+      texto = await res.text();
+    }
+    // La segunda respuesta trae `BACKENDID3`, que no viene en el reto. Sin
+    // guardarlo, el `stream_redirect` posterior no pasa de Fastly.
+    const nuevas = cookiesDeRespuesta(res);
+    if (nuevas) {
+      cookie = fusionarCookies(cookie, nuevas);
+      cacheCookiesBandcamp = { valor: cookie, expira: Date.now() + 8_000 };
+    }
+    return JSON.parse(texto) as T;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/**
+ * Sigue `bandcamp.com/stream_redirect` con el handshake de cookies hasta la URL
+ * firmada de `t4.bcbits.com`, que sí responde Range sin cookies. Se devuelve esa
+ * URL final; el `<audio>` del visitante nunca ve el reto de Fastly.
+ */
+async function resolverRedireccionBandcamp(url: string): Promise<string | null> {
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), TIMEOUT_BANDCAMP_MS);
+  const cabeceras = { "User-Agent": USER_AGENT, Accept: "*/*" };
+  let destino = url;
+  let cookie =
+    cacheCookiesBandcamp && cacheCookiesBandcamp.expira > Date.now()
+      ? cacheCookiesBandcamp.valor
+      : "";
+  try {
+    for (let paso = 0; paso < 4; paso++) {
+      const res = await fetch(destino, {
+        signal: control.signal,
+        redirect: "manual",
+        headers: cookie ? { ...cabeceras, Cookie: cookie } : cabeceras,
+      });
+      const nuevas = cookiesDeRespuesta(res);
+      if (nuevas) {
+        cookie = fusionarCookies(cookie, nuevas);
+        cacheCookiesBandcamp = { valor: cookie, expira: Date.now() + 8_000 };
+      }
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location");
+        if (!location) return null;
+        destino = new URL(location, destino).toString();
+        if (/\.bcbits\.com\//i.test(destino)) return destino;
+        continue;
+      }
+      if (res.status === 200) {
+        const tipo = res.headers.get("content-type") ?? "";
+        if (!tipo.includes("text/html")) return destino;
+        // Reto HTML: la cookie recién recibida debe abrir la pista en el
+        // segundo intento; si ya la teníamos, no hay nada más que hacer.
+        if (paso === 0 && nuevas) continue;
+      }
+      return null;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+/** MP3 por la API móvil de Bandcamp (sin parsear la página con reto). */
+async function audioPorMovilBandcamp(
+  r: ResultadoBandcamp,
+): Promise<{ url: string; duracion: number } | null> {
+  const bandId = Number(r.band_id ?? 0);
+  const trackId = Number(r.id ?? 0);
+  if (!bandId || !trackId) return null;
+  const datos = await pedirBandcampJson<{
+    tracks?: Array<{
+      streaming_url?: Record<string, string>;
+      duration?: number;
+      is_streamable?: boolean;
+    }>;
+  }>(
+    `https://bandcamp.com/api/mobile/24/tralbum_details?band_id=${bandId}&tralbum_id=${trackId}&tralbum_type=t`,
+  );
+  const pista = datos?.tracks?.[0];
+  if (!pista || pista.is_streamable === false) return null;
+  const redirect =
+    pista.streaming_url?.["mp3-128"] ?? pista.streaming_url?.["mp3-v0"] ?? pista.streaming_url?.mp3;
+  if (!redirect) return null;
+  const url = await resolverRedireccionBandcamp(redirect);
+  if (!url) return null;
+  return { url, duracion: Math.max(0, Math.round(pista.duration ?? 0)) };
+}
+
+/**
  * MP3 de una pista: primero se intenta la página directa y, si Bandcamp la
  * entrega como reto anti-bot (lo normal desde el Worker), se le pide a la
  * instancia de Yattee, que sí la recibe entera.
@@ -1132,9 +1374,13 @@ async function leerPaginaBandcamp(url: string): Promise<{ url: string; duracion:
 async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
   const propio = await leerPaginaBandcamp(url);
   if (propio) return propio;
+  const jina = await leerPaginaBandcampJina(url);
+  if (jina) return jina;
+  const traducida = await leerPaginaBandcampTraducida(url);
+  if (traducida) return traducida;
   const porInstancia = await audioPorInstanciaBandcamp(url);
   if (porInstancia) return porInstancia;
-  console.warn(`[bandcamp] sin audio: ni la página directa ni la instancia devolvieron MP3 (${url})`);
+  console.warn(`[bandcamp] sin audio: ni la página directa, Jina, Translate ni la instancia devolvieron MP3 (${url})`);
   return null;
 }
 
@@ -1170,7 +1416,7 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
 
   const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
   const consultaVersion = `${titulo} ${artista} ${p.album ?? ""}`.trim();
-  let mejor: { url: string; nombre: string; punto: number } | null = null;
+  let mejor: { url: string; nombre: string; punto: number; r: ResultadoBandcamp } | null = null;
 
   for (const [url, r] of porId) {
     // El título tiene que aparecer de verdad (2 = contiene o mismo orden de
@@ -1194,11 +1440,14 @@ async function resolverBandcamp(p: PeticionAudio): Promise<AudioBandcamp | null>
       else if (dif <= 20) punto += 30;
       else if (dif > 90) punto -= 40;
     }
-    if (!mejor || punto > mejor.punto) mejor = { url, nombre: r.name ?? "", punto };
+    if (!mejor || punto > mejor.punto) mejor = { url, nombre: r.name ?? "", punto, r };
   }
   if (!mejor) return null;
 
-  const pagina = await audioDePaginaBandcamp(mejor.url);
+  // La API móvil evita el HTML con reto de Fastly; la página queda como
+  // respaldo y, si ambas fallan, la instancia de Yattee.
+  const movil = await audioPorMovilBandcamp(mejor.r);
+  const pagina = movil ?? (await audioDePaginaBandcamp(mejor.url));
   if (!pagina) return null;
   return {
     url: pagina.url,
@@ -1298,6 +1547,25 @@ function configYouTube(): { yattee: string; yattees: string[]; auth: string; loc
     auth: process.env.YATTEE_AUTH ?? "",
     local: (process.env.YT_DLP_BACKEND_URL ?? "").replace(/\/+$/, ""),
   };
+}
+
+/**
+ * Invidious como tercer canal, sin pasar por Yattee.
+ *
+ * Yattee ya usa Invidious para extraer cuando esta configurado, pero si su
+ * base se reinicia y pierde los ajustes (Render sin disco persistente) vuelve
+ * a yt-dlp y falla con 429/Deno. Este canal va directo a la API de Invidious:
+ * la busqueda y los formatos no dependen de la configuracion de Yattee.
+ *
+ * `INVIDIOUS_URLS` acepta una lista separada por comas. Sin env se usa la
+ * instancia que ya funcionaba en produccion.
+ */
+function configInvidious(): string[] {
+  const urls = [process.env.INVIDIOUS_URLS, process.env.INVIDIOUS_URL]
+    .flatMap((url) => (url ?? "").split(","))
+    .map((url) => url.trim().replace(/\/+$/, ""))
+    .filter((url, i, todas) => !!url && todas.indexOf(url) === i);
+  return urls.length > 0 ? urls : ["https://yt.chocolatemoo53.com"];
 }
 
 /** Cuarentena por base: un Render en OOM no se reintenta en cada canción. */
@@ -1551,6 +1819,180 @@ async function pedirYattee<T>(
     }
     await new Promise((r) => setTimeout(r, 300));
   }
+  return null;
+}
+
+/** Ultimo estado HTTP de Invidious directo: explica un `null` en los logs. */
+let ultimoEstadoInvidious = 0;
+
+/** GET JSON contra Invidious, con un reintento para 5xx/cortes. */
+async function pedirInvidious<T>(base: string, ruta: string, ms: number): Promise<T | null> {
+  ultimoEstadoInvidious = 0;
+  for (let intento = 0; intento < 2; intento++) {
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), ms);
+    try {
+      const res = await fetch(`${base}${ruta}`, {
+        signal: control.signal,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Bitly/1.0 (+https://bitly-site.pages.dev)",
+        },
+      });
+      if (res.ok) return (await res.json()) as T;
+      ultimoEstadoInvidious = res.status;
+      if (res.status < 500 || intento === 1) return null;
+    } catch (e) {
+      ultimoEstadoInvidious = -1;
+      if (intento === 1) {
+        console.warn(`[yt] invidious ${base}: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }
+    } finally {
+      clearTimeout(reloj);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return null;
+}
+
+/** Convierte resultados de busqueda de YouTube a items del catalogo. */
+function aItemsYoutube(resultados: ResultadoBusquedaYattee[] | null, tope: number): Item[] {
+  return (Array.isArray(resultados) ? resultados : [])
+    .filter((r) => {
+      const dur = Number(r.lengthSeconds ?? 0);
+      return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
+    })
+    .slice(0, tope)
+    .map((r) => {
+      const id = String(r.videoId ?? "");
+      const miniaturas = r.videoThumbnails ?? [];
+      const caratula =
+        miniaturas.find((t) => t.quality === "high")?.url ??
+        miniaturas[miniaturas.length - 1]?.url ??
+        `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+      return {
+        id,
+        tipo: "track" as const,
+        titulo: r.title ?? "",
+        artista: r.author ?? "",
+        album: "",
+        caratula,
+        duracionMs: Math.max(0, Math.round(Number(r.lengthSeconds ?? 0) * 1000)),
+        isrc: null,
+      };
+    });
+}
+
+/** Busca candidatos directamente en la API de Invidious. */
+async function buscarCandidatosInvidious(
+  p: PeticionAudio,
+  base: string,
+): Promise<ResultadoBusquedaYattee[]> {
+  const consulta = `${p.titulo} ${p.artista}`.replace(/\s+/g, " ").trim();
+  if (!consulta) return [];
+
+  const pedir = async (q: string) => {
+    const resultados = await pedirInvidious<ResultadoBusquedaYattee[]>(
+      base,
+      `/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
+      TIMEOUT_YT_BUSQUEDA_MS,
+    );
+    return (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
+  };
+
+  const candidatos: ResultadoBusquedaYattee[] = [];
+  const vistos = new Set<string>();
+  const sumar = (mas: ResultadoBusquedaYattee[]) => {
+    for (const c of mas) {
+      if (!vistos.has(String(c.videoId))) {
+        candidatos.push(c);
+        vistos.add(String(c.videoId));
+      }
+    }
+  };
+  const mejorTitulo = () =>
+    candidatos.reduce((max, c) => Math.max(max, fieldScore(p.titulo, c.title ?? "")), 0);
+
+  const limpia = consultaYouTube(p.titulo);
+  const paralelas = [consulta];
+  if (
+    limpia &&
+    limpia.toLowerCase() !== p.titulo.trim().toLowerCase() &&
+    limpia.toLowerCase() !== consulta.toLowerCase()
+  ) {
+    paralelas.push(limpia);
+  }
+  const listas = await Promise.all(paralelas.map((q) => pedir(q)));
+  for (const lista of listas) sumar(lista);
+
+  if (candidatos.length === 0 || mejorTitulo() < 2) {
+    if (p.titulo) sumar(await pedir(p.titulo));
+  }
+  return candidatos;
+}
+
+/** Resuelve el audio usando Invidious directo, sin depender de Yattee. */
+async function rescatarEnInvidious(
+  p: PeticionAudio,
+  base: string,
+): Promise<{ stream: string; duracion: number } | null> {
+  const inicio = Date.now();
+  const candidatos = await buscarCandidatosInvidious(p, base);
+  if (candidatos.length === 0) {
+    console.warn(`[yt] invidious ${base}: sin candidatos (estado ${ultimoEstadoInvidious})`);
+    return null;
+  }
+
+  const objetivo = Math.max(0, Math.round((p.duracionMs ?? 0) / 1000));
+
+  const formatoDe = (video: VideoYattee | null): { stream: string; duracion: number } | null => {
+    const formatos = (video?.adaptiveFormats ?? []).filter(
+      (f) => f.url && (f.type ?? "").startsWith("audio/"),
+    );
+    if (formatos.length === 0) return null;
+    const universales = formatos.filter((f) => /mp4|m4a/.test(f.type ?? ""));
+    const mejor = (universales.length ? universales : formatos)
+      .slice()
+      .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+    return {
+      stream: new URL(String(mejor.url), base).toString(),
+      duracion: Math.max(0, Math.round(Number(video?.lengthSeconds ?? 0))),
+    };
+  };
+
+  const videoIdDirecto = (p.videoId ?? "").trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(videoIdDirecto)) {
+    const directo = await pedirInvidious<VideoYattee>(
+      base,
+      `/api/v1/videos/${encodeURIComponent(videoIdDirecto)}?local=true`,
+      TIMEOUT_YT_RESOLVER_MS,
+    );
+    const elegido = formatoDe(directo);
+    if (elegido) return elegido;
+  }
+
+  const filtro = new QueryFiltro(p.titulo, p.artista, p.album ?? "");
+  const ordenados = candidatos
+    .map((c) => ({ c, punto: puntuarCandidatoYattee(c, p, objetivo, filtro) }))
+    .filter((x) => Number.isFinite(x.punto))
+    .sort((a, b) => b.punto - a.punto);
+  if (ordenados.length === 0) return null;
+
+  for (const { c: elegida } of ordenados.slice(0, 5)) {
+    if (TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio) < 3_000) break;
+    const restante = TIMEOUT_YT_RESOLVER_MS - (Date.now() - inicio);
+    const video = await pedirInvidious<VideoYattee>(
+      base,
+      `/api/v1/videos/${encodeURIComponent(String(elegida.videoId))}?local=true`,
+      Math.max(3_000, restante),
+    );
+    const elegido = formatoDe(video);
+    if (elegido) return elegido;
+  }
+  console.warn(
+    `[yt] invidious ${base}: sin audio (estado ${ultimoEstadoInvidious}, ${candidatos.length} candidatos)`,
+  );
   return null;
 }
 
@@ -1848,19 +2290,33 @@ async function rescatarEnBackendPropio(
  */
 async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
   const cfg = configYouTube();
+  console.warn(`[yt] rescatarYouTube local=${!!cfg.local} yattees=${cfg.yattees.length}`);
   if (cfg.local) {
     const propio = await rescatarEnBackendPropio(p, cfg.local);
     if (propio) return propio;
   }
-  if (cfg.yattees.length === 0) return null;
-  await despertarYattee();
-  for (const base of yatteesVivas()) {
-    ultimoEstadoYt = 0;
-    const resuelto = await rescatarEnYattee(p, { yattee: base, auth: cfg.auth });
+  if (cfg.yattees.length > 0) {
+    // Gracia corta: el despertador del sitio (demoDespertar) ya le da 40 s al
+    // arranque desde que se abre la demo. Si el audio entrara a esperar otro
+    // arranque completo, el rescate se iría a 70-90 s y el visitante vería
+    // "no hay audio" justo cuando el backend terminaba de despertar. Con 6 s,
+    // el primer clic falla rápido y el reintento del cliente encuentra la
+    // instancia ya despierta.
+    await despertarYattee(6_000);
+    for (const base of yatteesVivas()) {
+      ultimoEstadoYt = 0;
+      const resuelto = await rescatarEnYattee(p, { yattee: base, auth: cfg.auth });
+      if (resuelto) return resuelto;
+      // Si la base contestó bien (200) pero no tenía la pista, la otra instancia
+      // del mismo repo tampoco la va a tener: no se paga otro timeout.
+      if (!falloYattee()) break;
+    }
+  }
+  // Tercer canal: Invidious directo. Cubre el caso en que Yattee perdió
+  // sus ajustes o su instancia dejó de responder.
+  for (const base of configInvidious()) {
+    const resuelto = await rescatarEnInvidious(p, base);
     if (resuelto) return resuelto;
-    // Si la base contestó bien (200) pero no tenía la pista, la otra instancia
-    // del mismo repo tampoco la va a tener: no se paga otro timeout.
-    if (!falloYattee()) break;
   }
   return null;
 }
@@ -1873,6 +2329,7 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
  */
 export async function buscarYouTubeBackend(consulta: string, limite: number): Promise<Item[] | null> {
   const cfg = configYouTube();
+  console.warn(`[yt] buscarYouTubeBackend local=${!!cfg.local} yattees=${cfg.yattees.length}`);
   const tope = Math.max(1, Math.min(24, limite));
 
   if (cfg.yattees.length > 0) {
@@ -1886,35 +2343,22 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
         `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
         TIMEOUT_YT_BUSQUEDA_MS,
       );
-      const encontrados = (Array.isArray(resultados) ? resultados : [])
-        .filter((r) => {
-          const dur = Number(r.lengthSeconds ?? 0);
-          return !!r.videoId && dur >= DURACION_MINIMA_YT_S && dur <= DURACION_MAXIMA_YT_S;
-        })
-        .slice(0, tope)
-        .map((r) => {
-          const id = String(r.videoId ?? "");
-          const miniaturas = r.videoThumbnails ?? [];
-          return {
-            id,
-            tipo: "track" as const,
-            titulo: r.title ?? "",
-            artista: r.author ?? "",
-            album: "",
-            caratula:
-              miniaturas.find((t) => t.quality === "high")?.url ??
-              miniaturas[miniaturas.length - 1]?.url ??
-              `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
-            duracionMs: Math.max(0, Math.round(Number(r.lengthSeconds ?? 0) * 1000)),
-            isrc: null,
-          };
-        });
+      const encontrados = aItemsYoutube(resultados, tope);
       // Yattee no encontró nada (o no contestó): si hay backend propio, se
       // prueba ahí. Es justo el caso del folklore que el índice no cubre.
       if (encontrados.length > 0) return encontrados;
       if (!falloYattee()) break;
     }
-    if (!cfg.local) return null;
+  }
+
+  for (const base of configInvidious()) {
+    const resultados = await pedirInvidious<ResultadoBusquedaYattee[]>(
+      base,
+      `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
+      TIMEOUT_YT_BUSQUEDA_MS,
+    );
+    const encontrados = aItemsYoutube(resultados, tope);
+    if (encontrados.length > 0) return encontrados;
   }
 
   if (!cfg.local) return null;
@@ -1931,10 +2375,14 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
       headers: cabecerasBackend(),
       signal: control.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[yt] /buscar local status ${res.status}`);
+      return null;
+    }
     const cuerpo = (await res.json()) as { items?: Item[] };
     return Array.isArray(cuerpo.items) ? cuerpo.items : null;
-  } catch {
+  } catch (e) {
+    console.warn(`[yt] /buscar local: ${e instanceof Error ? e.message : e}`);
     return null;
   } finally {
     clearTimeout(reloj);
@@ -2248,7 +2696,7 @@ const TOPE_YT_FINAL_MS = 25_000;
 
 /** Techo del rescate entero: aunque un camino externo se cuelgue, la demo
  * devuelve rápido (con su motivo) en vez de dejar al visitante 90 s a la espera. */
-const TOPE_RESCATE_MS = 50_000;
+const TOPE_RESCATE_MS = 45_000;
 
 function conTope<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((ok, mal) => {

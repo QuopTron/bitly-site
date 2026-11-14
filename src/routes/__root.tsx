@@ -6,6 +6,7 @@ import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { instalarReveals } from "@/lib/reveal";
 import { contarVista } from "@/lib/vistas";
 import { latirPresencia, useLatidoPresencia } from "@/lib/presente";
+import { capturarReferido } from "@/lib/referidos";
 import { bloquearDescarga, registrarServiceWorker, useEsStandalone } from "@/lib/pwa";
 import { SCRIPT_TEMA_INICIAL } from "@/lib/tema";
 import { DESCRIPCION, OG_IMAGE, SITIO, TITULO, jsonLd } from "@/lib/seo";
@@ -116,6 +117,9 @@ function RootComponent() {
   // La visita se cuenta al entrar al sitio, en cualquier ruta. Va acá y no en
   // la sección de opiniones: el contador no depende de que esa sección exista.
   useEffect(() => {
+    // Atribución de revendedor: si la visita trae `?ref=`, queda guardada para
+    // el alta de cuenta o la compra que ocurra después en esta sesión.
+    capturarReferido();
     void contarVista();
   }, []);
   // Presencia: un latido liviano por minuto, en cualquier ruta, para que el

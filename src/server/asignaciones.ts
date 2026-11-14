@@ -25,12 +25,14 @@ import { registrarEmitidos, soltarEmitido } from "@/server/codigos-emitidos";
 import { emitirCodigos } from "@/server/codigos";
 import {
   asignarPremiumACuenta,
+  atribuirRevendedorACuenta,
   codigosAsignados,
   crearCuentaInvitada,
   cuentaDeToken,
   cuentaPorCorreo,
   darDeBajaInvitada,
 } from "@/server/cuentas";
+import { revendedorPorCuenta } from "@/server/revendedores-store";
 
 const ARCHIVO = "data/asignaciones.json";
 const ARCHIVO_PEDIDOS = "data/pedidos.json";
@@ -251,6 +253,12 @@ export const asignarCodigos = createServerFn({ method: "POST" })
         const libres = codigos.filter((c) => !ocupados.has(c));
         if (libres.length === 0) return { ok: false, motivo: "sin_codigos" };
 
+        // Si reparte un revendedor, las cuentas que cree quedan colgadas de su
+        // libro: el baneo en cascada después las alcanza sin buscar por correo.
+        const revendedor = cuenta ? await revendedorPorCuenta(cuenta.id) : null;
+        const revendedorId =
+          revendedor?.estado === "activo" ? revendedor.id : null;
+
         const de = cuenta?.nombre?.trim() || "El equipo de Bitly";
         const asignadas: Asignada[] = [];
         const errores: Array<{ correo: string; motivo: string }> = [];
@@ -276,6 +284,9 @@ export const asignarCodigos = createServerFn({ method: "POST" })
             if (!okPremium.ok) {
               errores.push({ correo, motivo: "servidor" });
               continue;
+            }
+            if (revendedorId) {
+              await atribuirRevendedorACuenta(existente.id, revendedorId).catch(() => false);
             }
             await registrarEmitidos([codigo], folio, existente.id);
             const asignacion: Asignacion = {
@@ -309,6 +320,7 @@ export const asignarCodigos = createServerFn({ method: "POST" })
             codigo,
             folio,
             invitadaPor: cuenta?.id ?? null,
+            revendedorId,
           });
           if (!creada.ok) {
             errores.push({ correo, motivo: creada.motivo });

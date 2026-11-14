@@ -70,7 +70,10 @@ function autorizado(req, url) {
 }
 
 /** Clientes de YouTube, en orden: `web_embedded` sirve audio COMPLETO sin PO. */
-const CLIENTES = ["web_embedded", "mweb"];
+// Los mismos clientes anónimos que usa la app (ver ytdlp_args.go): YouTube ya
+// no entrega formatos de audio a `web_embedded`/`mweb` en muchos videos, pero
+// `tv_embedded` y `android_vr` sí, sin PO token ni sesión.
+const CLIENTES = ["tv_embedded", "android_vr", "web_embedded", "mweb"];
 const MARGEN_DURACION_S = 40;
 const TIMEOUT_BUSQUEDA_MS = 20_000;
 const TIMEOUT_URL_MS = 15_000;
@@ -89,7 +92,7 @@ function ytDlp(args, ms) {
   return new Promise((ok, mal) => {
     execFile(
       "yt-dlp",
-      ["--no-warnings", "--no-playlist", ...args],
+      ["--no-warnings", "--no-playlist", "--js-runtimes", "node", ...args],
       { timeout: ms, maxBuffer: 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => {
         if (err) mal(new Error(`yt-dlp falló (${err.code ?? err.signal ?? err.message}): ${String(stderr || stdout).slice(0, 400)}`));

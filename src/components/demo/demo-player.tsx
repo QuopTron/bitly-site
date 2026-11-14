@@ -586,14 +586,21 @@ export default function DemoPlayer({ onCuenta }: Props) {
       // fallar, un canal respondió 503, el isolate se despertó tarde). Antes
       // eso obligaba a pulsar la fila otra vez; ahora se reintenta una vez
       // sola, sin que el visitante tenga que contar clics.
+      const tPrimero = Date.now();
       let audioResuelto = await audioDe(p);
       if (!audioResuelto || !audioResuelto.url) {
+        // Si el primer intento ya agotó su reloj (o tardó casi medio minuto),
+        // el reintento NO puede volver a esperar otros 90 s: el backend ya
+        // tuvo su arranque y el visitante vería dos minutos de spinner. Se le
+        // da un techo corto; si el host terminó de despertar, alcanza.
+        const lentoDeVerdad =
+          audioResuelto?.motivo === "rescate-tiempo-agotado" || Date.now() - tPrimero > 20_000;
         await new Promise((listo) => setTimeout(listo, 600));
         if (orden !== pendiente.current) {
           clearTimeout(lento);
           return;
         }
-        audioResuelto = await audioDe(p);
+        audioResuelto = await audioDe(p, [], lentoDeVerdad ? 30_000 : undefined);
       }
       if (orden !== pendiente.current) {
         clearTimeout(lento);

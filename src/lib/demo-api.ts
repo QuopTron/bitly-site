@@ -161,12 +161,15 @@ export async function buscarDemo(opts: {
 const ESPERA_MAXIMA_RESCATE_MS = 90_000;
 
 /** Resuelve la URL que suena para una pista, o `null` si ningún canal responde. */
-export async function rescatarDemo(pista: PistaParaAudio): Promise<AudioRescatado | null> {
+export async function rescatarDemo(
+  pista: PistaParaAudio,
+  topeMs = ESPERA_MAXIMA_RESCATE_MS,
+): Promise<AudioRescatado | null> {
   try {
     const { carga } = await sellar(pista);
     let reloj: ReturnType<typeof setTimeout> | undefined;
     const techo = new Promise<null>((listo) => {
-      reloj = setTimeout(() => listo(null), ESPERA_MAXIMA_RESCATE_MS);
+      reloj = setTimeout(() => listo(null), topeMs);
     });
     try {
       return (await Promise.race([

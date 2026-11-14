@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AtSign,
+  Camera,
   Check,
   ClipboardCopy,
   Gem,
@@ -21,12 +22,15 @@ import {
 import ModalWrapper from "@/components/ui/modal-wrapper";
 import { i18n, useI18n } from "@/lib/i18n";
 import { navegarA } from "@/lib/navegacion";
+import { referidoActual } from "@/lib/referidos";
 import {
   guardarTokenCuenta,
   leerTokenCuenta,
   quitarTokenCuenta,
 } from "@/lib/cuentas-cliente";
+import { achicarFoto } from "@/lib/foto-perfil";
 import {
+  cambiarFoto,
   confirmarCambio,
   confirmarCuenta,
   eliminarCuenta,
@@ -182,6 +186,9 @@ export default function CuentaModal({ open, onClose }: Props) {
 
   const [cargando, setCargando] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  /** Hay una foto achicándose o viajando al servidor. */
+  const [fotoOcupada, setFotoOcupada] = useState(false);
+  const archivoFoto = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
   const [activado, setActivado] = useState(false);
@@ -234,6 +241,32 @@ export default function CuentaModal({ open, onClose }: Props) {
       setCargando(false);
     }
   }, []);
+
+  /**
+   * Cambia la foto de perfil: se achica en el navegador y se guarda en la
+   * cuenta. El mismo archivo y el mismo tope que usa la app.
+   */
+  async function elegirFoto(archivo: File | null) {
+    if (!archivo) return;
+    const token = leerTokenCuenta();
+    if (!token) return;
+    setFotoOcupada(true);
+    setError(null);
+    try {
+      const foto = await achicarFoto(archivo);
+      const r = await cambiarFoto({ data: { token, foto } });
+      if (!r.ok) {
+        setError(i18n("cuentaErrorServidor"));
+        return;
+      }
+      setCuenta(r.cuenta);
+    } catch {
+      setError(i18n("cuentaErrorServidor"));
+    } finally {
+      setFotoOcupada(false);
+      if (archivoFoto.current) archivoFoto.current.value = "";
+    }
+  }
 
   function setModoInicial() {
     setPaso("login");
@@ -378,7 +411,9 @@ export default function CuentaModal({ open, onClose }: Props) {
     setGuardando(true);
     setError(null);
     try {
-      const r = await registrarCuenta({ data: { usuario, correo, clave } });
+      const r = await registrarCuenta({
+        data: { usuario, correo, clave, ref: referidoActual() ?? "" },
+      });
       if (!r.ok) {
         setError(
           r.motivo === "existe"
@@ -724,13 +759,37 @@ export default function CuentaModal({ open, onClose }: Props) {
           {/* Ficha: quién sos y en qué estado está la cuenta. */}
           <div className="relative overflow-hidden rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/15 via-primary/5 to-transparent p-3.5">
             <div className="flex items-center gap-2.5">
-              <span
-                aria-hidden
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20"
-                style={{ backgroundImage: "var(--gradiente-marca)" }}
+              <button
+                type="button"
+                onClick={() => archivoFoto.current?.click()}
+                title={t("cuentaCambiarFoto")}
+                aria-label={t("cuentaCambiarFoto")}
+                className="group relative h-11 w-11 shrink-0 overflow-hidden rounded-full text-sm font-bold text-primary-foreground shadow-lg shadow-primary/20 transition active:scale-95"
+                style={cuenta.foto ? undefined : { backgroundImage: "var(--gradiente-marca)" }}
               >
-                {(cuenta.usuario[0] ?? "b").toUpperCase()}
-              </span>
+                {cuenta.foto ? (
+                  <img src={cuenta.foto} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center">
+                    {(cuenta.usuario[0] ?? "b").toUpperCase()}
+                  </span>
+                )}
+                <span className="absolute inset-x-0 bottom-0 flex items-center justify-center bg-black/45 py-0.5 text-white opacity-0 transition group-hover:opacity-100">
+                  <Camera className="h-3 w-3" aria-hidden />
+                </span>
+                {fotoOcupada && (
+                  <span className="absolute inset-0 grid place-items-center bg-background/70">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  </span>
+                )}
+              </button>
+              <input
+                ref={archivoFoto}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => void elegirFoto(e.target.files?.[0] ?? null)}
+              />
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-foreground">
                   <span className="truncate">@{cuenta.usuario}</span>

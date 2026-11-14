@@ -906,6 +906,8 @@ export const DICT: Record<string, [string, string]> = {
   cuentaCargando:       ["Cargando tu cuenta.",                      "Loading your account."],
   cuentaHola:           ["Hola, {nombre}",                           "Hi, {nombre}"],
   cuentaSalir:          ["Cerrar sesión",                            "Sign out"],
+  cuentaCambiarFoto:    ["Cambiar foto de perfil",                    "Change profile photo"],
+  cuentaQuitarFoto:     ["Quitar foto",                               "Remove photo"],
   cuentaPedidos:        ["Tus pedidos",                              "Your orders"],
   cuentaSinPedidos:     ["Todavía no tenés pedidos en esta cuenta. Las compras hechas con la sesión iniciada aparecen acá.",
                                                                    "You don't have orders in this account yet. Purchases made while signed in show up here."],

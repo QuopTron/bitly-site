@@ -34,6 +34,11 @@ export default defineConfig(({ mode }) => {
         external: ["cloudflare:sockets", "node:tls"],
       },
     },
+    preview: {
+      // En Windows `localhost` puede quedar en ::1 y el prerender no conecta.
+      // Fijar IPv4 hace que el servidor de vista previa y `fetch` coincidan.
+      host: "127.0.0.1",
+    },
     plugins: [
       tailwindcss(),
       tanstackStart({
