@@ -138,22 +138,29 @@ async function buscarRemoto(
   filtro: string | null,
   limite: number,
 ): Promise<ResultadoDemo> {
-  try {
-    const r = await buscarDemo({ consulta, ext, filtro, limite });
-    // El servidor puede haber contestado con OTRA fuente. Se etiqueta cada pista
-    // con la fuente que REALMENTE contestó —no con la elegida— porque ese id es
-    // el que después decide si su ISRC es autoritativo al rescatar el audio.
-    const cambio = Boolean(r.fuente && r.fuente !== ext);
-    const efectiva = (r.fuente ?? ext) as ExtensionId;
-    return {
-      pistas: r.items.map((i) => desdeItem(i, efectiva, r.origen === "respaldo")),
-      origen: r.origen,
-      otraFuente: cambio ? extensionDe(efectiva).nombre : null,
-      aviso: r.aviso,
-      limitado: r.limitado,
-    };
-  } catch {
-    return { pistas: [], origen: "respaldo" };
+  // Las fuentes externas fallan de forma intermitente (Bandcamp/Fastly,
+  // Invidious con rate limit). Un vacío NO se guarda en caché: se reintenta una
+  // vez para que el visitante no vea «sin resultados» por un fallo pasajero.
+  for (let intento = 0; ; intento++) {
+    try {
+      const r = await buscarDemo({ consulta, ext, filtro, limite });
+      // El servidor puede haber contestado con OTRA fuente. Se etiqueta cada pista
+      // con la fuente que REALMENTE contestó -no con la elegida- porque ese id es
+      // el que después decide si su ISRC es autoritativo al rescatar el audio.
+      const cambio = Boolean(r.fuente && r.fuente !== ext);
+      const efectiva = (r.fuente ?? ext) as ExtensionId;
+      const resultado: ResultadoDemo = {
+        pistas: r.items.map((i) => desdeItem(i, efectiva, r.origen === "respaldo")),
+        origen: r.origen,
+        otraFuente: cambio ? extensionDe(efectiva).nombre : null,
+        aviso: r.aviso,
+        limitado: r.limitado,
+      };
+      if (resultado.pistas.length > 0 || resultado.limitado || intento > 0) return resultado;
+    } catch {
+      if (intento > 0) return { pistas: [], origen: "respaldo" };
+    }
+    await new Promise((listo) => setTimeout(listo, 600));
   }
 }
 
