@@ -161,24 +161,39 @@ export async function buscarDemo(opts: {
 const ESPERA_MAXIMA_RESCATE_MS = 90_000;
 
 /** Resuelve la URL que suena para una pista, o `null` si ningún canal responde. */
+async function pedirRescate(
+  pista: PistaParaAudio,
+  topeMs: number,
+): Promise<AudioRescatado | null> {
+  const { carga } = await sellar(pista);
+  let reloj: ReturnType<typeof setTimeout> | undefined;
+  const techo = new Promise<null>((listo) => {
+    reloj = setTimeout(() => listo(null), topeMs);
+  });
+  try {
+    return (await Promise.race([
+      demoRescatar({ data: carga }) as Promise<AudioRescatado | null>,
+      techo,
+    ])) as AudioRescatado | null;
+  } finally {
+    if (reloj) clearTimeout(reloj);
+  }
+}
+
 export async function rescatarDemo(
   pista: PistaParaAudio,
   topeMs = ESPERA_MAXIMA_RESCATE_MS,
 ): Promise<AudioRescatado | null> {
   try {
-    const { carga } = await sellar(pista);
-    let reloj: ReturnType<typeof setTimeout> | undefined;
-    const techo = new Promise<null>((listo) => {
-      reloj = setTimeout(() => listo(null), topeMs);
-    });
-    try {
-      return (await Promise.race([
-        demoRescatar({ data: carga }) as Promise<AudioRescatado | null>,
-        techo,
-      ])) as AudioRescatado | null;
-    } finally {
-      if (reloj) clearTimeout(reloj);
+    let respuesta = await pedirRescate(pista, topeMs);
+    // "servidor-ocupado" es una cola llena, no una pista inexistente: un
+    // segundo intento tras una pausa corta evita que un pico de visitas deje
+    // al oyente sin audio. Los fallos reales no se reintentan.
+    if (!respuesta?.url && respuesta?.motivo === "servidor-ocupado") {
+      await new Promise((listo) => setTimeout(listo, 900));
+      respuesta = await pedirRescate(pista, topeMs);
     }
+    return respuesta;
   } catch {
     return null;
   }

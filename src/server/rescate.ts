@@ -39,9 +39,11 @@
  *        · `YT_DLP_BACKEND_URL`: el backend local de desarrollo
  *          (`scripts/backend-yt-dlp.mjs`, `pnpm yt-dlp`). Va PRIMERO para el
  *          audio cuando está configurado: en la misma máquina resuelve en ~7 s;
- *        · `YATTEE_URL` (+ `YATTEE_AUTH` "user:pass"): yattee-server, el canal
- *          que usa PRODUCCIÓN (medido: búsqueda 3 s, extracción 2 s con caché y
- *          ~25 s la primera vez, relay con Range y vencimiento). Busca
+ *        · Invidious directo (`INVIDIOUS_URLS`): búsqueda PRINCIPAL en
+ *          producción. Para AUDIO queda apagado por defecto
+ *          (`INVIDIOUS_AUDIO_DIRECTO=1` lo habilita): sus URLs llevan la IP del
+ *          worker y el navegador puede recibir 403/HTML.
+ *        · `YATTEE_URL` (+ `YATTEE_AUTH` "user:pass"): canal de audio. Busca
  *          (`/api/v1/search`), extrae con `player-client=web_embedded` y
  *          devuelve un stream FIRMADO de su relay (`/proxy/relay`).
  *      Ambos proxyan el stream de googlevideo —el navegador nunca ve ese
@@ -73,6 +75,7 @@ import {
   type TrackResult,
 } from "@/server/matching";
 import { tocaConsulta } from "@/server/relevancia";
+import { crearSemaforo, esOcupado, type Semaforo } from "@/server/semaforo";
 
 /* ── Tipos del contrato ──────────────────────────────────────────── */
 
@@ -170,7 +173,10 @@ function claveDe(p: PeticionAudio): string {
 function clavesDe(p: PeticionAudio): string[] {
   const claves = [claveDe(p)];
   const isrc = normalizarISRC(p.isrc);
-  if (isrc) claves.push(`isrc:${isrc}`);
+  // La calidad también forma parte de la clave canónica: sin ella, un enlace
+  // FLAC guardado por una cuenta Premium podía servirse a una gratis (o al
+  // revés) sólo porque compartían ISRC.
+  if (isrc) claves.push(`isrc:${isrc}:${p.calidad ?? "flac"}`);
   return claves;
 }
 
@@ -203,6 +209,142 @@ function enlaceCacheado(claves: string[]): Enlace | null {
     if (e && e.expira > ahora) return e;
   }
   return null;
+}
+
+/* ── Caché de audio compartida entre isolates ─────────────────────── */
+
+type EntradaCacheAudio = { audio: AudioResuelto; expira: number };
+
+const CACHE_AUDIO_URL = "https://bitly-site.pages.dev/__bitly-cache/v2/audio/";
+
+/** `caches.default` en Cloudflare; `null` en Node o si el runtime no lo expone. */
+function cacheDelBorde(): Cache | null {
+  try {
+    const almacen = (globalThis as { caches?: { default?: Cache } }).caches;
+    return almacen?.default ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function peticionCacheAudio(clave: string): Request {
+  return new Request(`${CACHE_AUDIO_URL}${encodeURIComponent(clave)}`, { method: "GET" });
+}
+
+/** Enlace guardado por OTRO isolate: evita repetir la extracción al mismo host. */
+async function leerCacheAudio(claves: string[]): Promise<Enlace | null> {
+  const cache = cacheDelBorde();
+  if (!cache) return null;
+  for (const clave of claves) {
+    try {
+      const respuesta = await cache.match(peticionCacheAudio(clave));
+      if (!respuesta) continue;
+      const entrada = (await respuesta.json()) as EntradaCacheAudio;
+      if (!entrada?.audio || !entrada.expira || entrada.expira <= Date.now() + 30_000) {
+        void cache.delete(peticionCacheAudio(clave)).catch(() => undefined);
+        continue;
+      }
+      return { ...entrada.audio, expira: entrada.expira };
+    } catch {
+      // Una caché lenta o corrupta no puede tumbar una reproducción.
+    }
+  }
+  return null;
+}
+
+/**
+ * Publica un enlace en la caché del borde para que los demás isolates del
+ * mismo centro de datos lo reutilicen. Sólo enlaces con vida útil suficiente:
+ * un token que vence en 40 s no gana nada y ensucia la caché.
+ */
+async function guardarCacheAudio(claves: string[], enlace: Enlace): Promise<void> {
+  const cache = cacheDelBorde();
+  if (!cache) return;
+  const segundos = Math.floor((enlace.expira - Date.now()) / 1000) - 60;
+  if (segundos < 60) return;
+  const ttl = Math.min(segundos, 45 * 60);
+  const { expira, ...audio } = enlace;
+  const cuerpo: EntradaCacheAudio = { audio, expira };
+  const respuesta = new Response(JSON.stringify(cuerpo), {
+    headers: {
+      "content-type": "application/json",
+      "cache-control": `public, max-age=${ttl}`,
+    },
+  });
+  for (const clave of claves) {
+    try {
+      await cache.put(peticionCacheAudio(clave), respuesta.clone());
+    } catch {
+      // La caché es una optimización; si falla, el rescate sigue normal.
+    }
+  }
+}
+
+/* ── Topes de concurrencia por isolate ────────────────────────────── */
+
+function numeroEnv(nombre: string, defecto: number, minimo: number, maximo: number): number {
+  const valor = Number(process.env[nombre]);
+  if (!Number.isFinite(valor)) return defecto;
+  return Math.max(minimo, Math.min(maximo, Math.floor(valor)));
+}
+
+let cupoRescate: Semaforo | null = null;
+let cupoInvidious: Semaforo | null = null;
+let cupoInvidiousBusqueda: Semaforo | null = null;
+let cupoYatteeAudio: Semaforo | null = null;
+let cupoYatteeBusqueda: Semaforo | null = null;
+
+/** Rescates completos en paralelo: protege CPU/memoria y hosts externos. */
+function cupoRescateActual(): Semaforo {
+  cupoRescate ??= crearSemaforo(
+    numeroEnv("RESCATE_CONCURRENCIA", 12, 3, 32),
+    numeroEnv("RESCATE_COLA", 200, 20, 1000),
+    numeroEnv("RESCATE_ESPERA_MS", 40_000, 5_000, 80_000),
+  );
+  return cupoRescate;
+}
+
+/** Invidious es UNA instancia pública: no se le mandan ráfagas sin freno. */
+function cupoInvidiousActual(): Semaforo {
+  cupoInvidious ??= crearSemaforo(
+    numeroEnv("INVIDIOUS_CONCURRENCIA", 4, 1, 10),
+    numeroEnv("INVIDIOUS_COLA", 80, 10, 400),
+    numeroEnv("INVIDIOUS_ESPERA_MS", 25_000, 5_000, 60_000),
+  );
+  return cupoInvidious;
+}
+
+/**
+ * Búsquedas en Invidious: cupo aparte para que una ráfaga de búsquedas no
+ * consuma los turnos de audio (ni al revés). Es la misma instancia pública.
+ */
+function cupoInvidiousBusquedaActual(): Semaforo {
+  cupoInvidiousBusqueda ??= crearSemaforo(
+    2,
+    40,
+    numeroEnv("INVIDIOUS_BUSQUEDA_ESPERA_MS", 8_000, 3_000, 30_000),
+  );
+  return cupoInvidiousBusqueda;
+}
+
+/** Extracciones de audio de Yattee (yt-dlp + ffmpeg en Render). */
+function cupoYatteeAudioActual(): Semaforo {
+  cupoYatteeAudio ??= crearSemaforo(
+    numeroEnv("YATTEE_CONCURRENCIA", 2, 1, 8),
+    60,
+    20_000,
+  );
+  return cupoYatteeAudio;
+}
+
+/** Búsquedas de Yattee: baratas, pero tampoco ilimitadas. */
+function cupoYatteeBusquedaActual(): Semaforo {
+  cupoYatteeBusqueda ??= crearSemaforo(
+    numeroEnv("YATTEE_BUSQUEDA_CONCURRENCIA", 6, 2, 16),
+    80,
+    numeroEnv("YATTEE_BUSQUEDA_ESPERA_MS", 15_000, 5_000, 45_000),
+  );
+  return cupoYatteeBusqueda;
 }
 
 
@@ -1568,6 +1710,17 @@ function configInvidious(): string[] {
   return urls.length > 0 ? urls : ["https://yt.chocolatemoo53.com"];
 }
 
+/**
+ * Las URLs de audio de Invidious llevan `ip=` del host que las firmó: el
+ * navegador del visitante sale por otra IP y el stream puede dar 403 o HTML
+ * (MEDIA_ERR_SRC_NOT_SUPPORTED). Por eso este canal NO se usa para audio por
+ * defecto; queda como opt-in para instancias que proxyean el stream o para
+ * pruebas desde la misma red. La búsqueda sí lo usa sin problema.
+ */
+function invidiousAudioDirecto(): boolean {
+  return /^(1|true|si|sí)$/i.test((process.env.INVIDIOUS_AUDIO_DIRECTO ?? "").trim());
+}
+
 /** Cuarentena por base: un Render en OOM no se reintenta en cada canción. */
 const YATTEE_CAIDO_MS = 60_000;
 const yatteeCaidos = new Map<string, number>();
@@ -1763,24 +1916,13 @@ function falloYattee(): boolean {
  * host muere por OOM ("memoria llena"). El cupo encola en vez de rechazar: el
  * audio sale igual, sólo espera su turno.
  */
-const MAX_YATTEE_AUDIO = Math.max(1, Math.min(8, Number(process.env.YATTEE_CONCURRENCIA) || 2));
-let yatteeActivos = 0;
-const yatteeEspera: Array<() => void> = [];
+function conCupoYattee<T>(tarea: () => Promise<T>): Promise<T> {
+  return cupoYatteeAudioActual().ejecutar(tarea);
+}
 
-async function conCupoYattee<T>(tarea: () => Promise<T>): Promise<T> {
-  if (yatteeActivos < MAX_YATTEE_AUDIO) {
-    yatteeActivos++;
-  } else {
-    // El turno se TRANSFIERE desde quien libera, así `yatteeActivos` no baja.
-    await new Promise<void>((resolver) => yatteeEspera.push(resolver));
-  }
-  try {
-    return await tarea();
-  } finally {
-    const siguiente = yatteeEspera.shift();
-    if (siguiente) siguiente();
-    else yatteeActivos--;
-  }
+/** Las búsquedas no lanzan ffmpeg, pero tampoco pueden saturar el Render. */
+function conCupoBusquedaYattee<T>(tarea: () => Promise<T>): Promise<T> {
+  return cupoYatteeBusquedaActual().ejecutar(tarea);
 }
 
 /** GET JSON contra yattee con auth básica. Nunca lanza: `null` es "falló". */
@@ -1825,8 +1967,40 @@ async function pedirYattee<T>(
 /** Ultimo estado HTTP de Invidious directo: explica un `null` en los logs. */
 let ultimoEstadoInvidious = 0;
 
-/** GET JSON contra Invidious, con un reintento para 5xx/cortes. */
+/** Una instancia que acaba de fallar no se reintenta en cada canción. */
+const invidiousCaidos = new Map<string, number>();
+const INVIDIOUS_CAIDO_MS = 60_000;
+
+function invidiousVivas(): string[] {
+  const ahora = Date.now();
+  const todas = configInvidious();
+  const vivas = todas.filter((base) => (invidiousCaidos.get(base) ?? 0) <= ahora);
+  return vivas.length > 0 ? vivas : todas;
+}
+
+function marcarInvidiousCaido(base: string): void {
+  if (base) invidiousCaidos.set(base, Date.now() + INVIDIOUS_CAIDO_MS);
+}
+
+function marcarInvidiousVivo(base: string): void {
+  if (base) invidiousCaidos.delete(base);
+}
+
+/** GET JSON contra Invidious, con cupo por isolate y un reintento. */
 async function pedirInvidious<T>(base: string, ruta: string, ms: number): Promise<T | null> {
+  return cupoInvidiousActual()
+    .ejecutar(() => pedirInvidiousInterno<T>(base, ruta, ms))
+    .catch(() => null);
+}
+
+/** Igual que `pedirInvidious`, pero con el cupo liviano de búsquedas. */
+async function pedirInvidiousBusqueda<T>(base: string, ruta: string, ms: number): Promise<T | null> {
+  return cupoInvidiousBusquedaActual()
+    .ejecutar(() => pedirInvidiousInterno<T>(base, ruta, ms))
+    .catch(() => null);
+}
+
+async function pedirInvidiousInterno<T>(base: string, ruta: string, ms: number): Promise<T | null> {
   ultimoEstadoInvidious = 0;
   for (let intento = 0; intento < 2; intento++) {
     const control = new AbortController();
@@ -1839,12 +2013,20 @@ async function pedirInvidious<T>(base: string, ruta: string, ms: number): Promis
           "User-Agent": "Bitly/1.0 (+https://bitly-site.pages.dev)",
         },
       });
-      if (res.ok) return (await res.json()) as T;
+      if (res.ok) {
+        marcarInvidiousVivo(base);
+        return (await res.json()) as T;
+      }
       ultimoEstadoInvidious = res.status;
-      if (res.status < 500 || intento === 1) return null;
+      if (res.status < 500 && res.status !== 429) return null;
+      if (intento === 1) {
+        marcarInvidiousCaido(base);
+        return null;
+      }
     } catch (e) {
       ultimoEstadoInvidious = -1;
       if (intento === 1) {
+        marcarInvidiousCaido(base);
         console.warn(`[yt] invidious ${base}: ${e instanceof Error ? e.message : e}`);
         return null;
       }
@@ -2077,10 +2259,12 @@ async function buscarCandidatosYattee(
   if (!consulta) return [];
 
   const pedir = async (q: string) => {
-    const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
-      cfg,
-      `/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
-      TIMEOUT_YT_BUSQUEDA_MS,
+    const resultados = await conCupoBusquedaYattee(() =>
+      pedirYattee<ResultadoBusquedaYattee[]>(
+        cfg,
+        `/api/v1/search?q=${encodeURIComponent(q)}&type=video`,
+        TIMEOUT_YT_BUSQUEDA_MS,
+      ),
     );
     return (Array.isArray(resultados) ? resultados : []).filter((r) => !!r.videoId && !r.liveNow);
   };
@@ -2282,19 +2466,29 @@ async function rescatarEnBackendPropio(
 }
 
 /**
- * Pide el audio al canal de YouTube. El backend local va PRIMERO cuando está
- * configurado (desarrollo: `pnpm yt-dlp` resuelve en ~7 s en la misma máquina);
- * en producción no hay backend propio publicado y el canal es yattee, que
- * resuelve el material de nicho en ~25 s la primera vez y ~2 s con la caché de
- * su extractor.
+ * Pide el audio al canal de YouTube.
+ *
+ * Orden pensado para aguantar muchas visitas:
+ *   1. Backend local, sólo en desarrollo.
+ *   2. Yattee (relay firmado). Es el único canal de audio de YouTube que
+ *      funciona para cualquier visitante: el relay descarga con SU IP y el
+ *      navegador recibe un stream del propio Yattee.
+ *   3. Invidious directo, sólo si `INVIDIOUS_AUDIO_DIRECTO=1`. Sus URLs
+ *      `videoplayback` quedan firmadas con la IP del worker y el navegador
+ *      suele recibir 403/HTML.
+ *
+ * Cada base está en cuarentena tras un fallo de red/5xx para no castigar al
+ * mismo host con cada canción. Los semáforos impiden que una ráfaga lance
+ * decenas de extracciones a la vez.
  */
 async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; duracion: number } | null> {
   const cfg = configYouTube();
   console.warn(`[yt] rescatarYouTube local=${!!cfg.local} yattees=${cfg.yattees.length}`);
   if (cfg.local) {
-    const propio = await rescatarEnBackendPropio(p, cfg.local);
+    const propio = await rescatarEnBackendPropio(p, cfg.local).catch(() => null);
     if (propio) return propio;
   }
+
   if (cfg.yattees.length > 0) {
     // Gracia corta: el despertador del sitio (demoDespertar) ya le da 40 s al
     // arranque desde que se abre la demo. Si el audio entrara a esperar otro
@@ -2302,21 +2496,30 @@ async function rescatarYouTube(p: PeticionAudio): Promise<{ stream: string; dura
     // "no hay audio" justo cuando el backend terminaba de despertar. Con 6 s,
     // el primer clic falla rápido y el reintento del cliente encuentra la
     // instancia ya despierta.
-    await despertarYattee(6_000);
+    await despertarYattee(6_000).catch(() => false);
     for (const base of yatteesVivas()) {
       ultimoEstadoYt = 0;
-      const resuelto = await rescatarEnYattee(p, { yattee: base, auth: cfg.auth });
-      if (resuelto) return resuelto;
+      try {
+        const resuelto = await rescatarEnYattee(p, { yattee: base, auth: cfg.auth });
+        if (resuelto) return resuelto;
+      } catch {
+        // Si esta base está saturada, se prueba la siguiente o se devuelve null.
+      }
       // Si la base contestó bien (200) pero no tenía la pista, la otra instancia
       // del mismo repo tampoco la va a tener: no se paga otro timeout.
       if (!falloYattee()) break;
     }
   }
-  // Tercer canal: Invidious directo. Cubre el caso en que Yattee perdió
-  // sus ajustes o su instancia dejó de responder.
-  for (const base of configInvidious()) {
-    const resuelto = await rescatarEnInvidious(p, base);
-    if (resuelto) return resuelto;
+
+  if (invidiousAudioDirecto()) {
+    for (const base of invidiousVivas()) {
+      try {
+        const resuelto = await rescatarEnInvidious(p, base);
+        if (resuelto) return resuelto;
+      } catch {
+        // Una base ocupada/caída no cancela el resto del rescate.
+      }
+    }
   }
   return null;
 }
@@ -2332,33 +2535,45 @@ export async function buscarYouTubeBackend(consulta: string, limite: number): Pr
   console.warn(`[yt] buscarYouTubeBackend local=${!!cfg.local} yattees=${cfg.yattees.length}`);
   const tope = Math.max(1, Math.min(24, limite));
 
-  if (cfg.yattees.length > 0) {
-    // Gracia corta: si el servidor de Yattee está dormido, el ping lo despierta
-    // sin hacer esperar la búsqueda entera (el catálogo contesta igual).
-    await despertarYattee(6_000);
-    for (const base of yatteesVivas()) {
-      ultimoEstadoYt = 0;
-      const resultados = await pedirYattee<ResultadoBusquedaYattee[]>(
-        { yattee: base, auth: cfg.auth },
+  // Invidious directo primero: es una sola petición HTTP, no despierta ni
+  // encola extracciones en Yattee y su búsqueda ya cubre el catálogo de YouTube.
+  for (const base of invidiousVivas()) {
+    try {
+      const resultados = await pedirInvidiousBusqueda<ResultadoBusquedaYattee[]>(
+        base,
         `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
         TIMEOUT_YT_BUSQUEDA_MS,
       );
       const encontrados = aItemsYoutube(resultados, tope);
-      // Yattee no encontró nada (o no contestó): si hay backend propio, se
-      // prueba ahí. Es justo el caso del folklore que el índice no cubre.
       if (encontrados.length > 0) return encontrados;
-      if (!falloYattee()) break;
+    } catch {
+      // Base saturada/caída: se prueba la siguiente o se cae a Yattee.
     }
   }
 
-  for (const base of configInvidious()) {
-    const resultados = await pedirInvidious<ResultadoBusquedaYattee[]>(
-      base,
-      `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
-      TIMEOUT_YT_BUSQUEDA_MS,
-    );
-    const encontrados = aItemsYoutube(resultados, tope);
-    if (encontrados.length > 0) return encontrados;
+  if (cfg.yattees.length > 0) {
+    // Gracia corta: si el servidor de Yattee está dormido, el ping lo despierta
+    // sin hacer esperar la búsqueda entera (el catálogo contesta igual).
+    await despertarYattee(6_000).catch(() => false);
+    for (const base of yatteesVivas()) {
+      ultimoEstadoYt = 0;
+      try {
+        const resultados = await conCupoBusquedaYattee(() =>
+          pedirYattee<ResultadoBusquedaYattee[]>(
+            { yattee: base, auth: cfg.auth },
+            `/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`,
+            TIMEOUT_YT_BUSQUEDA_MS,
+          ),
+        );
+        const encontrados = aItemsYoutube(resultados, tope);
+        // Yattee no encontró nada (o no contestó): si hay backend propio, se
+        // prueba ahí. Es justo el caso del folklore que el índice no cubre.
+        if (encontrados.length > 0) return encontrados;
+      } catch {
+        // Saturado: no se bloquea la búsqueda entera.
+      }
+      if (!falloYattee()) break;
+    }
   }
 
   if (!cfg.local) return null;
@@ -3257,12 +3472,32 @@ export async function resolverAudio(p: PeticionAudio): Promise<{ audio: AudioRes
     motivoUltimoRescate = null;
     return { audio: cacheado, motivo: null };
   }
+
+  // Caché del borde: otro isolate ya resolvió esta pista. Es lo que evita que
+  // 100 visitas sobre la misma canción paguen 100 extracciones al mismo host.
+  const compartido = await leerCacheAudio(claves);
+  if (compartido && !evitar.has(compartido.canal)) {
+    guardarEnlace(claves, compartido);
+    motivoUltimoRescate = null;
+    return { audio: compartido, motivo: null };
+  }
+
   const vueloKey = `${claves[0]}|${[...evitar].sort().join(",")}`;
   const enCurso = enVuelo.get(vueloKey);
   if (enCurso) return enCurso;
 
   const tarea = (async () => {
-    const resuelto = await conTope(resolverAudioInterno(p, claves, evitar), TOPE_RESCATE_MS).catch(() => null);
+    const resuelto = await conTope(
+      cupoRescateActual().ejecutar(() => resolverAudioInterno(p, claves, evitar)),
+      TOPE_RESCATE_MS,
+    ).catch((error) => {
+      motivoUltimoRescate = esOcupado(error) ? "servidor-ocupado" : "rescate-tiempo-agotado";
+      return null;
+    });
+    if (resuelto) {
+      const enlace = enlaceCacheado(claves);
+      if (enlace) await guardarCacheAudio(claves, enlace);
+    }
     return { audio: resuelto, motivo: resuelto ? null : (motivoUltimoRescate ?? "rescate-tiempo-agotado") };
   })().finally(() => {
     if (enVuelo.get(vueloKey) === tarea) enVuelo.delete(vueloKey);

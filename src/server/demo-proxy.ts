@@ -55,6 +55,7 @@ import { esCodigoPremiumActivo } from "@/lib/premium-check";
 import { letrasImpl, type Letras, type PeticionLetras } from "@/server/letras";
 import { obtenerIPCliente } from "@/server/ip";
 import { cuentaDeToken } from "@/server/cuentas";
+import { crearSemaforo } from "@/server/semaforo";
 import { pareceDesvio, tocaConsulta } from "@/server/relevancia";
 import { EXTENSIONES, categoriaDeFiltro, type ExtensionId } from "@/lib/demo-extensiones";
 import type { Item, TipoResultado } from "@/server/extensions";
@@ -124,11 +125,82 @@ function crearCupo(maxPorIp: number, maxGlobal: number) {
 // llegaba a 12 y veía «demasiadas búsquedas» con el buscador en la mano. Treinta
 // sigue siendo anti-abuso (un script hace eso en un segundo) y no molesta a
 // quien está probando la demo de verdad.
-const dentroDeCupo = crearCupo(30, 240);
-/** El rescate es más caro (mint firmado) y tiene caché, así que su techo es menor. */
-const dentroDeCupoRescate = crearCupo(20, 240);
+// El tope global es por isolate y se pensó para proteger a los hosts externos.
+// Con la caché del borde y los semáforos de rescate, 240/min era demasiado bajo
+// para un pico de visitas: una sola instancia bloqueaba a todos. El anti-abuso
+// real sigue siendo por IP; el global queda como válvula de emergencia amplia.
+const dentroDeCupo = crearCupo(60, 3000);
+/** El rescate es más caro, pero el caché hace que repetir una canción no cueste. */
+const dentroDeCupoRescate = crearCupo(40, 3000);
 /** Letras: una consulta por pista a LRCLIB; sin cupo era un proxy abierto. */
-const dentroDeCupoLetras = crearCupo(45, 240);
+const dentroDeCupoLetras = crearCupo(45, 3000);
+
+/** Búsquedas completas en paralelo por isolate; el resto espera su turno. */
+const cupoBusquedas = crearSemaforo(16, 160, 12_000);
+
+/* ── Caché de búsquedas compartida entre isolates ─────────────────── */
+
+type RespuestaBusqueda = {
+  origen: "extension" | "respaldo";
+  items: Item[];
+  aviso?: string;
+  fuente?: string;
+  limitado?: boolean;
+};
+
+const CACHE_BUSQUEDA_URL = "https://bitly-site.pages.dev/__bitly-cache/v2/buscar/";
+const CACHE_BUSQUEDA_TTL_S = 180;
+
+function cacheDelBorde(): Cache | null {
+  try {
+    const almacen = (globalThis as { caches?: { default?: Cache } }).caches;
+    return almacen?.default ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function peticionCacheBusqueda(clave: string): Request {
+  return new Request(`${CACHE_BUSQUEDA_URL}${encodeURIComponent(clave)}`, { method: "GET" });
+}
+
+async function leerCacheBusqueda(clave: string): Promise<RespuestaBusqueda | null> {
+  const cache = cacheDelBorde();
+  if (!cache) return null;
+  try {
+    const respuesta = await cache.match(peticionCacheBusqueda(clave));
+    if (!respuesta) return null;
+    const datos = (await respuesta.json()) as RespuestaBusqueda;
+    if (!Array.isArray(datos?.items) || datos.items.length === 0) return null;
+    return datos;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Una búsqueda popular no debe recorrer seis extensiones por cada visitante.
+ * Sólo se guardan resultados útiles (con filas y sin tope de cuota): un fallo
+ * transitorio tiene que poder reintentarse en el siguiente intento.
+ */
+async function guardarCacheBusqueda(clave: string, respuesta: RespuestaBusqueda): Promise<void> {
+  if (respuesta.items.length === 0 || respuesta.limitado) return;
+  const cache = cacheDelBorde();
+  if (!cache) return;
+  try {
+    await cache.put(
+      peticionCacheBusqueda(clave),
+      new Response(JSON.stringify(respuesta), {
+        headers: {
+          "content-type": "application/json",
+          "cache-control": `public, max-age=${CACHE_BUSQUEDA_TTL_S}`,
+        },
+      }),
+    );
+  } catch {
+    // La búsqueda sigue aunque la caché no esté disponible.
+  }
+}
 
 async function quienSolicita(): Promise<string> {
   return obtenerIPCliente();
@@ -490,6 +562,24 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   const limite = Math.max(1, Math.min(24, peticion.limite || 12));
   if (!consulta) return cerrar(data, { origen: "respaldo", items: [] });
 
+  const claveCache = `${peticion.ext}|${peticion.filtro ?? ""}|${limite}|${consulta.toLowerCase()}`;
+  const cacheada = await leerCacheBusqueda(claveCache);
+  if (cacheada) return cerrar(data, cacheada);
+
+  const responder = async (respuesta: RespuestaBusqueda): Promise<Cifrado> => {
+    await guardarCacheBusqueda(claveCache, respuesta);
+    return cerrar(data, respuesta);
+  };
+
+  /** Un semáforo lleno no rompe la búsqueda: se sigue con la fuente siguiente. */
+  const conCupo = async <T>(tarea: () => Promise<T>, siFalla: T): Promise<T> => {
+    try {
+      return await cupoBusquedas.ejecutar(tarea);
+    } catch {
+      return siFalla;
+    }
+  };
+
   let items: Item[] = [];
   /** Resultados que no tienen que ver con la consulta: último recurso. */
   let debiles: Item[] = [];
@@ -497,12 +587,9 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   let fuente: string | undefined;
 
   try {
-    const hallazgo = await buscarConFailover(
-      data.sesion,
-      consulta,
-      peticion.ext,
-      peticion.filtro,
-      limite,
+    const hallazgo = await conCupo(
+      () => buscarConFailover(data.sesion, consulta, peticion.ext, peticion.filtro, limite),
+      null,
     );
     if (hallazgo) {
       items = hallazgo.items;
@@ -516,7 +603,7 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   }
 
   if (utilizable(items, consulta, peticion.filtro)) {
-    return cerrar(data, { origen: "extension", items, aviso, fuente });
+    return responder({ origen: "extension", items, aviso, fuente });
   }
   if (items.length > 0) {
     // El catálogo contestó con el disco de otro artista, con resultados que
@@ -527,7 +614,10 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
   }
 
   try {
-    items = await buscarRespaldo(consulta, peticion.filtro, limite);
+    items = await conCupo(
+      () => buscarRespaldo(consulta, peticion.filtro, limite),
+      [] as Item[],
+    );
     items = ordenarResultados(items, consulta);
   } catch {
     items = [];
@@ -542,32 +632,35 @@ export async function buscarImpl(carga: Carga): Promise<Cifrado> {
     if (!categoria || categoria === "tracks") {
       // Bandcamp: el orden y el filtro de versiones también aplican. Antes se
       // devolvía crudo y un tributo/remix podía quedar primero.
-      const bc = ordenarResultados(await buscarBandcampItems(consulta, limite), consulta);
+      const bc = ordenarResultados(
+        await conCupo(() => buscarBandcampItems(consulta, limite), [] as Item[]),
+        consulta,
+      );
       // Los items de Bandcamp se etiquetan como "deezer" sólo por el contrato
       // del cliente (los tracks no se abren como álbum/artista y así el audio
       // sigue el camino normal); no publican ISRC, así que no acreditan
       // identidad de Deezer ni de ninguna otra fuente.
       if (utilizable(bc, consulta, peticion.filtro)) {
-        return cerrar(data, { origen: "respaldo", items: bc, aviso, fuente: "deezer" });
+        return responder({ origen: "respaldo", items: bc, aviso, fuente: "deezer" });
       }
     }
-    const ytCrudo = await buscarYouTubeBackend(consulta, limite);
+    const ytCrudo = await conCupo(() => buscarYouTubeBackend(consulta, limite), null);
     const yt = ytCrudo ? ordenarResultados(ytCrudo, consulta) : [];
     if (utilizable(yt, consulta, peticion.filtro)) {
-      return cerrar(data, { origen: "respaldo", items: yt, aviso, fuente });
+      return responder({ origen: "respaldo", items: yt, aviso, fuente });
     }
   }
 
   // Nada mejor: se devuelven los resultados débiles antes que una lista vacía.
   if (items.length === 0 && debiles.length > 0) {
-    return cerrar(data, { origen: "extension", items: debiles, aviso, fuente });
+    return responder({ origen: "extension", items: debiles, aviso, fuente });
   }
   // El catálogo de respaldo ES Deezer: decirlo hace dos cosas a la vez: la
   // interfaz etiqueta cada pista con `ext: "deezer"` —así su ISRC, que solo
   // Deezer publica, se usa como identidad autoritativa al rescatar— y al abrir
   // un álbum o artista de estos resultados la petición va a la fuente que
   // realmente los trajo.
-  return cerrar(data, { origen: "respaldo", items, aviso, fuente: items.length > 0 ? "deezer" : fuente });
+  return responder({ origen: "respaldo", items, aviso, fuente: items.length > 0 ? "deezer" : fuente });
 }
 
 /* ── Apertura de contenidos (álbum, artista, lista) ──────────────── */
