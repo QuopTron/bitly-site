@@ -2893,6 +2893,14 @@ const TOPE_MONO_INICIAL_MS = 2_500;
  */
 const CORTESIA_MONO_MS = 400;
 /**
+ * Ventaja de monochrome/relay sobre Tidal en la carrera sin pérdida. Tidal
+ * entrega AAC 320 y arranca YA, así que sin esta cortesía ganaría casi siempre
+ * a monochrome (FLAC) por unos cientos de ms. Con Qobuz pausado no hay FLAC
+ * de relay: la cortesía es corta para que el clic no espere de más.
+ */
+const CORTESIA_TIDAL_MS = 350;
+const CORTESIA_TIDAL_CON_QOBUZ_MS = 1_500;
+/**
  * Reloj del tramo sin pérdida (monochrome + relay). Pasado este tiempo sin
  * audio se sigue con Bandcamp y YouTube en vez de quedarse esperando: con 6 s
  * alcanza para el presupuesto del mint (5,5 s) y su sonda `etsp`.
@@ -2983,6 +2991,14 @@ async function resolverAudioInterno(
   // ese ISRC, es la misma grabación por definición (el código es único).
   const isrcPista = bienFormado ? isrcPedido : null;
   const pedido = { ...p, titulo, artista, album, duracionMs };
+
+  // Tidal arranca YA, en paralelo con la identidad y con Monochrome. Antes
+  // esperaba a que venciera el tramo sin pérdida (6 s) y recién ahí empezaba su
+  // propia búsqueda (~1-2 s): con Qobuz pausado eso era tiempo muerto.
+  const tidalParalelo =
+    !evitar.has("stash-tidal") && titulo
+      ? conTope(rescatarStashTidal(pedido), PRESUPUESTO_TIDAL_MS).catch(() => null)
+      : Promise.resolve(null);
 
   /** Enlace del canal YouTube (completo, del propio backend), ya cacheado. */
   const devolverYouTube = (yt: { stream: string; duracion: number }): AudioResuelto => {
@@ -3301,29 +3317,36 @@ async function resolverAudioInterno(
 
   type Ganador =
     | { canal: "monochrome"; mono: NonNullable<Awaited<ReturnType<typeof resolverMonochrome>>> }
-    | { canal: "stash-relay"; mint: Mint; c: Cand };
+    | { canal: "stash-relay"; mint: Mint; c: Cand }
+    | { canal: "stash-tidal"; tidal: NonNullable<Awaited<typeof tidalParalelo>> };
   // El reloj del tramo sin pérdida: sin él, dos canales que no tienen la pista
   // dejaban el `race` pendiente para siempre (nunca se llegaría a Bandcamp ni a
   // YouTube, que es justo el fallback que rescata el nicho).
+  const qobuzActivo = (configCache?.valor.bases.length ?? 0) > 0;
+  const cortesiaTidal = qobuzActivo ? CORTESIA_TIDAL_CON_QOBUZ_MS : CORTESIA_TIDAL_MS;
+  const tidalCarrera = cuandoHaya(dormir(cortesiaTidal).then(() => tidalParalelo));
+
   const ganador = await Promise.race([
     monoCarrera.then((m): Ganador => ({ canal: "monochrome", mono: m })),
     mintCarrera.then((r): Ganador => ({ canal: "stash-relay", mint: r.mint, c: r.c })),
-    dormir(PRESUPUESTO_SIN_PERDIDA_MS).then((): null => null),
+    tidalCarrera.then((t): Ganador => ({ canal: "stash-tidal", tidal: t })),
+    dormir(qobuzActivo ? PRESUPUESTO_SIN_PERDIDA_MS : 2_500).then((): null => null),
   ]);
   if (ganador) {
     motivoUltimoRescate = null;
     anotar(`gana=${ganador.canal}`);
     if (ganador.canal === "monochrome") return devolverMonochrome(ganador.mono);
+    if (ganador.canal === "stash-tidal") return devolverStashTidal(ganador.tidal);
     return devolverStash(ganador.mint, ganador.c);
   }
-  motivoUltimoRescate = "mono-stash-sin-audio";
+  motivoUltimoRescate = qobuzActivo ? "mono-stash-sin-audio" : "mono-sin-audio";
   anotar(`mono/stash sin audio (${candidatos.length} cands)`);
 
   // Tidal entrega AAC 320 progresivo (su FLAC es DASH y el navegador no lo
-  // abre). Va después del tramo sin pérdida -no compite con monochrome/Qobuz-
-  // y antes de Bandcamp/YouTube: mejor codec y catálogo de nicho.
+  // abre). Compite en la carrera de arriba con una cortesía para monochrome y,
+  // si no ganó, acá se recoge lo que haya quedado antes de Bandcamp/YouTube.
   if (!evitar.has("stash-tidal") && titulo) {
-    const tidal = await conTope(rescatarStashTidal(pedido), PRESUPUESTO_TIDAL_MS).catch(() => null);
+    const tidal = await tidalParalelo;
     if (tidal) {
       motivoUltimoRescate = null;
       return devolverStashTidal(tidal);
@@ -3410,8 +3433,15 @@ export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
     medir("stash-relay", async () => {
       const cfg = await traerConfigStash(true);
       if (!cfg) throw new Error("no se pudo leer lossless.json");
-      if (cfg.bases.length === 0) throw new Error("relay de Qobuz pausado (sin bases)");
-      return `${cfg.bases.length} relay(s) · ${cfg.bases.map((b) => new URL(b).host).join(", ")}`;
+      if (cfg.bases.length > 0) {
+        return `${cfg.bases.length} relay(s) · ${cfg.bases.map((b) => new URL(b).host).join(", ")}`;
+      }
+      // Stash retiró los relays compartidos de Qobuz (el campo `relays` ya no
+      // se lee upstream): el relay vivo del proyecto es el de Tidal.
+      if (cfg.tidalBase && cfg.tidalToken) {
+        return "Qobuz retirado por Stash · relay activo por Tidal";
+      }
+      throw new Error("sin relay de Qobuz ni de Tidal");
     }),
     medir("stash-tidal", async () => {
       const match = await buscarStashTidal(pedido);

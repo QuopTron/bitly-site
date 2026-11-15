@@ -776,7 +776,9 @@ function buildYouTubeChallengeSolver(playerJS) {
 
   try {
     var script = text.substring(0, markerIndex) + injection + text.substring(markerIndex);
-    eval(script);
+    // eval indirecto: corre en el ámbito global (igual que en el navegador) y
+    // el bundler no lo marca como eval directo, que rompe la minificación.
+    (0, eval)(script);
     var solver = root.__spotiflacYtChallengeSolver;
     return typeof solver === "function" ? solver : null;
   } catch (e) {
