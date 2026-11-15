@@ -686,14 +686,14 @@ async function firmarStashTidal(claveTexto: string, trackId: string, ts: number)
 }
 
 async function mintaStashTidal(trackId: string, limite: number): Promise<Mint | null> {
-  const config = await traerConfigStash();
+  let config = await traerConfigStash();
   if (!config || !config.tidalBase || !config.tidalToken) return null;
   const id = trackId.replace(/^td:/, "");
   if (!/^\d+$/.test(id)) return null;
-  const url = `${config.tidalBase}/stream/td:${id}?aac=only`;
 
   for (let intento = 0; intento <= REINTENTOS_BUSY; intento++) {
     if (Date.now() >= limite) return null;
+    const url = `${config.tidalBase}/stream/td:${id}?aac=only`;
     const ts = Math.floor(Date.now() / 1000);
     const firma = await firmarStashTidal(config.clave, id, ts);
     const control = new AbortController();
@@ -719,6 +719,15 @@ async function mintaStashTidal(trackId: string, limite: number): Promise<Mint | 
           continue;
         }
         return null;
+      }
+      // La config se cachea 6 h y la `relay_key` rota upstream: ante un 401/403
+      // se recarga UNA vez y se reintenta con la clave nueva, igual que el mint
+      // de Qobuz. Sin esto una rotación dejaba el canal mudo hasta el TTL.
+      if (res.status === 401 || res.status === 403) {
+        if (intento > 0) return null;
+        config = (await traerConfigStash(true)) ?? config;
+        if (!config.tidalBase || !config.tidalToken) return null;
+        continue;
       }
       if (!res.ok) return null;
       const cuerpo = (await res.json()) as {
@@ -3418,6 +3427,21 @@ export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
     }
   };
 
+  // El relay de Stash hoy es Tidal (Qobuz quedó retirado upstream): las dos
+  // filas del panel comparten la MISMA prueba para no mostrar una verde y la
+  // otra roja por dos peticiones simultáneas al mismo relay.
+  let saludTidal: Promise<{ titulo: string; host: string }> | null = null;
+  const comprobarTidal = () => {
+    saludTidal ??= (async () => {
+      const match = await buscarStashTidal(pedido);
+      if (!match) throw new Error("el catálogo de Tidal no devolvió la pista");
+      const mint = await mintaStashTidal(match.pista.id, Date.now() + PRESUPUESTO_TIDAL_MS);
+      if (!mint) throw new Error("el relay no entregó AAC progresivo");
+      return { titulo: match.pista.title, host: new URL(mint.url).host };
+    })();
+    return saludTidal;
+  };
+
   return Promise.all([
     medir("monochrome", async () => {
       const lista = await buscarMonochrome("Queen Bohemian Rhapsody", 6_000);
@@ -3439,16 +3463,14 @@ export async function probarCanalesDemo(): Promise<PruebaCanal[]> {
       // Stash retiró los relays compartidos de Qobuz (el campo `relays` ya no
       // se lee upstream): el relay vivo del proyecto es el de Tidal.
       if (cfg.tidalBase && cfg.tidalToken) {
-        return "Qobuz retirado por Stash · relay activo por Tidal";
+        const t = await comprobarTidal();
+        return `Qobuz retirado por Stash · Tidal OK (${t.host})`;
       }
       throw new Error("sin relay de Qobuz ni de Tidal");
     }),
     medir("stash-tidal", async () => {
-      const match = await buscarStashTidal(pedido);
-      if (!match) throw new Error("el catálogo de Tidal no devolvió la pista");
-      const mint = await mintaStashTidal(match.pista.id, Date.now() + PRESUPUESTO_TIDAL_MS);
-      if (!mint) throw new Error("el relay no entregó AAC progresivo");
-      return `${match.pista.title} · ${new URL(mint.url).host}`;
+      const t = await comprobarTidal();
+      return `${t.titulo} · ${t.host}`;
     }),
     medir("bandcamp", async () => {
       const bc = await resolverBandcamp(pedido);
