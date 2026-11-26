@@ -38,11 +38,17 @@ export const REPO_POR_DEFECTO = "QuopTron/bitly-audio";
 /**
  * Lee la configuración del entorno. `null` = no hay archivo frío.
  *
- * Si no hay `BITLY_AUDIO_TOKEN` se usa el token de datos que ya está en Pages:
- * el repo de audio es igual de privado y así no hay que mantener dos secretos.
+ * Si no hay `BITLY_AUDIO_TOKEN` se usan los tokens que ya están en Pages
+ * (`BITLY_DATA_TOKEN` o, como en producción, `BITLY_CODES_TOKEN`): el repo de
+ * audio es igual de privado y así no hay que mantener otro secreto.
  */
 export function configurar(): Config | null {
-  const token = String(process.env?.BITLY_AUDIO_TOKEN ?? process.env?.BITLY_DATA_TOKEN ?? "").trim();
+  const token = String(
+    process.env?.BITLY_AUDIO_TOKEN ??
+      process.env?.BITLY_DATA_TOKEN ??
+      process.env?.BITLY_CODES_TOKEN ??
+      "",
+  ).trim();
   const repos = String(process.env?.BITLY_AUDIO_REPOS ?? REPO_POR_DEFECTO)
     .split(",")
     .map((repo) => repo.trim())
