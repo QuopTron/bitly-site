@@ -175,6 +175,27 @@ async function buscarRemoto(
  */
 const enCurso = new Map<string, Promise<AudioRescatado | null>>();
 
+type AudioGuardado = { audio: AudioRescatado; hasta: number };
+
+const RESUELTO_MS = 10 * 60_000;
+const resueltos = new Map<string, AudioGuardado>();
+
+function claveResuelto(p: Pista): string {
+  const cuenta = codigoPremiumGuardado() || leerTokenCuenta() ? "premium" : "libre";
+  return `${p.id}|${p.ext}|${cuenta}`;
+}
+
+function guardarResuelto(p: Pista, audio: AudioRescatado) {
+  if (resueltos.size > 120) {
+    const ahora = Date.now();
+    for (const [clave, valor] of resueltos) {
+      if (valor.hasta <= ahora) resueltos.delete(clave);
+    }
+    if (resueltos.size > 160) resueltos.clear();
+  }
+  resueltos.set(claveResuelto(p), { audio, hasta: Date.now() + RESUELTO_MS });
+}
+
 /**
  * Canales que acaban de fallar EN ESTE navegador, con su vencimiento.
  *
@@ -225,7 +246,53 @@ async function resolverAudio(
   p.audioUrl = audio.url;
   p.canal = audio.canal ?? null;
   if (audio.duracion > 0) p.duracion = audio.duracion;
+  guardarResuelto(p, audio);
+  preconnectAudio(audio.url);
+  calentarAudio(audio.url);
   return audio;
+}
+
+const preconnectados = new Set<string>();
+const audiosCalientes = new Map<string, HTMLAudioElement>();
+
+function calentarAudio(url: string) {
+  if (typeof Audio === "undefined" || audiosCalientes.has(url)) return;
+  try {
+    const el = new Audio();
+    el.preload = "metadata";
+    el.src = url;
+    el.load();
+    audiosCalientes.set(url, el);
+    if (audiosCalientes.size > 3) {
+      const vieja = audiosCalientes.keys().next().value;
+      if (!vieja) return;
+      const anterior = audiosCalientes.get(vieja);
+      if (anterior) {
+        anterior.pause();
+        anterior.removeAttribute("src");
+        anterior.load();
+      }
+      audiosCalientes.delete(vieja);
+    }
+  } catch {
+    // Sin audio caliente se sigue igual: no es parte del camino crítico.
+  }
+}
+
+function preconnectAudio(url: string) {
+  if (typeof document === "undefined") return;
+  let origen: string;
+  try {
+    origen = new URL(url).origin;
+  } catch {
+    return;
+  }
+  if (preconnectados.has(origen)) return;
+  preconnectados.add(origen);
+  const enlace = document.createElement("link");
+  enlace.rel = "preconnect";
+  enlace.href = origen;
+  document.head.appendChild(enlace);
 }
 
 /**
@@ -245,6 +312,17 @@ export function audioDe(
   const descartados = [...new Set([...evitar, ...canalesCaidosAhora()])];
   if (p.audioUrl && descartados.length === 0) {
     return Promise.resolve({ url: p.audioUrl, duracion: p.duracion, canal: p.canal ?? undefined });
+  }
+  const guardado = resueltos.get(claveResuelto(p));
+  if (
+    guardado &&
+    guardado.hasta > Date.now() &&
+    (!guardado.audio.canal || !descartados.includes(guardado.audio.canal))
+  ) {
+    p.audioUrl = guardado.audio.url;
+    p.canal = guardado.audio.canal ?? null;
+    if (guardado.audio.duracion > 0) p.duracion = guardado.audio.duracion;
+    return Promise.resolve(guardado.audio);
   }
   // La lista entra en la clave: dos pedidos del mismo tema con canales
   // descartados distintos no pueden compartir la misma resolución.
@@ -268,6 +346,25 @@ export function letrasDe(p: Pista): Promise<Letras | null> {
 
 /** Sugerencias de arranque: evite que el marco se vea vacío al abrirlo. */
 export const SUGERIDAS = ["Daft Punk", "Rosalía", "Coldplay", "jazz", "blues", "guitarra"];
+
+let busquedaInicial: Promise<ResultadoDemo> | null = null;
+let calentamientoInicial: Promise<AudioRescatado | null> | null = null;
+
+export function buscarInicial(): Promise<ResultadoDemo> {
+  busquedaInicial ??= buscar(SUGERIDAS[0], "deezer", "track");
+  return busquedaInicial;
+}
+
+export function precalentarDemoInicial(): Promise<AudioRescatado | null> {
+  if (calentamientoInicial) return calentamientoInicial;
+  calentamientoInicial = (async () => {
+    const r = await buscarInicial();
+    const primera = r.pistas.find((p) => p.tipo === "track");
+    if (!primera) return null;
+    return await audioDe(primera);
+  })().catch(() => null);
+  return calentamientoInicial;
+}
 
 /**
  * Contenido de un álbum, artista o lista: SUS canciones —y en un artista,

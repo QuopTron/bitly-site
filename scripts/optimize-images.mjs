@@ -143,6 +143,19 @@ async function main() {
     fs.writeFileSync(path.join(ASSETS, `bitly-logo-${ancho}.webp`), buf);
   }
 
+  // 1b. Variantes responsivas del splash del hero, a partir de la versión 640.
+  for (const tema of ["blanco", "negro"]) {
+    const origen = path.join(ASSETS, `splash-${tema}-640.webp`);
+    if (!fs.existsSync(origen)) continue;
+    for (const ancho of [480, 320, 192, 96, 64]) {
+      const buf = await sharp(origen)
+        .resize(ancho, ancho, { fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 82, effort: 6 })
+        .toBuffer();
+      fs.writeFileSync(path.join(ASSETS, `splash-${tema}-${ancho}.webp`), buf);
+    }
+  }
+
   // 2. Iconos.
   const t16 = await cuadrado(16);
   const t32 = await cuadrado(32);
@@ -166,6 +179,11 @@ async function main() {
   const kb = (p) => (fs.statSync(p).size / 1024).toFixed(1) + " KB";
   for (const ancho of [640, 320, 96]) {
     console.log(`[imagenes] bitly-logo-${ancho}.webp ${kb(path.join(ASSETS, `bitly-logo-${ancho}.webp`))}`);
+  }
+  for (const tema of ["blanco", "negro"]) {
+    for (const ancho of [640, 480, 320, 192, 96, 64]) {
+      console.log(`[imagenes] splash-${tema}-${ancho}.webp ${kb(path.join(ASSETS, `splash-${tema}-${ancho}.webp`))}`);
+    }
   }
   for (const f of [
     "favicon.ico",

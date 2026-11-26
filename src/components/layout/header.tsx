@@ -1,5 +1,9 @@
 import { Sun, Moon, Globe, Menu, X, ChevronRight, MessageCircle, HelpCircle, Download, User } from "lucide-react";
+import splashBlanco64 from "@/assets/splash-blanco-64.webp";
+import splashBlanco96 from "@/assets/splash-blanco-96.webp";
 import splashBlanco from "@/assets/splash-blanco-128.webp";
+import splashNegro64 from "@/assets/splash-negro-64.webp";
+import splashNegro96 from "@/assets/splash-negro-96.webp";
 import splashNegro from "@/assets/splash-negro-128.webp";
 import { useI18n, useLanguage } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
@@ -126,10 +130,10 @@ export default function Header({ vista, onNavegar, onComentarios, onFaq, onCuent
                   enInicio ? "opacity-0" : "animate-spin opacity-100 [animation-duration:18s]"
                 }`}
               />
-              <img src={splashBlanco} alt="" width={128} height={128} className="logo-tema-oscuro h-full w-full object-contain" />
-              <img src={splashNegro} alt="" width={128} height={128} className="logo-tema-claro h-full w-full object-contain" />
+              <img src={splashBlanco} srcSet={`${splashBlanco64} 64w, ${splashBlanco96} 96w, ${splashBlanco} 128w`} sizes="(min-width: 640px) 48px, 40px" alt="" width={128} height={128} className="logo-tema-oscuro h-full w-full object-contain" />
+              <img src={splashNegro} srcSet={`${splashNegro64} 64w, ${splashNegro96} 96w, ${splashNegro} 128w`} sizes="(min-width: 640px) 48px, 40px" alt="" width={128} height={128} fetchPriority="low" className="logo-tema-claro h-full w-full object-contain" />
             </span>
-            <span className="flex min-w-0 flex-col text-left">
+            <span aria-hidden className="flex min-w-0 flex-col text-left">
               <span
                 className={`texto-tag texto-aerosol truncate leading-none transition-all duration-300 ${
                   enInicio ? "text-xl sm:text-[1.8rem]" : "text-lg sm:text-2xl"

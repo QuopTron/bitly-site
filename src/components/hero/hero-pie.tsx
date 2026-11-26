@@ -17,8 +17,8 @@ export default function HeroPie({ total, vistas, promedio, opiniones }: Props) {
   const proporcion = vistas > 0 ? Math.min(999, Math.round((total / vistas) * 100)) : 0;
 
   return (
-    <footer className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t border-border/50 pt-2">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+    <footer className="mt-2 flex min-h-[72px] flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t border-border/50 pt-2 sm:min-h-0">
+      <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground sm:min-h-0">
         <span className="inline-flex items-center gap-1.5">
           <Eye className="h-3.5 w-3.5 text-primary" aria-hidden />
           <strong className="tabular-nums text-foreground">{numero(vistas)}</strong>

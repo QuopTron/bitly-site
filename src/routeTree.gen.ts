@@ -12,7 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as RevendedorRouteImport } from './routes/revendedor'
+import { Route as ApiAudioRouteImport } from './routes/api/audio'
+import { Route as ApiCatalogoRouteImport } from './routes/api/catalogo'
 import { Route as ApiCuentaRouteImport } from './routes/api/cuenta'
+import { Route as ApiDatosRouteImport } from './routes/api/datos'
 import { Route as ApiDescargarRouteImport } from './routes/api/descargar'
 import { Route as ApiPresenteRouteImport } from './routes/api/presente'
 import { Route as ApiRescateRouteImport } from './routes/api/rescate'
@@ -33,9 +36,24 @@ const RevendedorRoute = RevendedorRouteImport.update({
   path: '/revendedor',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAudioRoute = ApiAudioRouteImport.update({
+  id: '/api/audio',
+  path: '/api/audio',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCatalogoRoute = ApiCatalogoRouteImport.update({
+  id: '/api/catalogo',
+  path: '/api/catalogo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCuentaRoute = ApiCuentaRouteImport.update({
   id: '/api/cuenta',
   path: '/api/cuenta',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDatosRoute = ApiDatosRouteImport.update({
+  id: '/api/datos',
+  path: '/api/datos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDescargarRoute = ApiDescargarRouteImport.update({
@@ -63,7 +81,10 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/revendedor': typeof RevendedorRoute
+  '/api/audio': typeof ApiAudioRoute
+  '/api/catalogo': typeof ApiCatalogoRoute
   '/api/cuenta': typeof ApiCuentaRoute
+  '/api/datos': typeof ApiDatosRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
@@ -73,7 +94,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/revendedor': typeof RevendedorRoute
+  '/api/audio': typeof ApiAudioRoute
+  '/api/catalogo': typeof ApiCatalogoRoute
   '/api/cuenta': typeof ApiCuentaRoute
+  '/api/datos': typeof ApiDatosRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
@@ -84,7 +108,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/revendedor': typeof RevendedorRoute
+  '/api/audio': typeof ApiAudioRoute
+  '/api/catalogo': typeof ApiCatalogoRoute
   '/api/cuenta': typeof ApiCuentaRoute
+  '/api/datos': typeof ApiDatosRoute
   '/api/descargar': typeof ApiDescargarRoute
   '/api/presente': typeof ApiPresenteRoute
   '/api/rescate': typeof ApiRescateRoute
@@ -96,7 +123,10 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/revendedor'
+    | '/api/audio'
+    | '/api/catalogo'
     | '/api/cuenta'
+    | '/api/datos'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
@@ -106,7 +136,10 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/revendedor'
+    | '/api/audio'
+    | '/api/catalogo'
     | '/api/cuenta'
+    | '/api/datos'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
@@ -116,7 +149,10 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/revendedor'
+    | '/api/audio'
+    | '/api/catalogo'
     | '/api/cuenta'
+    | '/api/datos'
     | '/api/descargar'
     | '/api/presente'
     | '/api/rescate'
@@ -127,7 +163,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   RevendedorRoute: typeof RevendedorRoute
+  ApiAudioRoute: typeof ApiAudioRoute
+  ApiCatalogoRoute: typeof ApiCatalogoRoute
   ApiCuentaRoute: typeof ApiCuentaRoute
+  ApiDatosRoute: typeof ApiDatosRoute
   ApiDescargarRoute: typeof ApiDescargarRoute
   ApiPresenteRoute: typeof ApiPresenteRoute
   ApiRescateRoute: typeof ApiRescateRoute
@@ -157,11 +196,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RevendedorRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/audio': {
+      id: '/api/audio'
+      path: '/api/audio'
+      fullPath: '/api/audio'
+      preLoaderRoute: typeof ApiAudioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/catalogo': {
+      id: '/api/catalogo'
+      path: '/api/catalogo'
+      fullPath: '/api/catalogo'
+      preLoaderRoute: typeof ApiCatalogoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cuenta': {
       id: '/api/cuenta'
       path: '/api/cuenta'
       fullPath: '/api/cuenta'
       preLoaderRoute: typeof ApiCuentaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/datos': {
+      id: '/api/datos'
+      path: '/api/datos'
+      fullPath: '/api/datos'
+      preLoaderRoute: typeof ApiDatosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/descargar': {
@@ -199,7 +259,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   RevendedorRoute: RevendedorRoute,
+  ApiAudioRoute: ApiAudioRoute,
+  ApiCatalogoRoute: ApiCatalogoRoute,
   ApiCuentaRoute: ApiCuentaRoute,
+  ApiDatosRoute: ApiDatosRoute,
   ApiDescargarRoute: ApiDescargarRoute,
   ApiPresenteRoute: ApiPresenteRoute,
   ApiRescateRoute: ApiRescateRoute,

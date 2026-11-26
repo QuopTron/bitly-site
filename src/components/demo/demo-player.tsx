@@ -8,11 +8,10 @@ import { useI18n } from "@/lib/i18n";
 import { format, useCurrency } from "@/lib/currency";
 import { formatoCuenta, progresoOferta } from "@/lib/pricing";
 import { useFaseActual } from "@/lib/use-pricing";
-import { anotarCanalCaido, audioDe, buscar, contenidoDe, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
+import { anotarCanalCaido, audioDe, buscar, buscarInicial, contenidoDe, precalentarDemoInicial, SUGERIDAS, type Pista } from "@/lib/demo-catalog";
 import { consultarDescargas, descargarPista } from "@/lib/descargas-cuenta";
 import { leerTokenCuenta } from "@/lib/cuentas-cliente";
 import type { EstadoDescargasCuenta } from "@/server/descargas-cuenta";
-import { demoDespertar } from "@/server/demo-proxy";
 import { categoriaDeFiltro, extensionDe, type ExtensionId } from "@/lib/demo-extensiones";
 import { useCuota } from "@/lib/demo-cuota";
 import { retraso } from "@/lib/reveal";
@@ -28,15 +27,6 @@ import { PaseTope } from "@/components/demo/pase-tope";
 
 // Sólo monta al ingresar el código: chunk aparte, igual que los otros modales.
 const DemoCodigoModal = lazy(() => import("@/components/modals/demo-codigo-modal"));
-
-/**
- * Un solo ping de arranque por carga de página.
- *
- * El backend de YouTube puede vivir en un plan free que apaga la instancia: si
- * se lo despierta al abrir la demo, el arranque ocurre mientras el visitante
- * escribe la búsqueda, no cuando ya tocó play. No se espera la respuesta.
- */
-let despertado = false;
 
 /**
  * Cuánto se muestra el spinner antes de decir que la búsqueda se está
@@ -231,6 +221,17 @@ export default function DemoPlayer({ onCuenta }: Props) {
   const evitarRef = useRef(new Map<string, string[]>());
   /** La pista que está en el <audio>, para el manejador de `error`. */
   const pistaRef = useRef<Pista | null>(null);
+  const resultadosRef = useRef<Pista[] | null>(null);
+  const busquedaManual = useRef(false);
+  const terminoRef = useRef("");
+
+  useEffect(() => {
+    resultadosRef.current = resultados;
+  }, [resultados]);
+
+  useEffect(() => {
+    terminoRef.current = termino;
+  }, [termino]);
 
   const info = extensionDe(extension);
 
@@ -253,12 +254,36 @@ export default function DemoPlayer({ onCuenta }: Props) {
     };
   }, [refrescarDescargas]);
 
-  // Despierta el backend de YouTube mientras el visitante busca. Si el host está
-  // en un plan free que se apaga, el arranque se paga acá y no al tocar play.
   useEffect(() => {
-    if (despertado) return;
-    despertado = true;
-    void demoDespertar().catch(() => {});
+    let vivo = true;
+    void precalentarDemoInicial().then((resuelto) => {
+      if (!vivo || !resuelto?.url || pendiente.current > 0 || pistaRef.current) return;
+      const el = audio.current;
+      if (!el) return;
+      const red = (navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }).connection;
+      const lento = Boolean(red?.saveData) || /(^|-)2g$/.test(red?.effectiveType ?? "");
+      el.preload = lento ? "metadata" : "auto";
+      el.src = resuelto.url;
+      el.load();
+    });
+    void buscarInicial()
+      .then((r) => {
+        if (!vivo || busquedaManual.current || resultadosRef.current !== null || r.pistas.length === 0) return;
+        if (terminoRef.current.trim()) return;
+        setTermino(SUGERIDAS[0]);
+        setResultados(r.pistas);
+        setListaActual(r.pistas.filter((p) => p.tipo === "track"));
+        setSinResultados(false);
+        setRespaldada(r.origen === "respaldo");
+        setOtraFuente(r.otraFuente ?? null);
+        setLimitado(false);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
   }, []);
 
   // Un solo <audio> para toda la demo: cambiar de pista es cambiar `src`.
@@ -393,9 +418,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
     void audioDe(primera).catch(() => {});
   }, []);
 
+  const precalentarPista = useCallback((p: Pista) => {
+    if (p.tipo !== "track" || p.audioUrl || precalentado.current.has(p.id)) return;
+    precalentado.current.add(p.id);
+    void audioDe(p).catch(() => {});
+  }, []);
+
   const hacerBusqueda = useCallback(async (q: string, extId: ExtensionId, filtroId: string | null) => {
     const limpio = q.trim();
     if (!limpio) return;
+    busquedaManual.current = true;
     const orden = ++busquedaEnCurso.current;
     setCargando(true);
     setBusquedaLenta(false);
@@ -576,6 +608,12 @@ export default function DemoPlayer({ onCuenta }: Props) {
       const orden = ++pendiente.current;
       setPreparando(p.id);
       setAvisoAudio(null);
+      const mostrarYa = !pista?.audioUrl;
+      if (mostrarYa) {
+        setPista(p);
+        setAvance(0);
+        setSonando(false);
+      }
       // Aviso de espera larga: el nicho puede tardar 30 s o más. Decirlo es
       // mejor que un spinner mudo, que parece un botón roto.
       const lento = setTimeout(() => {
@@ -610,6 +648,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
       if (!audioResuelto || !audioResuelto.url) {
         clearTimeout(lento);
         setPreparando(null);
+        if (mostrarYa) setPista(null);
         setAvisoAudio(audioResuelto?.motivo ? `${t("demoAudioNone")} (${audioResuelto.motivo})` : t("demoAudioNone"));
         return;
       }
@@ -629,6 +668,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
         if (orden !== pendiente.current) return;
         setPreparando(null);
         setSonando(ok);
+        if (!ok && mostrarYa) setPista(null);
         setAvisoAudio(ok ? null : t("demoAudioNone"));
       })();
     },
@@ -648,6 +688,17 @@ export default function DemoPlayer({ onCuenta }: Props) {
   useEffect(() => {
     reproducirRef.current = (p) => void reproducir(p);
   }, [reproducir]);
+
+  useEffect(() => {
+    if (!sonando || !pista || aleatorio || repetir) return;
+    const indice = listaActual.findIndex((p) => p.id === pista.id);
+    const siguiente = indice >= 0 ? listaActual[indice + 1] : undefined;
+    if (!siguiente || siguiente.audioUrl) return;
+    const reloj = setTimeout(() => {
+      void audioDe(siguiente).catch(() => {});
+    }, 2_500);
+    return () => clearTimeout(reloj);
+  }, [aleatorio, listaActual, pista, repetir, sonando]);
 
   /** El gesto de deslizar alterna: si ya estaba, se saca de la cola. */
   const alternarCola = useCallback((p: Pista) => {
@@ -717,12 +768,16 @@ export default function DemoPlayer({ onCuenta }: Props) {
         }
         const canciones = pistas.filter((x) => x.tipo === "track");
         if (canciones.length > 0) setListaActual(canciones);
+        // Igual que tras una búsqueda: la primera canción de la colección se
+        // resuelve por detrás mientras el visitante elige, así el toque no paga
+        // la extracción entera.
+        if (!cuota.sinCuota) precalentar(pistas);
         setDetalle({ item: p, pistas, cargando: false, error: pistas.length === 0 });
       } catch {
         setDetalle((previo) => (previo ? { ...previo, cargando: false, error: true } : null));
       }
     },
-    [],
+    [cuota.sinCuota, precalentar],
   );
 
   const volver = useCallback(() => {
@@ -1110,6 +1165,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
                           descargando={descargando?.id === p.id}
                           progreso={descargando?.id === p.id ? descargando.progreso : null}
                           onReproducir={() => void reproducir(p, detalleCanciones)}
+                          onPrecalentar={() => precalentarPista(p)}
                           onDescargar={() => void descargar(p)}
                           onEncolar={() => alternarCola(p)}
                           onAbrirCola={() => {
@@ -1171,6 +1227,7 @@ export default function DemoPlayer({ onCuenta }: Props) {
                           descargando={descargando?.id === p.id}
                           progreso={descargando?.id === p.id ? descargando.progreso : null}
                           onReproducir={() => void reproducir(p, cancionesResultados)}
+                          onPrecalentar={() => precalentarPista(p)}
                           onDescargar={() => void descargar(p)}
                           onEncolar={() => alternarCola(p)}
                           onAbrirCola={() => {

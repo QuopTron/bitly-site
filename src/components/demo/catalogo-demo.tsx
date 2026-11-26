@@ -102,6 +102,7 @@ export function FilaCancion({
   descargando,
   progreso,
   onReproducir,
+  onPrecalentar,
   onDescargar,
   onEncolar,
   onAbrirCola,
@@ -115,6 +116,7 @@ export function FilaCancion({
   descargando: boolean;
   progreso: number | null;
   onReproducir: () => void;
+  onPrecalentar?: () => void;
   onDescargar: () => void;
   /** Deslizar la tarjeta a la derecha: con esto nacen las colas. */
   onEncolar?: () => void;
@@ -131,6 +133,22 @@ export function FilaCancion({
   // el contenedor (`touch-action: pan-y`).
   const [dx, setDx] = useState(0);
   const desde = useRef<number | null>(null);
+  const esperaAudio = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const entrar = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse" || !onPrecalentar || activa || preparando) return;
+    if (esperaAudio.current) clearTimeout(esperaAudio.current);
+    esperaAudio.current = setTimeout(() => {
+      esperaAudio.current = null;
+      onPrecalentar();
+    }, 600);
+  };
+  const salir = () => {
+    if (esperaAudio.current) {
+      clearTimeout(esperaAudio.current);
+      esperaAudio.current = null;
+    }
+  };
 
   const empezar = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!onEncolar) return;
@@ -163,11 +181,18 @@ export function FilaCancion({
         {enCola ? t("demoColaQuitar") : t("demoEncolar")}
       </span>
     <div
-      onPointerDown={empezar}
+      onPointerDown={(e) => {
+        salir();
+        empezar(e);
+      }}
+      onPointerEnter={entrar}
       onPointerMove={mover}
       onPointerUp={soltar}
       onPointerCancel={soltar}
-      onPointerLeave={soltar}
+      onPointerLeave={() => {
+        soltar();
+        salir();
+      }}
       style={{
         animationDelay: `${Math.min(indice, 8) * 35}ms`,
         transform: dx ? `translateX(${dx}px)` : undefined,

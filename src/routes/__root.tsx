@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
+import { Outlet, Link, createRootRoute, useRouter, HeadContent, Scripts, type ErrorRouteComponent } from "@tanstack/react-router";
 import { getLanguage, useLanguage } from "@/lib/i18n";
 import { usePreferenciasGuardadas } from "@/lib/preferencias";
 import { instalarReveals } from "@/lib/reveal";
@@ -50,23 +49,6 @@ function Shell({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
-        {/* Revela lo que ya está a la vista EN EL PRIMER PINTADO, sin esperar a
-            que llegue el bundle. El observador de `reveal.ts` sigue siendo el
-            dueño de todo lo que aparece al hacer scroll: este guion sólo saca
-            del ocultamiento al primer plato. Corre durante el parseo del HTML,
-            así que no hay frame en el que la portada se vea vacía (FCP, LCP y
-            Speed Index suben y, encima, la portada no "aparece" al hidratar).
-            Marca con el atributo `data-dentro` durante el parseo; los bloques
-            `data-reveal` llevan `suppressHydrationWarning`, así que React no
-            valida sus atributos al hidratar y este cambio a propósito no
-            acusa mismatch. El atributo además sobrevive a re-renders que
-            pisen el className (una clase se perdía en silencio). */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              '(function(){try{var m=document.querySelectorAll("[data-reveal]");for(var i=0;i<m.length;i++){if(m[i].getBoundingClientRect().top<=window.innerHeight)m[i].setAttribute("data-dentro","")}}catch(e){}})();',
-          }}
-        />
         <Scripts />
       </body>
     </html>
@@ -110,7 +92,6 @@ const ErrorPage: ErrorRouteComponent = ({ error, reset }) => {
 };
 
 function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
   // Un solo observador para todas las apariciones del sitio. Corre después de
   // que los hijos montaron, así ya encuentra los `data-reveal` en el DOM.
   useEffect(() => instalarReveals(), []);
@@ -139,14 +120,10 @@ function RootComponent() {
     window.addEventListener("pagehide", alSalir);
     return () => window.removeEventListener("pagehide", alSalir);
   }, []);
-  return (
-    <QueryClientProvider client={queryClient}>
-      <Outlet />
-    </QueryClientProvider>
-  );
+  return <Outlet />;
 }
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" }, { name: "viewport", content: "width=device-width, initial-scale=1" },
@@ -195,8 +172,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // elemento LCP en móvil: sin precargarla, el navegador la descubre recién
       // al parsear la CSS y el título aparece tarde.
       { rel: "preload", href: "/fonts/titanone-latin.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
-      { rel: "preconnect", href: "https://api.github.com" },
-      { rel: "dns-prefetch", href: "https://api.github.com" },
     ],
   }),
   shellComponent: Shell,

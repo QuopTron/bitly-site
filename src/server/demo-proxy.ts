@@ -791,13 +791,18 @@ export async function rescatarImpl(data: Carga): Promise<RespuestaAudio> {
   // que mandó el cliente contra el registro (con caché corta). Sin código
   // activo —cuenta gratis, invitado o un código caducado— va calidad estándar;
   // así cambiar el JSON de la petición no sirve para llevarse el FLAC.
-  const premium = await esCodigoPremiumActivo(peticion.codigo).catch(() => false);
+  //
+  // Las dos verificaciones van EN PARALELO: son viajes distintos (registro de
+  // códigos y de cuentas), y encadenarlas sumaba su latencia a CADA play.
+  const [premium, cuenta] = await Promise.all([
+    esCodigoPremiumActivo(peticion.codigo).catch(() => false),
+    peticion.token ? cuentaDeToken(peticion.token).catch(() => null) : Promise.resolve(null),
+  ]);
 
   // El cupo por IP es anti-abuso para INVITADOS. Con sesión de cuenta válida
   // (o Premium) no se gasta: el sitio promete escuchar sin límite, y si la red
   // cortaba a las ~20 extracciones la demo se quedaba muda por horas y parecía
   // que la canción no existía.
-  const cuenta = peticion.token ? await cuentaDeToken(peticion.token).catch(() => null) : null;
   if (!cuenta && !premium && !dentroDeCupoRescate(await quienSolicita())) return null;
 
   // Un id de 11 caracteres es un videoId de YouTube: el de YouTube Music, pero

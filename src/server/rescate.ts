@@ -479,23 +479,6 @@ function dormir(ms: number): Promise<void> {
 }
 
 /**
- * Espera vitalicia: se resuelve SOLO si [p] devuelve algo. Con `null` queda
- * pendiente para siempre, así un canal que no tiene la pista no "gana" una
- * carrera por haber contestado primero que no.
- *
- * Se usa para competir dos canales con `Promise.race` sin que el que falla
- * rápido (que es lo normal) decida el resultado. Las promesas pendientes no
- * retienen nada: sus temporizadores internos ya vencieron.
- */
-function cuandoHaya<T>(p: Promise<T | null>): Promise<T> {
-  return new Promise<T>((listo) => {
-    void p.then((valor) => {
-      if (valor != null) listo(valor);
-    });
-  });
-}
-
-/**
  * Carrera HEDGED sobre una lista de intentos: el primero arranca ya y los
  * siguientes a los [escalonMs], así una base lenta no bloquea a una sana y el
  * proveedor no recibe N peticiones a la vez en el caso normal (el primero
@@ -1523,14 +1506,19 @@ async function audioPorMovilBandcamp(
  * instancia de Yattee, que sí la recibe entera.
  */
 async function audioDePaginaBandcamp(url: string): Promise<{ url: string; duracion: number } | null> {
-  const propio = await leerPaginaBandcamp(url);
-  if (propio) return propio;
-  const jina = await leerPaginaBandcampJina(url);
-  if (jina) return jina;
-  const traducida = await leerPaginaBandcampTraducida(url);
-  if (traducida) return traducida;
-  const porInstancia = await audioPorInstanciaBandcamp(url);
-  if (porInstancia) return porInstancia;
+  // En escalera, no en serie: la lectura propia arranca ya y los respaldos
+  // entran uno por segundo. Antes Jina podía colgar el turno hasta 30 s (dos
+  // intentos de 15 s) antes de probar Translate, que quizá tenía el MP3.
+  const audio = await primeroQueResponda<{ url: string; duracion: number }>(
+    [
+      () => leerPaginaBandcamp(url),
+      () => leerPaginaBandcampJina(url),
+      () => leerPaginaBandcampTraducida(url),
+      () => audioPorInstanciaBandcamp(url),
+    ],
+    1_000,
+  );
+  if (audio) return audio;
   console.warn(`[bandcamp] sin audio: ni la página directa, Jina, Translate ni la instancia devolvieron MP3 (${url})`);
   return null;
 }
@@ -1842,20 +1830,37 @@ export async function despertarYattee(esperaMs = DESPERTAR_MS): Promise<boolean>
     if (auth) encabezados.Authorization = `Basic ${btoa(auth)}`;
     try {
       // En paralelo: los dos Render tardan lo mismo en arrancar y no queremos
-      // pagar el arranque de uno después del otro.
-      const respuestas = await Promise.all(
-        yattees.map(async (base) => {
-          try {
-            await fetch(`${base}/`, { headers: encabezados, signal: AbortSignal.timeout(esperaMs) });
-            // Si hubo respuesta, el host está despierto (el status no importa).
-            marcarYatteeVivo(base);
-            return true;
-          } catch {
-            return false;
+      // pagar el arranque de uno después del otro. Se resuelve en cuanto UNA
+      // instancia contesta: esperar a la más lenta (hasta `esperaMs`) metía ese
+      // retraso dentro del rescate aunque ya hubiera un host listo.
+      const despierto = await new Promise<boolean>((listo) => {
+        let faltan = yattees.length;
+        let terminado = false;
+        const fin = (ok: boolean) => {
+          faltan--;
+          if (terminado) return;
+          if (ok) {
+            terminado = true;
+            listo(true);
+            return;
           }
-        }),
-      );
-      if (!respuestas.some(Boolean)) return false;
+          if (faltan === 0) {
+            terminado = true;
+            listo(false);
+          }
+        };
+        for (const base of yattees) {
+          fetch(`${base}/`, { headers: encabezados, signal: AbortSignal.timeout(esperaMs) }).then(
+            () => {
+              // Si hubo respuesta, el host está despierto (el status no importa).
+              marcarYatteeVivo(base);
+              fin(true);
+            },
+            () => fin(false),
+          );
+        }
+      });
+      if (!despierto) return false;
       yatteeDespiertoHasta = Date.now() + DESPIERTO_MS;
       return true;
     } catch {
@@ -1877,14 +1882,6 @@ export async function despertarCanalYouTube(esperaMs = DESPERTAR_MS): Promise<bo
   if (yattees.length > 0) return despertarYattee(esperaMs);
   return despertarBackendYouTube(esperaMs);
 }
-/**
- * Cuánto espera la calidad estándar al canal de YouTube antes de seguir por la
- * vía sin pérdida. Es corto a propósito: si el catálogo sin pérdida tiene la
- * pista, suena en ~1 s y no hay razón para hacer esperar; y si el canal de
- * YouTube está roto (los ~25 s que tarda yt-dlp en rendirse cuando el servidor
- * no puede resolver el reto JS) el usuario no paga esa espera.
- */
-const TOPE_ESTANDAR_YT_MS = 4_000;
 const TIMEOUT_YT_BUSQUEDA_MS = 15_000;
 /** El relay de yattee firma con 6 h de vida: 1 h de caché queda holgado. */
 const TTL_YT_ENLACE_MS = 60 * 60 * 1000;
@@ -3033,25 +3030,6 @@ async function resolverAudioInterno(
     };
   };
 
-  // Calidad estándar (cuenta gratis o sin sesión): YouTube entrega AAC ~128
-  // kbps, que es exactamente "una calidad menor que el FLAC" sin transcodificar
-  // nada en el servidor. Si ese backend no responde se sigue por el camino sin
-  // pérdida: la demo prefiere sonar a quedarse muda.
-  //
-  // TOPE: el canal de YouTube se espera sólo un momento. Una extracción que
-  // falla tarda ~25 s en decirlo (yt-dlp reintenta clientes) y antes de este
-  // tope el usuario gratis se quedaba 25 s mirando el spinner por una canción
-  // que el catálogo sin pérdida resuelve en ~1 s. Agotado el tope se sigue por
-  // la vía sin pérdida; si TAMBIÉN falla, el respaldo final vuelve a esperar a
-  // `ytParalelo` completo con su propio techo, así que el nicho no se pierde.
-  if (p.calidad === "estandar" && !evitar.has("youtube")) {
-    const yt = await Promise.race([
-      ytParalelo,
-      new Promise<null>((listo) => setTimeout(() => listo(null), TOPE_ESTANDAR_YT_MS)),
-    ]);
-    if (yt) return devolverYouTube(yt);
-  }
-
   type Cand = { id: string; duracionMs: number; isrc: string | null; proveedor: string };
   const porIsrc = isrcConfiable ?? isrcPista;
 
@@ -3196,49 +3174,30 @@ async function resolverAudioInterno(
     return resolverBandcamp(pedido);
   })();
 
-  // Con techo propio y CORTO: si el respaldo de ISRC (Deezer) o el catálogo de
-  // monochrome se cuelgan, el rescate sigue igual con el relay y Bandcamp. Antes
-  // esta espera era de 7 s y estaba DELANTE de todo: ningún otro canal podía
-  // intentarlo hasta que venciera.
-  const monoInicial = await conTope(monoParalelo, TOPE_MONO_INICIAL_MS).catch((): MonoInicial => ({
-    isrc: null,
-    pista: null,
-  }));
-  if (monoInicial.pista && (await monochromeDisponible(monoInicial.pista.url))) {
-    motivoUltimoRescate = null;
-    return devolverMonochrome(monoInicial.pista);
-  }
-  motivoUltimoRescate = monoInicial.pista ? "mono-isrc-sin-audio" : "mono-isrc-sin-match";
-  anotar(monoInicial.pista ? "mono-isrc-sin-audio" : "mono-isrc-sin-match");
+  // La identidad por ISRC ya NO es una puerta delante de los demás canales: es
+  // un carril más que compite desde el primer milisegundo. Antes se esperaba
+  // hasta 2,5 s aquí y luego otros 4 s de sonda antes de mirar Tidal/Bandcamp.
+  const monoInicialPromise = conTope(monoParalelo, TOPE_MONO_INICIAL_MS).catch(
+    (): MonoInicial => ({ isrc: null, pista: null }),
+  );
 
-  const [candidatosResueltos, monoPorNombre] = await Promise.all([candidatosPromise, monoNombre]);
-  let candidatos = candidatosResueltos;
-  anotar(`cands=${candidatos.length}`);
-
-  // El re-subido de YouTube/SoundCloud pone `ARTISTA - Canción` en el TÍTULO y
-  // el canal en el campo artista ("Monsieur Blaya", "Maitre 80"), así que el
-  // primer intento no acredita a nadie y el matching estricto —con razón— no
-  // resuelve. Se reintenta con lo que el TÍTULO declara: es la señal que el
-  // usuario tiene delante y la que el filtro por artista no pudo ver.
-  if (candidatos.length === 0) {
-    const partes = splitSearchQuery(titulo);
-    const artistaTitulo = partes.artist.trim();
-    const tituloTitulo = partes.title.trim();
-    if (artistaTitulo && tituloTitulo) {
-      candidatos = await juntarCandidatos({ ...pedido, titulo: tituloTitulo, artista: artistaTitulo });
+  // El reintento por «ARTISTA - Canción» en el TÍTULO se pliega DENTRO de la
+  // identidad: así el relay y los ISRC de monochrome lo esperan una sola vez y
+  // en paralelo, en vez de pagar otra ronda secuencial antes de arrancar.
+  const candidatosFinalesPromise = (async (): Promise<Cand[]> => {
+    let candidatos = await candidatosPromise;
+    anotar(`cands=${candidatos.length}`);
+    if (candidatos.length === 0) {
+      const partes = splitSearchQuery(titulo);
+      const artistaTitulo = partes.artist.trim();
+      const tituloTitulo = partes.title.trim();
+      if (artistaTitulo && tituloTitulo) {
+        candidatos = await juntarCandidatos({ ...pedido, titulo: tituloTitulo, artista: artistaTitulo });
+        anotar(`cands-retry=${candidatos.length}`);
+      }
     }
-  }
-
-  // Monochrome primero: su catálogo no depende del pool del relay. Si el ISRC
-  // de la pista no estaba, ya se buscó por nombre en paralelo
-  // (ver resolverMonochromePorNombre); después se prueban los ISRC que
-  // acreditaron Qobuz/Deezer.
-  if (monoPorNombre && (await monochromeDisponible(monoPorNombre.url))) {
-    motivoUltimoRescate = null;
-    return devolverMonochrome(monoPorNombre);
-  }
-  motivoUltimoRescate = monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match";
-  anotar(monoPorNombre ? "mono-nombre-sin-audio" : "mono-nombre-sin-match");
+    return candidatos;
+  })().catch((): Cand[] => []);
 
   // Devolver el FLAC del relay con los datos del candidato que lo resolvió.
   const devolverStash = (mint: Mint, c: Cand): AudioResuelto => {
@@ -3293,85 +3252,152 @@ async function resolverAudioInterno(
     };
   };
 
+  type Mono = NonNullable<Awaited<ReturnType<typeof resolverMonochrome>>>;
+  type Tidal = NonNullable<Awaited<typeof tidalParalelo>>;
+  type Ganador =
+    | { canal: "monochrome"; mono: Mono }
+    | { canal: "stash-relay"; mint: Mint; c: Cand }
+    | { canal: "stash-tidal"; tidal: Tidal }
+    | { canal: "bandcamp"; bc: AudioBandcamp }
+    | { canal: "youtube"; yt: { stream: string; duracion: number } };
+
+  // Una sonda por ganador: el carril sólo existe si el host sirve el archivo
+  // AHORA, para no devolver un enlace que el navegador descubra muerto.
+  const conSonda = (m: Mono | null): Promise<Mono | null> =>
+    m ? monochromeDisponible(m.url).then((ok) => (ok ? m : null)) : Promise.resolve(null);
+
+  // Todos los carriles arrancan YA, sin puertas delante. Cada uno resuelve
+  // `null` si su canal no tiene la pista, así que los lentos no frenan a nadie.
+  const monoIsrcLane: Promise<Ganador | null> = monoInicialPromise
+    .then((mi) => conSonda(mi.pista))
+    .then((m) => (m ? { canal: "monochrome" as const, mono: m } : null))
+    .catch(() => null);
+
+  const monoNombreLane: Promise<Ganador | null> = monoNombre
+    .then(conSonda)
+    .then((m) => (m ? { canal: "monochrome" as const, mono: m } : null))
+    .catch(() => null);
+
   // Los ISRC que acreditaron Qobuz/Deezer, sin repetir, contra el catálogo de
   // monochrome. En PARALELO (hedged): antes era un `for` con `await` dentro, así
-  // que cada ISRC sin match costaba 2,5 s antes de probar el siguiente y el clic
-  // se iba a los 20-30 s con unos pocos candidatos.
-  const isrcsMonochrome = new Set<string>(monoInicial.isrc ? [monoInicial.isrc] : []);
-  const tareasMonochrome: Array<() => Promise<Awaited<ReturnType<typeof resolverMonochrome>>>> = [];
-  for (const c of evitar.has("monochrome") ? [] : candidatos) {
-    const isrc = normalizarISRC(c.isrc ?? "");
-    if (!isrc || isrcsMonochrome.has(isrc)) continue;
-    isrcsMonochrome.add(isrc);
-    tareasMonochrome.push(() => resolverMonochrome(isrc, 2_500));
-  }
-  // La sonda de "¿el host sirve el archivo AHORA?" entra en la misma cadena:
-  // el ganador de la carrera tiene que estar ya verificado, no descubrirse
-  // muerto al devolverlo.
-  const monoCarrera = cuandoHaya(
-    primeroQueResponda(tareasMonochrome, 250).then(async (m) =>
-      m && (await monochromeDisponible(m.url)) ? m : null,
-    ),
-  );
+  // que cada ISRC sin match costaba 2,5 s antes de probar el siguiente.
+  const monoCandsLane: Promise<Ganador | null> = (async () => {
+    if (evitar.has("monochrome")) return null;
+    const [candidatos, mi] = await Promise.all([candidatosFinalesPromise, monoInicialPromise]);
+    const vistos = new Set<string>(mi.isrc ? [mi.isrc] : []);
+    const tareas: Array<() => Promise<Mono | null>> = [];
+    for (const c of candidatos) {
+      const isrc = normalizarISRC(c.isrc ?? "");
+      if (!isrc || vistos.has(isrc)) continue;
+      vistos.add(isrc);
+      tareas.push(() => resolverMonochrome(isrc, 2_500));
+    }
+    if (tareas.length === 0) return null;
+    const m = await conSonda(await primeroQueResponda(tareas, 250));
+    return m ? { canal: "monochrome" as const, mono: m } : null;
+  })().catch(() => null);
 
-  const tareasMint =
-    evitar.has("stash-relay") || candidatos.length === 0
-      ? []
-      : candidatos.map((c) => () => mintaStash(c.id).then((mint) => (mint ? { mint, c } : null)));
-  // El relay arranca CORTESIA_MONO_MS después: si monochrome ya resolvió, no se
-  // gasta cupo ajeno. Si no, corre igual y gana el que entregue audio primero.
-  const mintCarrera = cuandoHaya(
-    dormir(CORTESIA_MONO_MS).then(() => primeroQueResponda(tareasMint, 300)),
-  );
-
-  type Ganador =
-    | { canal: "monochrome"; mono: NonNullable<Awaited<ReturnType<typeof resolverMonochrome>>> }
-    | { canal: "stash-relay"; mint: Mint; c: Cand }
-    | { canal: "stash-tidal"; tidal: NonNullable<Awaited<typeof tidalParalelo>> };
-  // El reloj del tramo sin pérdida: sin él, dos canales que no tienen la pista
-  // dejaban el `race` pendiente para siempre (nunca se llegaría a Bandcamp ni a
-  // YouTube, que es justo el fallback que rescata el nicho).
-  const qobuzActivo = (configCache?.valor.bases.length ?? 0) > 0;
-  const cortesiaTidal = qobuzActivo ? CORTESIA_TIDAL_CON_QOBUZ_MS : CORTESIA_TIDAL_MS;
-  const tidalCarrera = cuandoHaya(dormir(cortesiaTidal).then(() => tidalParalelo));
-
-  const ganador = await Promise.race([
-    monoCarrera.then((m): Ganador => ({ canal: "monochrome", mono: m })),
-    mintCarrera.then((r): Ganador => ({ canal: "stash-relay", mint: r.mint, c: r.c })),
-    tidalCarrera.then((t): Ganador => ({ canal: "stash-tidal", tidal: t })),
-    dormir(qobuzActivo ? PRESUPUESTO_SIN_PERDIDA_MS : 2_500).then((): null => null),
-  ]);
-  if (ganador) {
-    motivoUltimoRescate = null;
-    anotar(`gana=${ganador.canal}`);
-    if (ganador.canal === "monochrome") return devolverMonochrome(ganador.mono);
-    if (ganador.canal === "stash-tidal") return devolverStashTidal(ganador.tidal);
-    return devolverStash(ganador.mint, ganador.c);
-  }
-  motivoUltimoRescate = qobuzActivo ? "mono-stash-sin-audio" : "mono-sin-audio";
-  anotar(`mono/stash sin audio (${candidatos.length} cands)`);
+  const relayLane: Promise<Ganador | null> = (async () => {
+    if (evitar.has("stash-relay")) return null;
+    const candidatos = await candidatosFinalesPromise;
+    if (candidatos.length === 0) return null;
+    // Cortesía: si monochrome está por resolver, no se gasta cupo del relay.
+    await dormir(CORTESIA_MONO_MS);
+    const r = await primeroQueResponda(
+      candidatos.map((c) => () => mintaStash(c.id).then((mint) => (mint ? { mint, c } : null))),
+      300,
+    );
+    return r ? { canal: "stash-relay" as const, mint: r.mint, c: r.c } : null;
+  })().catch(() => null);
 
   // Tidal entrega AAC 320 progresivo (su FLAC es DASH y el navegador no lo
-  // abre). Compite en la carrera de arriba con una cortesía para monochrome y,
-  // si no ganó, acá se recoge lo que haya quedado antes de Bandcamp/YouTube.
-  if (!evitar.has("stash-tidal") && titulo) {
-    const tidal = await tidalParalelo;
-    if (tidal) {
-      motivoUltimoRescate = null;
-      return devolverStashTidal(tidal);
+  // abre). Compite con una cortesía para que un FLAC que estaba por salir no
+  // pierda el clic por milisegundos.
+  const qobuzActivo = (configCache?.valor.bases.length ?? 0) > 0;
+  const cortesiaTidal = qobuzActivo ? CORTESIA_TIDAL_CON_QOBUZ_MS : CORTESIA_TIDAL_MS;
+  const tidalLane: Promise<Ganador | null> = dormir(cortesiaTidal)
+    .then(() => tidalParalelo)
+    .then((t) => (t ? { canal: "stash-tidal" as const, tidal: t } : null))
+    .catch(() => null);
+
+  // Tope propio: la página de Bandcamp puede demorarse, y no vale la pena
+  // retener el rescate entero esperándola.
+  const bandcampLane: Promise<Ganador | null> = conTope(bandcampParalelo, 20_000)
+    .catch(() => null)
+    .then((bc) => (bc ? { canal: "bandcamp" as const, bc } : null));
+
+  const youtubeLane: Promise<Ganador | null> = evitar.has("youtube")
+    ? Promise.resolve(null)
+    : ytParalelo
+        .then((yt) => (yt ? { canal: "youtube" as const, yt } : null))
+        .catch(() => null);
+
+  const devolverGanador = (ganador: Ganador): AudioResuelto => {
+    motivoUltimoRescate = null;
+    switch (ganador.canal) {
+      case "monochrome":
+        return devolverMonochrome(ganador.mono);
+      case "stash-tidal":
+        return devolverStashTidal(ganador.tidal);
+      case "stash-relay":
+        return devolverStash(ganador.mint, ganador.c);
+      case "bandcamp":
+        return devolverBandcamp(ganador.bc);
+      case "youtube":
+        return devolverYouTube(ganador.yt);
     }
-    motivoUltimoRescate = "tidal-sin-audio";
-    anotar("tidal-sin-audio");
+  };
+
+  // Calidad estándar (cuenta gratis o sin sesión): el visitante recibe el
+  // PRIMER audio que suene, sin puertas secuenciales. Bandcamp entra con su
+  // retardo de 1,2 s y YouTube corre desde el inicio; si el FLAC está, suele
+  // llegar antes que todos y se lleva el clic.
+  if (p.calidad === "estandar") {
+    const ganador = await primeroQueResponda<Ganador>(
+      [
+        () => monoIsrcLane,
+        () => monoNombreLane,
+        () => monoCandsLane,
+        () => relayLane,
+        () => tidalLane,
+        () => bandcampLane,
+        () => youtubeLane,
+      ],
+      0,
+    );
+    if (ganador) {
+      anotar(`gana=${ganador.canal}@${Date.now() - t0}ms`);
+      return devolverGanador(ganador);
+    }
+    motivoUltimoRescate = "sin-audio";
+    console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · ${Date.now() - t0}ms`);
+    return null;
   }
+
+  // Premium: primero el tramo sin pérdida con su presupuesto, medido desde el
+  // inicio (antes el reloj arrancaba recién después de las puertas). Si nada
+  // aparece, Bandcamp (MP3 público) y sólo al final el YouTube completo.
+  const ganadorSinPerdida = await Promise.race([
+    primeroQueResponda<Ganador>(
+      [() => monoIsrcLane, () => monoNombreLane, () => monoCandsLane, () => relayLane, () => tidalLane],
+      0,
+    ),
+    dormir(qobuzActivo ? PRESUPUESTO_SIN_PERDIDA_MS : 2_500).then((): Ganador | null => null),
+  ]);
+  if (ganadorSinPerdida) {
+    anotar(`gana=${ganadorSinPerdida.canal}@${Date.now() - t0}ms`);
+    return devolverGanador(ganadorSinPerdida);
+  }
+  motivoUltimoRescate = qobuzActivo ? "mono-stash-sin-audio" : "mono-sin-audio";
+  anotar("sin pérdida agotado");
 
   // Sin FLAC ni relay, Bandcamp cubre el nicho con su MP3 público. Va antes de
   // YouTube porque no depende de un backend externo ni de credenciales. Tiene
-  // su propio tope: el reto de Fastly desde el Worker puede demorarse, y no
-  // vale la pena bloquear el rescate entero esperando la página de Bandcamp.
+  // su propio tope: el reto de Fastly desde el Worker puede demorarse.
   motivoUltimoRescate = "bandcamp-sin-audio";
   const bandcamp = await conTope(bandcampParalelo, 20_000).catch(() => null);
   if (bandcamp) {
-    motivoUltimoRescate = null;
+    anotar(`gana=bandcamp@${Date.now() - t0}ms`);
     return devolverBandcamp(bandcamp);
   }
   anotar("bandcamp-sin-match");
@@ -3394,8 +3420,7 @@ async function resolverAudioInterno(
     console.warn(`[rescate] sin audio «${titulo}» · ${traza.join(" ")} · ${Date.now() - t0}ms`);
     return null;
   }
-  motivoUltimoRescate = null;
-  return devolverYouTube(yt);
+  return devolverGanador({ canal: "youtube", yt });
 }
 
 /* ── Salud de los canales (panel del dueño) ───────────────────────── */

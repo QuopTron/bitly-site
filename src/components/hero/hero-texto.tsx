@@ -1,6 +1,5 @@
 import { Sparkles } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
-import { retraso } from "@/lib/reveal";
 import BrushStroke from "@/components/ui/brush-stroke";
 
 type Props = {
@@ -17,12 +16,12 @@ export default function HeroTexto({ tagline, description, version }: Props) {
 
   return (
     <>
-      <div data-reveal suppressHydrationWarning style={retraso(0)} className="etiqueta w-fit -rotate-1">
+      <div className="etiqueta w-fit -rotate-1">
         <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />
         {version ? `${t("heroBadge")} · ${version}` : t("heroBadge")}
       </div>
 
-      <div data-reveal suppressHydrationWarning style={retraso(80)}>
+      <div>
         <h1 className="texto-tag titulo-aerosol text-[2.45rem] leading-[0.9] tracking-tight sm:text-6xl lg:text-[3.9rem] 2xl:text-[4.8rem]">
           <span className="block bg-clip-text text-transparent" style={{ backgroundImage: "var(--gradiente-marca)" }}>
             {primera}
@@ -37,9 +36,6 @@ export default function HeroTexto({ tagline, description, version }: Props) {
       </div>
 
       <p
-        data-reveal
-        suppressHydrationWarning
-        style={retraso(150)}
         className="hero-descripcion max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base"
       >
         {description || t("heroDescription")}

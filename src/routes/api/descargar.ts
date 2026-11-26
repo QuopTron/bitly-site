@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { anotarPedido, claveDe, cubo } from "@/server/audio-cache";
 import { cuentaDeToken } from "@/server/cuentas";
 import { consumirDescarga, LIMITE_DESCARGAS } from "@/server/descargas-cuenta";
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
@@ -189,6 +190,14 @@ export const Route = createFileRoute("/api/descargar")({
           videoId,
           calidad,
         };
+
+        // Cuenta el pedido para el caché de audio: si esta canción se repite,
+        // la app podrá sembrarla en R2 después de su propia descarga. Sin R2
+        // configurado esto no hace nada.
+        if (cubo()) {
+          const clave = claveDe(peticion.isrc || `${peticion.artista}|${peticion.titulo}`);
+          await anotarPedido(clave).catch(() => undefined);
+        }
 
         let traido = await traerAudio(peticion, request.signal);
         // El enlace se resolvió pero el host no lo abrió: se pide otro canal.

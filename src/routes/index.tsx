@@ -5,7 +5,6 @@ import Header from "@/components/layout/header";
 import HeroSection from "@/components/hero/hero-section";
 import PlansSection from "@/components/plans-section";
 import InstallSection, { abrirGuia, plataformaDeDescarga } from "@/components/install/install-section";
-import DemoPlayer from "@/components/demo/demo-player";
 import ComentariosInicio from "@/components/inicio/comentarios-inicio";
 import PistaDeslizar from "@/components/layout/pista-deslizar";
 
@@ -18,6 +17,7 @@ import { TITULO } from "@/lib/seo";
 import { EVENTO_NAVEGAR, VISTAS, esVista, type VistaId } from "@/lib/navegacion";
 import { useDeslizamientoVistas } from "@/lib/deslizamiento-vistas";
 import { INFO_POR_DEFECTO, leerDatosSitio, registrarDescarga, type InfoApp, type StatsSitio } from "@/server/datos";
+import { demoDespertar } from "@/server/demo-proxy";
 
 /**
  * Diálogos bajo demanda.
@@ -31,6 +31,23 @@ const ReleaseModal = lazy(() => import("@/components/modals/release-modal"));
 const FaqModal = lazy(() => import("@/components/modals/faq-modal"));
 const ComentariosModal = lazy(() => import("@/components/modals/comentarios-modal"));
 const CuentaModal = lazy(() => import("@/components/modals/cuenta-modal"));
+const DemoPlayer = lazy(() => import("@/components/demo/demo-player"));
+
+type VentanaOciosa = Window & {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+};
+
+function cuandoLibre(fn: () => void, timeout: number): () => void {
+  if (typeof window === "undefined") return () => {};
+  const w = window as VentanaOciosa;
+  if (w.requestIdleCallback) {
+    const id = w.requestIdleCallback(fn, { timeout });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(fn, timeout);
+  return () => window.clearTimeout(id);
+}
 
 type Datos = { info: InfoApp; stats: StatsSitio; vistas: number; release: ReleaseIndex | null };
 
@@ -66,7 +83,7 @@ export const Route = createFileRoute("/")({
 export default function Index() {
   const datos = Route.useLoaderData();
   usePreferenciasGuardadas();
-  const [info, setInfo] = useState<InfoApp>(datos.info);
+  const [info] = useState<InfoApp>(datos.info);
   const [stats, setStats] = useState(datos.stats);
   const [vistas, setVistas] = useState(datos.vistas);
   const [showRelease, setShowRelease] = useState(false);
@@ -78,7 +95,8 @@ export default function Index() {
   const [vista, setVista] = useState<VistaId>("inicio");
   const [releasePlatform, setReleasePlatform] = useState<"windows" | "android" | "tv" | "ios" | "macos">("android");
   const [blocked, setBlocked] = useState(false);
-  const [release, setRelease] = useState<ReleaseIndex | null>(datos.release);
+  const release = datos.release;
+  const [demoMontado, setDemoMontado] = useState(false);
 
   useAnalitica(vista);
   const { disponible: pwaDisponible, instalar: instalarPwa } = useInstalacionPwa();
@@ -166,23 +184,37 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const d = await leerDatosSitio();
-        setInfo(d.info);
-        setStats((prev) => ({ ...prev, ...d.stats }));
-        setVistas(d.vistas);
-      } catch (e) {
-        console.error("[Bitly] Failed to load app info:", e);
-      }
-    })();
-    initRates();
-    let vivo = true;
-    cargarReleases()
-      .then((r) => { if (vivo) setRelease(r); })
-      .catch((e) => { console.error("[Bitly] No se pudieron cargar las releases:", e); });
-    return () => { vivo = false; };
+    if (vista === "demo") setDemoMontado(true);
+  }, [vista]);
+
+  useEffect(() => {
+    const precargar = cuandoLibre(() => {
+      void import("@/components/demo/demo-player");
+    }, 3_500);
+    const calentarDemo = cuandoLibre(() => {
+      void import("@/lib/demo-catalog").then((m) => m.precalentarDemoInicial());
+    }, 6_000);
+    const despertar = () => {
+      void demoDespertar().catch(() => {});
+    };
+    const primerDespertar = cuandoLibre(despertar, 1_200);
+    const alVolver = () => {
+      if (document.visibilityState === "visible") despertar();
+    };
+    const latido = setInterval(alVolver, 4 * 60_000);
+    document.addEventListener("visibilitychange", alVolver);
+    return () => {
+      precargar();
+      calentarDemo();
+      primerDespertar();
+      clearInterval(latido);
+      document.removeEventListener("visibilitychange", alVolver);
+    };
   }, []);
+
+  useEffect(() => {
+    if (vista === "demo" || vista === "planes") void initRates();
+  }, [vista]);
 
   /** Abre la lista de archivos. No cuenta nada todavía: eso pasa al bajar uno. */
   const handleDownload = (platform: "windows" | "android" | "tv" | "ios" | "macos", _url: string | null) => {
@@ -249,7 +281,20 @@ export default function Index() {
         </>
       );
     }
-    if (id === "demo") return <DemoPlayer onCuenta={() => setShowCuenta(true)} />;
+    if (id === "demo") {
+      if (!demoMontado) return null;
+      return (
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center">
+              <span className="h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+            </div>
+          }
+        >
+          <DemoPlayer onCuenta={() => setShowCuenta(true)} />
+        </Suspense>
+      );
+    }
     if (id === "instalar") return <InstallSection onDownload={(p) => handleDownload(p, null)} />;
     return <PlansSection onCuenta={() => setShowCuenta(true)} />;
   };

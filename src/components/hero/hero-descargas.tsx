@@ -1,6 +1,5 @@
 import { Monitor, Smartphone, Apple, Tv, Lock, type LucideIcon } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
-import { retraso } from "@/lib/reveal";
 
 export type Plataforma = "windows" | "android" | "tv" | "ios" | "macos";
 
@@ -56,9 +55,6 @@ export default function HeroDescargas({ isBlocked, windowsUrl, androidUrl, iosUr
   return (
     <div
       id="descargar"
-      data-reveal
-      suppressHydrationWarning
-      style={retraso(220)}
       className="grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:grid-cols-5"
     >
       <button

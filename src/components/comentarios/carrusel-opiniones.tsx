@@ -98,6 +98,7 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
 
     let raf = 0;
     let ultimo = performance.now();
+    let enPantalla = false;
     const paso = (ahora: number) => {
       const dt = Math.min(64, ahora - ultimo);
       ultimo = ahora;
@@ -111,10 +112,37 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
       }
       raf = requestAnimationFrame(paso);
     };
-
-    raf = requestAnimationFrame(paso);
-    return () => {
+    const arrancar = () => {
+      if (raf) return;
+      ultimo = performance.now();
+      raf = requestAnimationFrame(paso);
+    };
+    const detener = () => {
+      if (!raf) return;
       cancelAnimationFrame(raf);
+      raf = 0;
+    };
+
+    const visibilidad = new IntersectionObserver(
+      ([entrada]) => {
+        enPantalla = entrada?.isIntersecting ?? false;
+        if (enPantalla && !document.hidden) arrancar();
+        else detener();
+      },
+      { rootMargin: "200px" },
+    );
+    visibilidad.observe(el);
+
+    const alCambiarVisibilidad = () => {
+      if (!document.hidden && enPantalla) arrancar();
+      else detener();
+    };
+    document.addEventListener("visibilitychange", alCambiarVisibilidad);
+
+    return () => {
+      detener();
+      visibilidad.disconnect();
+      document.removeEventListener("visibilitychange", alCambiarVisibilidad);
       observador.disconnect();
       aplicar.current = () => {};
     };
@@ -141,7 +169,7 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
 
   if (opiniones === null) {
     return (
-      <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
+      <div className="flex min-h-[120px] items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> {t("opinionesLista")}
       </div>
     );
@@ -149,7 +177,7 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
 
   if (opiniones.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 py-8 text-center">
+      <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 py-8 text-center">
         <MessageSquare className="h-6 w-6 text-muted-foreground" aria-hidden />
         <p className="text-xs text-muted-foreground">{t("opinionesSinOpiniones")}</p>
       </div>
@@ -166,7 +194,7 @@ export default function CarruselOpiniones({ opiniones, columnas = 2 }: Props) {
 
   return (
     <div
-      className="relative select-none"
+      className="relative min-h-[120px] select-none"
       onMouseEnter={() => {
         pausado.current = true;
       }}

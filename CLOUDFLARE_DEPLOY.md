@@ -526,3 +526,25 @@ Si el punto 4 dice "El registro no respondió", el problema es de entorno, no de
 registro: revisá que `BITLY_CODES_TOKEN` esté en las env vars, que
 `nodejs_compat` esté activo y que la `compatibility_date` sea reciente (ver la
 sección 3 sobre la siembra).
+
+## 8. Caché de audio en R2 (opcional)
+
+El endpoint `/api/audio` sirve audio ya cacheado para las canciones **más
+pedidas** (por defecto, 3 pedidos). Es opcional: sin la binding responde
+`apagado` y la app sigue usando los proveedores.
+
+Para activarlo, en el dashboard del proyecto de Pages:
+
+1. **R2 → Create bucket** (por ejemplo `bitly-audio`).
+2. **Settings → Functions → R2 bindings → Add binding**:
+   - Variable name: `BITLY_AUDIO`
+   - Bucket: el que creaste.
+3. (Opcional) En **Environment variables**, `BITLY_AUDIO_UMBRAL` con la cantidad
+   de pedidos necesaria para cachear (por defecto `3`).
+
+El `_worker.js` generado expone esa binding al servidor en `globalThis`. El
+bucket no necesita dominio público ni CORS: solo lo lee el propio Worker.
+
+Qué guarda: el audio que la app aporta **después** de una descarga normal, solo
+si la canción pasó el umbral, con una sesión válida y hasta 40 MB. La clave es
+el ISRC (o `artista|título`) y el objeto se nombra con su SHA-256.
