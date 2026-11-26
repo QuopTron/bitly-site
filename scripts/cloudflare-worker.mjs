@@ -283,7 +283,7 @@ export default {
 
     const respuesta = await app.fetch(request, env, ctx);
     // La API no cae al 404 del sitio: un cliente que espera JSON no tiene que
-    // recibir HTML solo porque el recurso no existe (`no_cargado`, por ejemplo).
+    // recibir HTML solo porque el recurso no existe ("no_cargado", por ejemplo).
     const salida =
       respuesta.status !== 404 || esApi ? respuesta : await env.ASSETS.fetch(request);
     const final = await conCsp(salida, esApp);
