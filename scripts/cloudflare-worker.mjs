@@ -282,7 +282,10 @@ export default {
     }
 
     const respuesta = await app.fetch(request, env, ctx);
-    const salida = respuesta.status !== 404 ? respuesta : await env.ASSETS.fetch(request);
+    // La API no cae al 404 del sitio: un cliente que espera JSON no tiene que
+    // recibir HTML solo porque el recurso no existe (`no_cargado`, por ejemplo).
+    const salida =
+      respuesta.status !== 404 || esApi ? respuesta : await env.ASSETS.fetch(request);
     const final = await conCsp(salida, esApp);
     // La RPC y la API de la app (descargas, audio) no se cachean ni se indexan,
     // y salen con las mismas cabeceras de seguridad que el resto del sitio: un
