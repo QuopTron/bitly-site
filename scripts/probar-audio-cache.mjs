@@ -141,6 +141,10 @@ check(
   "el conteo quedó guardado con vencimiento",
   kv.datos.get("popularidad.json")?.expira > 300 * 24 * 60 * 60,
 );
+check(
+  "y guardado en cada pedido hasta el umbral (lo lee el aporte en otra instancia)",
+  JSON.parse(kv.datos.get("popularidad.json")?.valor ?? "{}")[CLAVE] === 3,
+);
 
 /* ── Un archivo chico: un solo trozo ────────────────────────────────────── */
 const chico = new TextEncoder().encode("ID3-chico");
@@ -180,8 +184,8 @@ check("el tipo del FLAC se conserva", grandeLeido?.tipo === "audio/flac");
 // KV es global a propósito: cualquier origen ve la misma entrada.
 check("otro origen ve la misma entrada (KV es global)", (await hay(OTRO, CLAVE, "flac")) === true);
 check(
-  "el conteo visible es el último volcado a KV",
-  (await pedidosDe(OTRO, CLAVE)) === 1,
+  "el conteo visible desde otro origen es el de KV",
+  (await pedidosDe(OTRO, CLAVE)) === 3,
   String(await pedidosDe(OTRO, CLAVE)),
 );
 

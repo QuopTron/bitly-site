@@ -125,10 +125,18 @@ async function popularidad(origen: string): Promise<Record<string, number>> {
   return datos;
 }
 
-/** Guarda el conteo sin inundar el almacén: como mucho una escritura por minuto. */
-async function persistir(origen: string, datos: Record<string, number>): Promise<void> {
+/**
+ * Guarda el conteo. Mientras la canción no cruzó el umbral se escribe en cada
+ * pedido: el aporte llega a otra instancia y tiene que ver el número real, no el
+ * que quedó de la última escritura. Pasado el umbral se escribe una vez por minuto.
+ */
+async function persistir(
+  origen: string,
+  datos: Record<string, number>,
+  urgente: boolean,
+): Promise<void> {
   const memoria = memoriaDe(origen);
-  if (Date.now() - memoria.ultimaEscritura < ESPERA_ESCRITURA_MS) return;
+  if (!urgente && Date.now() - memoria.ultimaEscritura < ESPERA_ESCRITURA_MS) return;
   memoria.ultimaEscritura = Date.now();
   const recorte: Record<string, number> = {};
   for (const clave of Object.keys(datos).sort((a, b) => datos[b]! - datos[a]!).slice(0, MAX_CLAVES)) {
@@ -147,7 +155,7 @@ export async function anotarPedido(origen: string, clave: string): Promise<numbe
   const datos = await popularidad(origen);
   const n = (datos[clave] ?? 0) + 1;
   datos[clave] = n;
-  await persistir(origen, datos);
+  await persistir(origen, datos, n <= umbralSembrar() * 2);
   return n;
 }
 
