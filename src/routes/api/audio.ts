@@ -10,8 +10,10 @@ import {
   hay,
   MAX_BYTES,
   pedidosDe,
+  pedidosFrescos,
   umbralSembrar,
 } from "@/server/audio-cache";
+import { firmar, verificar } from "@/server/audio-cache/permiso";
 
 /**
  * API del CACHÉ DE AUDIO opcional (Cache API de Cloudflare, ver audio-cache.ts).
@@ -92,11 +94,16 @@ export const Route = createFileRoute("/api/audio")({
         const pedidos =
           accion === "pedir" ? await anotarPedido(origen, clave) : await pedidosDe(origen, clave);
         const cargado = await hay(origen, clave, calidad);
+        const sembrar = !cargado && pedidos >= umbralSembrar();
+        // El permiso evita depender del contador al aportar: el aporte puede
+        // caer en otra instancia y ver un número viejo.
+        const permiso = sembrar ? await firmar(clave, calidad) : null;
         return json({
           ok: true,
           hay: cargado,
-          sembrar: !cargado && pedidos >= umbralSembrar(),
+          sembrar,
           pedidos,
+          ...(permiso ? { permiso } : {}),
         });
       },
 
@@ -112,10 +119,19 @@ export const Route = createFileRoute("/api/audio")({
         const cuenta = await cuentaDeToken(token);
         if (!cuenta) return json({ ok: false, motivo: "sesion" }, 401);
 
-        // El umbral se revalida acá: el cliente no decide qué se cachea.
-        const pedidos = await pedidosDe(url.origin, clave);
-        if (pedidos < umbralSembrar()) {
-          return json({ ok: false, motivo: "poco_pedida", pedidos }, 403);
+        // El cliente no decide qué se cachea: o trae un permiso firmado por el
+        // sitio (se le dio cuando la canción cruzó el umbral) o se revalida el
+        // contador, que es lo que hacen los clientes viejos.
+        const permiso = request.headers.get("x-bitly-permiso") ?? "";
+        if (permiso) {
+          if (!(await verificar(permiso, clave, calidad))) {
+            return json({ ok: false, motivo: "permiso" }, 403);
+          }
+        } else {
+          const pedidos = await pedidosFrescos(url.origin, clave);
+          if (pedidos < umbralSembrar()) {
+            return json({ ok: false, motivo: "poco_pedida", pedidos }, 403);
+          }
         }
 
         const largo = Number(request.headers.get("content-length") ?? 0);

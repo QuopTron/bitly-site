@@ -164,6 +164,24 @@ export async function pedidosDe(origen: string, clave: string): Promise<number> 
   return clave ? ((await popularidad(origen))[clave] ?? 0) : 0;
 }
 
+/**
+ * El conteo tal como está guardado, sin la copia en memoria.
+ *
+ * El aporte puede caer en otra instancia que tenga un número viejo cacheado; en
+ * ese caso conviene pagar una lectura y no rechazar un audio que ya se ganó su
+ * lugar. Los clientes nuevos ni siquiera pasan por acá: traen permiso firmado.
+ */
+export async function pedidosFrescos(origen: string, clave: string): Promise<number> {
+  if (!clave) return 0;
+  const texto = await almacen(origen)?.leerTexto("popularidad.json", VIDA_CONTEO_SEG);
+  try {
+    const n = Number((JSON.parse(texto ?? "{}") as Record<string, unknown>)[clave]);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Si esa canción y calidad ya están cacheadas. */
 export async function hay(origen: string, clave: string, calidad: string): Promise<boolean> {
   const llave = await llaveDe(clave, calidad);
