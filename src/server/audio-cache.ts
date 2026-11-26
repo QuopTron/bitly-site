@@ -5,13 +5,18 @@
  * el audio se sigue bajando del proveedor. Si un tema lo piden muchas personas,
  * guardarlo una vez ahorra las siguientes descargas.
  *
- * Dónde se guarda, en orden de preferencia:
+ * Dónde se guarda, en dos capas:
  *
- * 1. **Workers KV** (`BITLY_AUDIO` como binding de KV): global, no lo desaloja
- *    el CDN y entra en el plan gratis sin tarjeta. Los archivos grandes se
- *    parten en trozos de 20 MB, así un FLAC entra igual. Ver `kv.ts`.
- * 2. **Cache API** (sin configurar nada): viene incluida en Pages, pero cada
- *    centro de datos tiene su copia y el CDN puede vaciarla. Ver `cache-api.ts`.
+ * 1. **Fría** (`BITLY_AUDIO_REPOS` + `BITLY_AUDIO_TOKEN`): un repo privado de
+ *    GitHub. Guarda todo lo sembrado, sin vencimiento, con el archivo partido
+ *    en trozos. Es el archivo de verdad. Ver `github.ts`.
+ * 2. **Caliente** (`BITLY_AUDIO` como binding de KV): global y rápido; entra en
+ *    el plan gratis sin tarjeta. Si no hay KV, se usa la Cache API, que viene
+ *    incluida pero es por centro de datos y desalojable. Ver `kv.ts` y
+ *    `cache-api.ts`.
+ *
+ * Leer mira caliente y después frío; aportar escribe siempre en el frío y
+ * copia al caliente si el archivo es chico. Ver `dos-capas.ts`.
  *
  * Con ninguna de las dos responde `apagado` y la app sigue usando los
  * proveedores. Para apagarlo igual: variable de entorno `BITLY_AUDIO=apagado`.
@@ -25,6 +30,8 @@
 import type { Almacen, Archivo } from "./audio-cache/almacen";
 import { cacheApi, namespaceKv } from "./audio-cache/almacen";
 import { crear as crearCacheApi } from "./audio-cache/cache-api";
+import { crear as crearDosCapas } from "./audio-cache/dos-capas";
+import { configurar as configurarGithub, crear as crearGithub } from "./audio-cache/github";
 import { crear as crearKv } from "./audio-cache/kv";
 
 const VIDA_MEMORIA_MS = 60_000;
@@ -44,19 +51,23 @@ export function umbralSembrar(): number {
 /** Tope por archivo: un FLAC típico entra; un show completo no. */
 export const MAX_BYTES = 40 * 1024 * 1024;
 
-/** El almacén que toca: KV si hay binding, Cache API si no. `null` = apagado. */
+/**
+ * El almacén que toca: caliente (KV o Cache API) + frío (repo de GitHub).
+ * `null` = apagado.
+ */
 function almacen(origen: string): Almacen | null {
   const kv = namespaceKv();
-  if (kv) return crearKv(kv);
   const cache = cacheApi();
-  return cache ? crearCacheApi(cache, origen) : null;
+  const caliente = kv ? crearKv(kv) : cache ? crearCacheApi(cache, origen) : null;
+  const config = configurarGithub();
+  return crearDosCapas(caliente, config ? crearGithub(config) : null);
 }
 
 /** Si el sitio puede guardar y servir audio. Sin esto todo contesta `apagado`. */
 export function disponible(): boolean {
   const ajuste = String(process.env?.BITLY_AUDIO ?? "").trim().toLowerCase();
   if (ajuste && APAGADOS.has(ajuste)) return false;
-  return Boolean(namespaceKv() || cacheApi());
+  return Boolean(namespaceKv() || cacheApi() || configurarGithub());
 }
 
 /** La misma normalización que el catálogo: ISRC en mayúsculas, sin signos. */

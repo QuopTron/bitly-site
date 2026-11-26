@@ -47,7 +47,9 @@ function crearKvFalso() {
       const { valor } = datos.get(clave);
       if (tipo === "json") return typeof valor === "string" ? JSON.parse(valor) : null;
       if (tipo === "arrayBuffer") {
-        return typeof valor === "string" ? new TextEncoder().encode(valor).buffer : valor;
+        if (typeof valor === "string") return new TextEncoder().encode(valor).buffer;
+        // KV acepta vistas; la API devuelve siempre un ArrayBuffer exacto.
+        return valor.buffer.slice(valor.byteOffset, valor.byteOffset + valor.byteLength);
       }
       return typeof valor === "string" ? valor : new TextDecoder().decode(valor);
     },
@@ -70,6 +72,38 @@ function crearCacheFalsa() {
     },
   };
 }
+
+/** Un GitHub de mentira: la API de contenidos (PUT) y raw (GET/HEAD). */
+const github = { archivos: new Map(), escrituras: [] };
+globalThis.fetch = async (url, init = {}) => {
+  const pedido = String(url);
+  const metodo = (init.method ?? "GET").toUpperCase();
+
+  if (pedido.startsWith("https://api.github.com/repos/")) {
+    const resto = decodeURI(pedido.slice("https://api.github.com/repos/".length));
+    const [dueno, repo, , ...partes] = resto.split("/");
+    const camino = partes.join("/");
+    const clave = `${dueno}/${repo}/${camino}`;
+    if (metodo !== "PUT") return new Response("no", { status: 405 });
+    const cuerpo = JSON.parse(String(init.body));
+    // GitHub contesta 422 si el archivo ya existe: el aporte es write-once.
+    if (github.archivos.has(clave)) return new Response("ya existe", { status: 422 });
+    github.archivos.set(clave, new Uint8Array(Buffer.from(cuerpo.content, "base64")));
+    github.escrituras.push(clave);
+    return new Response("{}", { status: 201 });
+  }
+
+  if (pedido.startsWith("https://raw.githubusercontent.com/")) {
+    const resto = decodeURI(pedido.slice("https://raw.githubusercontent.com/".length));
+    const [dueno, repo, rama, ...partes] = resto.split("/");
+    const valor = github.archivos.get(`${dueno}/${repo}/${partes.join("/")}`);
+    if (rama !== "main") return new Response("rama", { status: 400 });
+    if (!valor) return new Response("no está", { status: 404 });
+    return new Response(metodo === "HEAD" ? null : valor, { status: 200 });
+  }
+
+  throw new Error(`fetch inesperado: ${pedido}`);
+};
 
 const kv = crearKvFalso();
 globalThis.__BITLY_AUDIO = kv;
@@ -151,6 +185,63 @@ check(
   String(await pedidosDe(OTRO, CLAVE)),
 );
 
+/* ── Archivo frío en un repo de GitHub ──────────────────────────────────── */
+process.env.BITLY_AUDIO_TOKEN = "token-de-prueba";
+process.env.BITLY_AUDIO_REPOS = "QuopTron/bitly-audio-0,QuopTron/bitly-audio-1";
+check("con repos configurados sigue disponible", disponible() === true);
+
+const COLD = "COLD-1";
+const llaveCold = await llaveDe(COLD, "flac");
+const hexCold = llaveCold.slice("audio/".length);
+const repoEsperado = `QuopTron/bitly-audio-${parseInt(hexCold.slice(0, 2), 16) % 2}`;
+const baseCold = `audio/${hexCold.slice(0, 2)}/${hexCold}`;
+
+const frio = new Uint8Array(20 * 1024 * 1024 + 7);
+frio[0] = 0x11;
+frio[frio.length - 1] = 0x22;
+check(
+  "un FLAC grande se aporta con repo configurado",
+  await guardar(ORIGEN, COLD, "flac", new Blob([frio]).stream(), "audio/flac", frio.length),
+);
+check(
+  "va al repo que toca por hash",
+  [...github.archivos.keys()].some((k) => k === `${repoEsperado}/${baseCold}/man.json`),
+  repoEsperado,
+);
+const trozosFrios = [...github.archivos.keys()].filter((k) =>
+  k.startsWith(`${repoEsperado}/${baseCold}/trozo-`),
+).length;
+check("el repo lo parte en trozos de 8 MB", trozosFrios === 3, String(trozosFrios));
+check("y quedó copia caliente (≤ 24 MB)", Boolean(kv.datos.get(`${llaveCold}/man`)));
+
+// Sin la copia caliente, el archivo tiene que salir igual del repo.
+for (const clave of [...kv.datos.keys()]) if (clave.startsWith(llaveCold)) kv.datos.delete(clave);
+check("sin KV lo encuentra el repo", (await hay(ORIGEN, COLD, "flac")) === true);
+const desdeFrio = await abrir(ORIGEN, COLD, "flac");
+const vueltaFria = desdeFrio
+  ? new Uint8Array(await new Response(desdeFrio.cuerpo).arrayBuffer())
+  : null;
+check(
+  "y vuelve entero desde el repo",
+  vueltaFria?.length === frio.length &&
+    vueltaFria?.[0] === 0x11 &&
+    vueltaFria?.[vueltaFria.length - 1] === 0x22,
+);
+
+const pesado = new Uint8Array(25 * 1024 * 1024);
+check(
+  "un archivo de 25 MB se guarda",
+  await guardar(ORIGEN, "COLD-2", "flac", new Blob([pesado]).stream(), "audio/flac", pesado.length),
+);
+check(
+  "los grandes van solo al repo (sin copia caliente)",
+  Boolean(kv.datos.get(`${await llaveDe("COLD-2", "flac")}/man`)) === false,
+);
+check(
+  "volver a aportar lo mismo no falla (write-once)",
+  await guardar(ORIGEN, COLD, "flac", new Blob([frio]).stream(), "audio/flac", frio.length),
+);
+
 /* ── Respaldo: sin KV se usa la Cache API ───────────────────────────────── */
 const cache = crearCacheFalsa();
 globalThis.caches = { default: cache };
@@ -172,8 +263,12 @@ check(
   [...cache.entradas.keys()].some((u) => u.startsWith(`${ORIGEN}/__cache/audio/`)),
 );
 check(
-  "la Cache API sí separa por origen (preview no la ve)",
-  (await hay(OTRO, "OTRA-CLAVE", "flac")) === false,
+  "otro origen ve la copia fría (el archivo es global)",
+  (await hay(OTRO, "OTRA-CLAVE", "flac")) === true,
+);
+check(
+  "pero la Cache API solo tiene entradas del origen que escribió",
+  [...cache.entradas.keys()].every((u) => u.startsWith(`${ORIGEN}/__cache/`)),
 );
 
 /* ── Apagado ────────────────────────────────────────────────────────────── */
@@ -187,7 +282,14 @@ delete process.env.BITLY_AUDIO;
 const cacheReal = globalThis.caches;
 delete globalThis.caches;
 delete globalThis.__BITLY_AUDIO;
-check("sin KV ni Cache API queda apagado", disponible() === false);
+check("todavía disponible por el repo", disponible() === true);
+check(
+  "y lee del repo sin capa caliente ni Cache API",
+  (await hay(ORIGEN, COLD, "flac")) === true,
+);
+delete process.env.BITLY_AUDIO_TOKEN;
+delete process.env.BITLY_AUDIO_REPOS;
+check("sin ninguna capa queda apagado", disponible() === false);
 globalThis.caches = cacheReal;
 
 console.log(`\n${ok}/${ok + fallos} aserciones OK`);

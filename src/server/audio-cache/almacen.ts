@@ -19,7 +19,7 @@ export type Archivo = {
 
 export type Almacen = {
   /** De dónde salió: sirve para los diagnósticos y los tests. */
-  nombre: "kv" | "cache";
+  nombre: string;
   leer(ruta: string): Promise<Archivo | null>;
   hay(ruta: string): Promise<boolean>;
   guardar(ruta: string, cuerpo: ReadableStream, tipo: string, bytes: number): Promise<boolean>;
@@ -32,7 +32,7 @@ export type Kv = {
   get(clave: string, tipo?: "text" | "json" | "arrayBuffer"): Promise<unknown>;
   put(
     clave: string,
-    valor: ArrayBuffer | string,
+    valor: ArrayBuffer | ArrayBufferView | string,
     opciones?: { expirationTtl?: number },
   ): Promise<void>;
 };

@@ -530,12 +530,21 @@ sección 3 sobre la siembra).
 ## 8. Caché de audio (opcional)
 
 El endpoint `/api/audio` sirve audio ya cacheado para las canciones **más
-pedidas** (por defecto, 3 pedidos). Usa la **Cache API de Cloudflare**
-(`caches.default`), no R2: no hay bucket, no hay binding y no hace falta tarjeta.
-Funciona igual en `*.pages.dev` y en dominio propio.
+pedidas** (por defecto, 3 pedidos). No usa R2: pide tarjeta. Hay dos capas y
+ninguna cuesta plata:
 
-Funciona sin configurar nada usando la Cache API como respaldo. Para que sea
-**global y durable**, se le da un namespace de KV:
+- **Caliente**: Workers KV (`BITLY_AUDIO`). Global y rápido. Si falta el binding
+  se usa la Cache API, que viene incluida pero es por centro de datos y el CDN
+  puede desalojarla.
+- **Fría**: un repo privado de GitHub (`QuopTron/bitly-audio`). Ahí queda todo lo
+  que se sembró alguna vez, sin vencimiento.
+
+Leer mira caliente y después frío. Aportar escribe siempre en el frío y además
+copia al caliente si el archivo no pasa de 24 MB (los grandes quedan solo en el
+repo: duplicarlos pediría 40 MB de memoria en un Worker de 128 MB). El conteo de
+pedidos vive solo en el caliente.
+
+### Capa caliente (KV)
 
 1. El namespace ya existe: **Workers & Pages → KV**, `BITLY_AUDIO`
    (`3035582e15f64989a259a0ffb7591374`). Si hay que recrearlo:
@@ -562,11 +571,37 @@ Con KV:
   día, sin tarjeta. Un tema de 30 MB ocupa dos trozos (dos escrituras).
 - Las entradas vencen solas: 30 días el audio, un año el conteo.
 
-Sin KV (Cache API):
+Sin KV (Cache API): la caché es **por centro de datos** y el CDN puede
+**desalojar** entradas; sirve de respaldo, no de archivo.
 
-- La caché es **por centro de datos** y el CDN puede **desalojar** entradas. Es
-  una optimización, no almacenamiento durable.
-- No se puede purgar a mano: las entradas vencen solas o se desalojan.
+### Capa fría (repo privado)
+
+1. El repo ya existe: `QuopTron/bitly-audio`, privado, con el layout
+   `audio/<2 hex>/<sha256>/trozo-N.bin` + `man.json` (trozos de 8 MB).
+2. Crear un **token fine-grained** en GitHub:
+   - Repository access: solo `bitly-audio` (y los que agregues).
+   - Permissions → **Contents: Read and write**.
+   - Expiración: 90 días.
+3. En Pages → Settings → Variables and secrets:
+   - `BITLY_AUDIO_REPOS` (texto): `QuopTron/bitly-audio`
+   - `BITLY_AUDIO_TOKEN` (secreto): el token.
+4. Redeploy.
+
+Detalles que importan:
+
+- **Write-once**: el archivo se crea una vez y no se actualiza. Si ya existe,
+  GitHub contesta `422` y se toma como éxito: no hay carreras ni manejo de `sha`.
+- Las lecturas van por `raw.githubusercontent.com` con token: el repo es privado
+  y no se gasta la cuota de la API.
+- **Varios repos**: `BITLY_AUDIO_REPOS=QuopTron/bitly-audio-0,…,bitly-audio-9`.
+  El que toca sale de los dos primeros hex del hash (`hex[0..2] % cantidad`), así
+  que sigue siendo **una sola petición**: no se consultan los diez.
+- Límites de GitHub: 100 MB por archivo, ~5 GB recomendado por repo y 5.000
+  peticiones/hora **por token**. Por eso conviene shardear recién arriba de esos
+  5 GB, no antes.
+
+Apagado: `BITLY_AUDIO=apagado` en las variables del proyecto. `BITLY_AUDIO_UMBRAL`
+cambia el umbral de pedidos.
 
 Qué guarda: el audio que la app aporta **después** de una descarga normal, solo
 si la canción pasó el umbral, con una sesión válida y hasta 40 MB. La clave es
