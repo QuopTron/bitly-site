@@ -42,6 +42,12 @@ export function crear(caliente: Almacen | null, frio: Almacen | null): Almacen |
         caliente.guardar(ruta, new Blob([copia]).stream(), tipo, bytes),
         frio.guardar(ruta, new Blob([copia]).stream(), tipo, bytes),
       ]);
+      // Alcanza con una capa, pero conviene verse en los logs si una falló.
+      for (const resultado of [enCaliente, enFrio]) {
+        if (resultado.status === "rejected") {
+          console.error("audio: una capa falló al guardar", String(resultado.reason));
+        }
+      }
       const ok = (resultado: PromiseSettledResult<boolean>) =>
         resultado.status === "fulfilled" && resultado.value === true;
       // Alcanza con que una de las dos lo tenga.
