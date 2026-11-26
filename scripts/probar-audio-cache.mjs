@@ -119,6 +119,12 @@ const codigo = output[0].code;
 const { abrir, anotarPedido, disponible, guardar, hay, llaveDe, pedidosDe, umbralSembrar } =
   await import(`data:text/javascript;base64,${Buffer.from(codigo).toString("base64")}`);
 
+const paquetePermiso = await rolldown({ input: path.join(raiz, "src", "server", "audio-cache", "permiso.ts") });
+const salidaPermiso = await paquetePermiso.generate({ format: "esm" });
+const { firmar, verificar } = await import(
+  `data:text/javascript;base64,${Buffer.from(salidaPermiso.output[0].code).toString("base64")}`
+);
+
 const ORIGEN = "https://bitly-site.pages.dev";
 const OTRO = "https://preview-123.bitly-site.pages.dev";
 const CLAVE = "USUM71607007";
@@ -274,6 +280,21 @@ check(
   "pero la Cache API solo tiene entradas del origen que escribió",
   [...cache.entradas.keys()].every((u) => u.startsWith(`${ORIGEN}/__cache/`)),
 );
+
+/* ── Permiso firmado del aporte ─────────────────────────────────────────── */
+process.env.BITLY_SESSION_SECRET = "secreto-de-prueba";
+const permiso = await firmar("ISRC9", "flac");
+check("se firma un permiso", Boolean(permiso) && permiso.includes("."), String(permiso).slice(0, 8));
+check("y vale para esa canción", await verificar(permiso, "ISRC9", "flac"));
+check("no vale para otra", (await verificar(permiso, "ISRC8", "flac")) === false);
+check("ni para otra calidad", (await verificar(permiso, "ISRC9", "estandar")) === false);
+check(
+  "ni si le tocan la firma",
+  (await verificar(String(permiso).replace(/.$/, (c) => (c === "a" ? "b" : "a")), "ISRC9", "flac")) ===
+    false,
+);
+check("ni vacío", (await verificar("", "ISRC9", "flac")) === false);
+check("vencido no sirve", (await verificar("1.abc", "ISRC9", "flac")) === false);
 
 /* ── Apagado ────────────────────────────────────────────────────────────── */
 globalThis.__BITLY_AUDIO = kv;
