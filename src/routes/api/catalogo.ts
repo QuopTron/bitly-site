@@ -38,6 +38,13 @@ const MAX_BYTES = 512 * 1024;
 const VIDA_MS = 30 * 24 * 60 * 60 * 1_000;
 const VIDA_FALLO_MS = 6 * 60 * 60 * 1_000;
 const ESPERA_MS = 15_000;
+/**
+ * Margen para relojes adelantados. Sin esto, un cliente 1 s por delante del
+ * servidor manda `visto` en el futuro, `vigente` lo descarta y el aporte se
+ * pierde con un `ok:true` que miente. Cinco minutos cubren cualquier desfase
+ * razonable sin dejar entrar datos viejos.
+ */
+const MARGEN_RELOJ_MS = 5 * 60 * 1_000;
 
 type Fuente = {
   proveedor: string;
@@ -78,7 +85,7 @@ function clave(valor: unknown): string {
 
 function vigente(fuente: Fuente, ahora: number): boolean {
   const edad = ahora - fuente.visto;
-  return edad >= 0 && edad <= (fuente.fallo ? VIDA_FALLO_MS : VIDA_MS);
+  return edad >= -MARGEN_RELOJ_MS && edad <= (fuente.fallo ? VIDA_FALLO_MS : VIDA_MS);
 }
 
 /** La mejor fuente viva de una entrada, para devolverle a la app. */
