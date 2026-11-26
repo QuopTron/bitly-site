@@ -16,8 +16,9 @@
  * - Las lecturas van por `raw.githubusercontent.com` con el token: el repo es
  *   privado y así no se gasta la cuota de la API.
  *
- * Variables: `BITLY_AUDIO_REPOS` (lista separada por comas) y
- * `BITLY_AUDIO_TOKEN` (fine-grained, Contents: RW, solo esos repos).
+ * Variables: `BITLY_AUDIO_REPOS` (lista separada por comas; por defecto
+ * `QuopTron/bitly-audio`) y `BITLY_AUDIO_TOKEN` (fine-grained, Contents: RW,
+ * solo esos repos). Sin ese token se reutiliza `BITLY_DATA_TOKEN`.
  */
 
 import type { Almacen, Archivo } from "./almacen";
@@ -31,10 +32,18 @@ const TROZO_BYTES = 8 * 1024 * 1024;
 
 export type Config = { token: string; repos: string[] };
 
-/** Lee la configuración del entorno. `null` = no hay archivo frío. */
+/** Repo de fábrica: se usa si no hay `BITLY_AUDIO_REPOS`. */
+export const REPO_POR_DEFECTO = "QuopTron/bitly-audio";
+
+/**
+ * Lee la configuración del entorno. `null` = no hay archivo frío.
+ *
+ * Si no hay `BITLY_AUDIO_TOKEN` se usa el token de datos que ya está en Pages:
+ * el repo de audio es igual de privado y así no hay que mantener dos secretos.
+ */
 export function configurar(): Config | null {
-  const token = String(process.env?.BITLY_AUDIO_TOKEN ?? "").trim();
-  const repos = String(process.env?.BITLY_AUDIO_REPOS ?? "")
+  const token = String(process.env?.BITLY_AUDIO_TOKEN ?? process.env?.BITLY_DATA_TOKEN ?? "").trim();
+  const repos = String(process.env?.BITLY_AUDIO_REPOS ?? REPO_POR_DEFECTO)
     .split(",")
     .map((repo) => repo.trim())
     .filter(Boolean);
