@@ -58,12 +58,11 @@ export const Route = createFileRoute("/api/audio")({
 
         const objeto = await abrir(url.origin, clave, calidad);
         if (!objeto) return json({ ok: false, motivo: "no_cargado" }, 404);
-        const largo = objeto.headers.get("content-length");
-        return new Response(objeto.body, {
+        return new Response(objeto.cuerpo, {
           status: 200,
           headers: {
-            "content-type": objeto.headers.get("content-type") || "application/octet-stream",
-            ...(largo ? { "content-length": largo } : {}),
+            "content-type": objeto.tipo || "application/octet-stream",
+            ...(objeto.bytes > 0 ? { "content-length": String(objeto.bytes) } : {}),
             "cache-control": "public, max-age=86400",
             "x-calidad": calidad,
           },
@@ -131,7 +130,7 @@ export const Route = createFileRoute("/api/audio")({
         if (!request.body) return json({ ok: false, motivo: "vacio" }, 411);
 
         // El cuerpo va directo a la caché: no se guarda entero en memoria.
-        const guardado = await guardar(url.origin, clave, calidad, request.body, tipo);
+        const guardado = await guardar(url.origin, clave, calidad, request.body, tipo, largo);
         if (!guardado) return json({ ok: false, motivo: "servidor" }, 502);
         return json({ ok: true, clave, calidad, bytes: largo });
       },

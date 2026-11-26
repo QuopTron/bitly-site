@@ -534,20 +534,39 @@ pedidas** (por defecto, 3 pedidos). Usa la **Cache API de Cloudflare**
 (`caches.default`), no R2: no hay bucket, no hay binding y no hace falta tarjeta.
 Funciona igual en `*.pages.dev` y en dominio propio.
 
-No hay nada que configurar para encenderlo. Para apagarlo sin tocar código,
-poner `BITLY_AUDIO=apagado` en las variables de entorno del proyecto: todo
-contesta `apagado` y la app sigue usando los proveedores. `BITLY_AUDIO_UMBRAL`
-cambia la cantidad de pedidos necesaria para cachear (por defecto `3`).
+Funciona sin configurar nada usando la Cache API como respaldo. Para que sea
+**global y durable**, se le da un namespace de KV:
 
-Lo que hay que saber de este almacén:
+1. El namespace ya existe: **Workers & Pages → KV**, `BITLY_AUDIO`
+   (`3035582e15f64989a259a0ffb7591374`). Si hay que recrearlo:
+   `npx wrangler kv namespace create BITLY_AUDIO`.
+2. En el proyecto de Pages: **Settings → Bindings → Add → KV namespace**,
+   variable name `BITLY_AUDIO`, y elegir ese namespace.
+3. Volver a desplegar (push a `master`) para que la binding tome efecto.
 
-- La caché es **por centro de datos**: lo que aporta un usuario en un continente
-  no aparece en otro. El conteo de pedidos vive ahí mismo, así que el umbral se
-  mide por región, que es justo donde la caché sirve.
-- El CDN puede **desalojar** entradas cuando necesita lugar. Es una
-  optimización, no almacenamiento durable.
-- No se puede purgar a mano desde el panel: las entradas vencen solas (30 días
-  el audio, un año el conteo) o se desalojan.
+Con la binding puesta, el servidor la ve en `globalThis.__BITLY_AUDIO` (la
+siembra `_worker.js`). Sin binding, sigue funcionando con la Cache API.
+
+Para apagarlo sin tocar código, poner `BITLY_AUDIO=apagado` en las variables de
+entorno del proyecto: todo contesta `apagado` y la app sigue usando los
+proveedores. `BITLY_AUDIO_UMBRAL` cambia la cantidad de pedidos necesaria para
+cachear (por defecto `3`).
+
+Con KV:
+
+- Es **global**: la entrada que aporta alguien en un continente la ve el resto.
+- **Un FLAC entra igual**: KV acepta hasta 25 MiB por valor, así que el archivo
+  se parte en trozos de 20 MB y se escribe un manifiesto al final. Mientras no
+  haya manifiesto, la entrada no se sirve.
+- Plan gratis: 1 GB de almacenamiento, 1.000 escrituras y 100.000 lecturas por
+  día, sin tarjeta. Un tema de 30 MB ocupa dos trozos (dos escrituras).
+- Las entradas vencen solas: 30 días el audio, un año el conteo.
+
+Sin KV (Cache API):
+
+- La caché es **por centro de datos** y el CDN puede **desalojar** entradas. Es
+  una optimización, no almacenamiento durable.
+- No se puede purgar a mano: las entradas vencen solas o se desalojan.
 
 Qué guarda: el audio que la app aporta **después** de una descarga normal, solo
 si la canción pasó el umbral, con una sesión válida y hasta 40 MB. La clave es

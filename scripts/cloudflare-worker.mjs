@@ -72,6 +72,12 @@ const worker = `/**
 import app from "./_ssr/server.js";
 
 function sembrarEnv(env) {
+  // El namespace de KV no es una cadena, así que process.env no lo ve. El
+  // servidor lo lee de globalThis (ver src/server/audio-cache/almacen.ts): sin
+  // esto, el caché de audio se quedaría en el respaldo de la Cache API.
+  if (env.BITLY_AUDIO && typeof env.BITLY_AUDIO === "object" && !globalThis.__BITLY_AUDIO) {
+    globalThis.__BITLY_AUDIO = env.BITLY_AUDIO;
+  }
   if (typeof process === "undefined" || !process.env) return;
   for (const [clave, valor] of Object.entries(env)) {
     if (typeof valor === "string" && process.env[clave] === undefined) {
