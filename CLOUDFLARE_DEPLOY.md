@@ -527,24 +527,33 @@ registro: revisá que `BITLY_CODES_TOKEN` esté en las env vars, que
 `nodejs_compat` esté activo y que la `compatibility_date` sea reciente (ver la
 sección 3 sobre la siembra).
 
-## 8. Caché de audio en R2 (opcional)
+## 8. Caché de audio (opcional)
 
 El endpoint `/api/audio` sirve audio ya cacheado para las canciones **más
-pedidas** (por defecto, 3 pedidos). Es opcional: sin la binding responde
-`apagado` y la app sigue usando los proveedores.
+pedidas** (por defecto, 3 pedidos). Usa la **Cache API de Cloudflare**
+(`caches.default`), no R2: no hay bucket, no hay binding y no hace falta tarjeta.
+Funciona igual en `*.pages.dev` y en dominio propio.
 
-Para activarlo, en el dashboard del proyecto de Pages:
+No hay nada que configurar para encenderlo. Para apagarlo sin tocar código,
+poner `BITLY_AUDIO=apagado` en las variables de entorno del proyecto: todo
+contesta `apagado` y la app sigue usando los proveedores. `BITLY_AUDIO_UMBRAL`
+cambia la cantidad de pedidos necesaria para cachear (por defecto `3`).
 
-1. **R2 → Create bucket** (por ejemplo `bitly-audio`).
-2. **Settings → Functions → R2 bindings → Add binding**:
-   - Variable name: `BITLY_AUDIO`
-   - Bucket: el que creaste.
-3. (Opcional) En **Environment variables**, `BITLY_AUDIO_UMBRAL` con la cantidad
-   de pedidos necesaria para cachear (por defecto `3`).
+Lo que hay que saber de este almacén:
 
-El `_worker.js` generado expone esa binding al servidor en `globalThis`. El
-bucket no necesita dominio público ni CORS: solo lo lee el propio Worker.
+- La caché es **por centro de datos**: lo que aporta un usuario en un continente
+  no aparece en otro. El conteo de pedidos vive ahí mismo, así que el umbral se
+  mide por región, que es justo donde la caché sirve.
+- El CDN puede **desalojar** entradas cuando necesita lugar. Es una
+  optimización, no almacenamiento durable.
+- No se puede purgar a mano desde el panel: las entradas vencen solas (30 días
+  el audio, un año el conteo) o se desalojan.
 
 Qué guarda: el audio que la app aporta **después** de una descarga normal, solo
 si la canción pasó el umbral, con una sesión válida y hasta 40 MB. La clave es
-el ISRC (o `artista|título`) y el objeto se nombra con su SHA-256.
+el ISRC (o `artista|título`) y la entrada se nombra con su SHA-256, así que el
+nombre no filtra nada. El `PUT` revalida el umbral en el servidor.
+
+Para probarlo: `POST /api/audio` con `{accion:"pedir", clave, calidad}` tres
+veces, aportar con `PUT /api/audio?clave&calidad` y `x-bitly-token`, y leerlo con
+`GET /api/audio?clave&calidad`.

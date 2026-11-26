@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { anotarPedido, claveDe, cubo } from "@/server/audio-cache";
+import { anotarPedido, claveDe, disponible } from "@/server/audio-cache";
 import { cuentaDeToken } from "@/server/cuentas";
 import { consumirDescarga, LIMITE_DESCARGAS } from "@/server/descargas-cuenta";
 import { esCodigoPremiumActivo } from "@/lib/premium-check";
@@ -192,11 +192,11 @@ export const Route = createFileRoute("/api/descargar")({
         };
 
         // Cuenta el pedido para el caché de audio: si esta canción se repite,
-        // la app podrá sembrarla en R2 después de su propia descarga. Sin R2
-        // configurado esto no hace nada.
-        if (cubo()) {
+        // la app podrá sembrarla en la Cache API después de su propia descarga.
+        // Con el caché apagado esto no hace nada.
+        if (disponible()) {
           const clave = claveDe(peticion.isrc || `${peticion.artista}|${peticion.titulo}`);
-          await anotarPedido(clave).catch(() => undefined);
+          await anotarPedido(new URL(request.url).origin, clave).catch(() => undefined);
         }
 
         let traido = await traerAudio(peticion, request.signal);

@@ -72,12 +72,6 @@ const worker = `/**
 import app from "./_ssr/server.js";
 
 function sembrarEnv(env) {
-  // La binding R2 no es una cadena, así que process.env no la ve. El servidor
-  // la lee de globalThis (ver src/server/audio-cache.ts): sin esto, el caché de
-  // audio quedaría siempre apagado aunque la binding esté configurada.
-  if (env.BITLY_AUDIO && !globalThis.__BITLY_AUDIO) {
-    globalThis.__BITLY_AUDIO = env.BITLY_AUDIO;
-  }
   if (typeof process === "undefined" || !process.env) return;
   for (const [clave, valor] of Object.entries(env)) {
     if (typeof valor === "string" && process.env[clave] === undefined) {
